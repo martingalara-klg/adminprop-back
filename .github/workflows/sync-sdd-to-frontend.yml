@@ -14,7 +14,7 @@ name: Sync SDDs + runbooks to adminprop-front
 on:
   push:
     branches:
-      - master
+      - main
     paths:
       - 'docs/sdd/**'
       - 'docs/runbooks/**'
@@ -36,7 +36,7 @@ jobs:
 
     env:
       FRONTEND_REPO: martingalara-klg/adminprop-front
-      FRONTEND_BASE_BRANCH: master # si el default branch del frontend es 'master', cambiar
+      FRONTEND_BASE_BRANCH: main # rama default de adminprop-front; si cambiara, actualizar aquí
       SYNC_BRANCH: chore/sync-docs
 
     steps:
