@@ -26,7 +26,7 @@ Leer **antes de**:
 
 - `core/sdd_04_nonfunctional.md` §1.3 — SLAs P90/P99 por tipo de tarea, política de retry.
 - `core/sdd_04_nonfunctional.md` §3.3 — strategy de escalado de workers por profundidad de cola.
-- `features/spec_module_05_liquidaciones.md` §RF-02 — reintentos de cálculo/ajuste por índice.
+- `features/spec_module_03_contratos.md` §"Ajustes por índice" — reintentos de aplicación de ajuste por índice.
 - `infrastructure/spec_notificaciones.md` §RF-04 — política de reintento de canales.
 - `features/spec_module_06_mantenimiento.md` — generación de documentos asociados a órdenes de trabajo.
 
@@ -66,7 +66,7 @@ celery_app.conf.update(
 )
 
 # ─── Celery Beat (schedulers) ──────────────────────────────────────
-# SDD: spec_notificaciones §RF-01 (digests), spec_module_05_liquidaciones §RF-02
+# SDD: spec_notificaciones §RF-01 (digests), spec_module_03_contratos §"Ajustes por índice"
 # (ajustes programados por índice), spec_module_03_contratos (alertas de vencimiento).
 celery_app.conf.beat_schedule = {
     "digest-diario-per-org-08-local": {
@@ -101,7 +101,7 @@ Cada tarea debe:
 
 ```python
 # src/adminprop/workers/indices_worker.py
-# SDD: features/spec_module_05_liquidaciones.md §RF-02
+# SDD: features/spec_module_03_contratos.md §"Ajustes por índice"
 
 from datetime import datetime
 from uuid import UUID
@@ -124,7 +124,7 @@ from adminprop.shared.errors.retryable import (
 logger = logging.getLogger(__name__)
 
 
-# ─── Política de reintentos: spec_module_05 §RF-02 + sdd_04 §1.3 ──
+# ─── Política de reintentos: spec_module_03_contratos §"Ajustes por índice" + sdd_04 §1.3 ──
 # Máximo 3 intentos; backoff exponencial con jitter.
 class IndicesTask(Task):
     autoretry_for = (RetryableIndexError,)
@@ -138,7 +138,7 @@ class IndicesTask(Task):
 def aplicar_ajuste_contrato(self, contract_id: str, organization_id: str, request_id: str) -> None:
     """
     Aplica el ajuste programado por índice (ICL/IPC) a un contrato.
-    SDD: spec_module_05_liquidaciones.md §RF-02.
+    SDD: spec_module_03_contratos.md §"Ajustes por índice".
     Implements: RN-L01 (un ajuste aplicado por período), RN-D01 (scoping multi-tenant).
     """
     contract_uuid = UUID(contract_id)
@@ -556,6 +556,6 @@ def send_contract_notice_email(contract_id):
 - Backend `CLAUDE.md` §8 — "encolar tareas largas en Celery, retornar 202 Accepted" + "request_id propagado".
 - `core/sdd_04_nonfunctional.md` §1.3 — SLAs P90/P99 + política de reintentos por tipo de tarea.
 - `core/sdd_04_nonfunctional.md` §3.3 — escalado de workers por profundidad de cola.
-- `features/spec_module_05_liquidaciones.md` §RF-02 — pipeline de ajuste programado por índice.
+- `features/spec_module_03_contratos.md` §"Ajustes por índice" — pipeline de ajuste programado por índice.
 - `infrastructure/spec_notificaciones.md` §"Apéndice" — política de reintento por canal (email/in-app).
 - `_index.md` §4 #8 — Celery + Redis con workers separados.

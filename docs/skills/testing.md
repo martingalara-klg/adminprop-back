@@ -93,7 +93,7 @@ El docstring contiene la descripción exacta del CA o RN. El nombre del archivo 
 #### Frontend (Vitest)
 
 ```typescript
-// apps/main/src/modules/auth/__tests__/login-flow.spec.ts
+// src/modules/auth/__tests__/login-flow.spec.ts
 // SDD: spec_module_00_superadmin.md §"Flujo de Activación de Cuenta"
 // + sdd_04 §2.2 "Autenticación y sesiones"
 
@@ -291,7 +291,7 @@ Cada flujo del frontend tiene los siguientes estados que deben cubrirse (ver `fl
 - `empty` — operación OK sin datos
 
 ```typescript
-// apps/main/src/modules/auth/__tests__/login.spec.ts
+// src/modules/auth/__tests__/login.spec.ts
 
 describe('Login flow', () => {
   it('UC-LOGIN-01: success → guarda sesión y redirige a /', async () => { ... })
@@ -348,7 +348,7 @@ class Test<NombreDelCriterio>:
 ### Template de test frontend con Vitest + RTL
 
 ```typescript
-// apps/main/src/modules/<modulo>/__tests__/<feature>.spec.tsx
+// src/modules/<modulo>/__tests__/<feature>.spec.tsx
 // SDD: <ruta-del-SDD>.md §<sección>
 
 import { describe, it, expect, vi } from 'vitest'

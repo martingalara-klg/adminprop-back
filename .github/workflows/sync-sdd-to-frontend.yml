@@ -1,15 +1,18 @@
 # Requiere secret con permisos sobre adminprop-front — ver guía en clarix-backend/docs/ops/ci-sync-sdd-setup.md (bootstrap, paso 7)
-name: Sync SDDs + runbooks to adminprop-front
+name: Sync SDDs to adminprop-front
 
-# Sincroniza docs/sdd/ y docs/runbooks/ desde este repo (adminprop-back,
-# fuente de verdad) hacia adminprop-front abriendo un PR automático.
+# Sincroniza docs/sdd/ desde este repo (adminprop-back, fuente de verdad)
+# hacia adminprop-front abriendo un PR automático.
 #
 # Decisión adoptada del esqueleto SDD (_index.md #50): copia activa en
 # adminprop-back con sincronización al frontend vía CI.
 #
+# El frontend es dueño de su propio runbook (`RUNBOOK-LOCAL-002-frontend.md`)
+# — este workflow NO sincroniza docs/runbooks/.
+#
 # Los SDDs de adminprop aún no existen (se escriben en los pasos 2–5 del
 # diseño SDD) — este workflow queda configurado desde ya y se activa en
-# cuanto aparezca el primer push a main que toque docs/sdd/** o docs/runbooks/**.
+# cuanto aparezca el primer push a main que toque docs/sdd/**.
 
 on:
   push:
@@ -17,7 +20,6 @@ on:
       - main
     paths:
       - 'docs/sdd/**'
-      - 'docs/runbooks/**'
   workflow_dispatch: {} # permitir ejecución manual desde la UI de Actions
 
 # Cancelar runs concurrentes — si llegan varios pushes en sucesión,
@@ -55,7 +57,7 @@ jobs:
           ref: ${{ env.FRONTEND_BASE_BRANCH }}
           fetch-depth: 1
 
-      - name: Sync docs/sdd/ and docs/runbooks/ from backend to frontend
+      - name: Sync docs/sdd/ from backend to frontend
         run: |
           set -euo pipefail
 
@@ -68,19 +70,8 @@ jobs:
             adminprop-back/docs/sdd/ \
             adminprop-front/docs/sdd/
 
-          # Asegurar que docs/runbooks/ existe en el frontend antes del rsync.
-          mkdir -p adminprop-front/docs/runbooks
-
-          rsync -av --delete \
-            --exclude='.DS_Store' \
-            --exclude='Thumbs.db' \
-            adminprop-back/docs/runbooks/ \
-            adminprop-front/docs/runbooks/
-
           echo "--- Estado tras el sync (docs/sdd/) ---"
           ls -la adminprop-front/docs/sdd/
-          echo "--- Estado tras el sync (docs/runbooks/) ---"
-          ls -la adminprop-front/docs/runbooks/
 
       - name: Capture backend commit metadata
         id: meta
@@ -100,13 +91,13 @@ jobs:
         working-directory: adminprop-front
         run: |
           set -euo pipefail
-          if [[ -z "$(git status --porcelain docs/sdd/ docs/runbooks/)" ]]; then
+          if [[ -z "$(git status --porcelain docs/sdd/)" ]]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "✓ No hay cambios en docs/sdd/ ni docs/runbooks/. Skipping PR."
+            echo "✓ No hay cambios en docs/sdd/. Skipping PR."
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
             echo "Cambios detectados:"
-            git status --porcelain docs/sdd/ docs/runbooks/
+            git status --porcelain docs/sdd/
           fi
 
       - name: Create or update PR in adminprop-front
@@ -120,16 +111,15 @@ jobs:
           delete-branch: true
           add-paths: |
             docs/sdd
-            docs/runbooks
           commit-message: |
-            chore(docs): sync sdd + runbooks from adminprop-back@${{ steps.meta.outputs.sha_short }}
+            chore(docs): sync sdd from adminprop-back@${{ steps.meta.outputs.sha_short }}
 
             Source commit: ${{ steps.meta.outputs.subject }}
             Author: ${{ steps.meta.outputs.author_name }} <${{ steps.meta.outputs.author_email }}>
             See: ${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.meta.outputs.sha_full }}
-          title: "chore(docs): sync sdd + runbooks from adminprop-back@${{ steps.meta.outputs.sha_short }}"
+          title: "chore(docs): sync sdd from adminprop-back@${{ steps.meta.outputs.sha_short }}"
           body: |
-            Sincronización automática de SDDs (`docs/sdd/`) y runbooks (`docs/runbooks/`) desde [`adminprop-back`](${{ github.server_url }}/${{ github.repository }}).
+            Sincronización automática de SDDs (`docs/sdd/`) desde [`adminprop-back`](${{ github.server_url }}/${{ github.repository }}).
 
             **Source commit:** [`${{ steps.meta.outputs.sha_short }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.meta.outputs.sha_full }})
             **Subject:** ${{ steps.meta.outputs.subject }}
@@ -137,8 +127,8 @@ jobs:
 
             ---
 
-            > ⚠️ **No editar SDDs ni runbooks directamente en este repo.**
-            > La fuente de verdad es `adminprop-back/docs/sdd/` y `adminprop-back/docs/runbooks/`.
+            > ⚠️ **No editar SDDs directamente en este repo.**
+            > La fuente de verdad es `adminprop-back/docs/sdd/`.
             > Cualquier edición local se va a sobrescribir en el próximo sync.
 
             Revisar y mergear cuando el equipo de frontend esté al tanto del cambio.

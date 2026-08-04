@@ -109,7 +109,7 @@ Para hacer el comentario procesable:
 - [ ] El client HTTP es Axios con `withCredentials: true` (para HttpOnly cookies).
 - [ ] El interceptor de Axios maneja 401 con refresh automático + retry de la request original; si el refresh falla, redirige a `/login`.
 - [ ] El client lee el formato de error **CUSTOM** (`error.code`, `error.message`, `error.field`, `error.details`), no RFC 7807.
-- [ ] Los tipos del request/response vienen de `packages/shared/api/generated/` (generados desde OpenAPI), no redeclarados.
+- [ ] Los tipos del request/response vienen de `src/api/generated/` (generados desde OpenAPI), no redeclarados.
 - [ ] No hay lógica de negocio en el frontend que pertenezca al backend (cálculos de ajuste por índice, validaciones de invariantes complejas).
 - [ ] Descargas de archivos usan **Fetch + Blob**, no `window.open(download_url)`.
 

@@ -21,7 +21,7 @@ Leer **antes de**:
 
 ## SDDs de referencia
 
-- `features/spec_module_05_liquidaciones.md` §RF-02 — pipeline de obtención y aplicación de índices.
+- `features/spec_module_03_contratos.md` §"Ajustes por índice" — pipeline de obtención y aplicación de índices.
 - `core/sdd_04_nonfunctional.md` §2.9 — política de reintento e indisponibilidad de servicios de índices.
 - `infrastructure/spec_notificaciones.md` §"Apéndice" — Email: rate limits, retry, dead-letter, branding `From` dinámico.
 
@@ -31,7 +31,7 @@ Leer **antes de**:
 
 ```python
 # src/adminprop/shared/indices/bcra.py
-# SDD: features/spec_module_05_liquidaciones.md §RF-02.
+# SDD: features/spec_module_03_contratos.md §"Ajustes por índice".
 
 from datetime import date
 import httpx
@@ -39,7 +39,7 @@ import httpx
 from adminprop.shared.errors.retryable import RetryableIndexError, NonRetryableIndexError
 
 
-BCRA_ICL_ENDPOINT = "https://api.bcra.gob.ar/estadisticas/v3.0/monetarias/40"   # SDD §RF-02
+BCRA_ICL_ENDPOINT = "https://api.bcra.gob.ar/estadisticas/v3.0/monetarias/40"   # SDD §"Ajustes por índice"
 _TIMEOUT_SECONDS = 10.0
 
 
@@ -53,7 +53,7 @@ class IclIndexValue:
 async def get_icl_index(reference_date: date) -> IclIndexValue:
     """
     Obtiene el valor del índice ICL para una fecha de referencia.
-    SDD: spec_module_05_liquidaciones §RF-02.
+    SDD: spec_module_03_contratos.md §"Ajustes por índice".
     """
     async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS, verify=True) as http:
         try:
@@ -90,7 +90,7 @@ async def get_icl_index(reference_date: date) -> IclIndexValue:
 
 ```python
 # src/adminprop/shared/indices/indec.py
-# SDD: features/spec_module_05_liquidaciones.md §RF-02 (índice alternativo para
+# SDD: features/spec_module_03_contratos.md §"Ajustes por índice" (índice alternativo para
 # contratos que no ajustan por ICL).
 
 from datetime import date
@@ -383,7 +383,7 @@ if response.status_code == 429:
 
 ## Referencias
 
-- `features/spec_module_05_liquidaciones.md` §RF-02 — pipeline de obtención y aplicación de índices ICL/IPC.
+- `features/spec_module_03_contratos.md` §"Ajustes por índice" — pipeline de obtención y aplicación de índices ICL/IPC.
 - `core/sdd_04_nonfunctional.md` §2.9 — política de retry e indisponibilidad de servicios externos.
 - `infrastructure/spec_notificaciones.md` §"Apéndice" — Email: rate limits, retry/backoff, dead letter, branding From dinámico.
 - Backend `CLAUDE.md` §3 y §10 — librerías concretas (`httpx`, SDK de Resend).
