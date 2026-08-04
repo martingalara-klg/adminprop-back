@@ -17,7 +17,7 @@ Leer **antes de**:
 | Convención de naming | `YYYYMMDD_HHMMSS_<slug>.py` (timestamp ISO) | backend `CLAUDE.md` §3 / §5 |
 | DB | PostgreSQL 16 + extensión `pgcrypto` | backend `CLAUDE.md` §3 |
 | Pool de conexiones | PgBouncer (transaction-scoped) | backend `CLAUDE.md` §3 |
-| Encriptación columnar | AES-256 vía `pgcrypto`; clave (KEK) en variable de entorno local (`.env`, no commiteado) en MVP — migrar a un secret manager cuando exista infra cloud | backend `CLAUDE.md` §3 |
+| Encriptación columnar | AES-256 vía `pgcrypto`; clave (KEK) en variable de entorno local (`.env`, no commiteado) en MVP — migrar a un gestor de secretos cuando exista infra cloud | backend `CLAUDE.md` §3 |
 | RLS | Política `USING (organization_id = current_setting('app.current_tenant_id')::uuid)` | backend `CLAUDE.md` §4 |
 | Roles DB | `adminprop_app` (default, sujeto a RLS), `adminprop_superadmin` (BYPASSRLS) | backend `CLAUDE.md` §3, `_index.md` §4 #42 |
 | Ubicación | `src/adminprop/db/migrations/versions/` | backend `CLAUDE.md` §9 |
@@ -193,7 +193,7 @@ def downgrade() -> None:
 SDD: features/spec_module_07_administracion.md §RF-08 (configuración de cobros/pagos)
 + sdd_04 §2.4 (campos sensibles cifrados AES-256 columnar via pgcrypto)
 + nota: la KEK vive en variable de entorno local (.env, no commiteado) en MVP;
-  migrar a un secret manager cuando exista infra cloud.
+  migrar a un gestor de secretos cuando exista infra cloud.
 """
 from alembic import op
 

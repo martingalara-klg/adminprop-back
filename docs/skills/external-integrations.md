@@ -16,7 +16,7 @@ Leer **antes de**:
 |---|---|---|---|
 | Índice ICL | `httpx` contra la API pública del BCRA | Endpoint estadísticas monetarias del BCRA; sin autenticación | backend `CLAUDE.md` §3 |
 | Índice IPC | `httpx` contra la API de datos.gob.ar / series de tiempo de INDEC | Endpoint de series públicas; sin autenticación | backend `CLAUDE.md` §3 |
-| Email transaccional | Resend Python SDK | API key en variable de entorno local (`.env`, no commiteado); migrar a un secret manager cuando exista infra cloud | backend `CLAUDE.md` §3 |
+| Email transaccional | Resend Python SDK | API key en variable de entorno local (`.env`, no commiteado); migrar a un gestor de secretos cuando exista infra cloud | backend `CLAUDE.md` §3 |
 | Storage | Filesystem local vía volumen Docker | Rutas `/data/adminprop-storage/{org_slug}/{purpose}/`; migrar a storage cloud post-infra | backend `CLAUDE.md` §3 |
 
 ## SDDs de referencia
