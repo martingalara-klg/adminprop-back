@@ -24,7 +24,7 @@ Si la operación involucra el ciclo `develop → feature → PR → merge → de
 ## SDDs de referencia
 
 - `core/sdd_03_api_contracts.md` §"Regla de oro" — los contratos no se modifican sin actualizar el SDD primero.
-- Criterio de versionado de los SDDs: `1.x` para adiciones backwards-compatible, `2.x` para breaking changes.
+- `docs/sdd/_index.md` §6 "Estado de los SDDs" — versionado `1.x` para adiciones backwards-compatible, `2.x` para breaking changes.
 - Backend `CLAUDE.md` §2 y Frontend `CLAUDE.md` §2 — el SDD manda; ante divergencia, detenerse y reportar.
 
 ## El patrón
@@ -309,6 +309,6 @@ git commit --no-verify -m "feat(...): ..."
 ## Referencias
 
 - `core/sdd_03_api_contracts.md` §"Regla de oro" — ningún contrato API cambia sin actualizar el SDD primero. Este principio se traslada a la convención de commits: el footer `Rule:` y `Implements:` ata el código al SDD.
-- Criterio de versionado de SDDs (`1.x` aditivo, `2.x` breaking) que el commit `docs(...)` debe respetar.
+- `docs/sdd/_index.md` §6 — versionado de SDDs (`1.x` aditivo, `2.x` breaking) que el commit `docs(...)` debe respetar.
 - Backend `CLAUDE.md` §8 "Comportamiento esperado de Claude Code" — "referenciar la regla de negocio (RN-XX) en el código cuando se implemente una invariante crítica" se materializa en el footer del commit.
 - Frontend `CLAUDE.md` §8 — "nombrar los tests con el ID del criterio de aceptación (CA-XX o UC-XX) del SDD" es coherente con `test(...)` + `Implements:` en el footer.

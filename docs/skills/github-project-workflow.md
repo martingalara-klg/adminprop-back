@@ -21,26 +21,28 @@ Este skill define el contrato exacto entre Claude Code y los dos GitHub Projects
 | Project backend | Project del repo (owner `martingalara-klg`; el número se confirma en el bootstrap — paso 7 del diseño) |
 | Project frontend | Project del repo (owner `martingalara-klg`; el número se confirma en el bootstrap — paso 7 del diseño) |
 | CLI | `gh` v2.x (autenticado como `martingalara-klg`, scopes `repo, project, read:org`) |
-| Convención de status del Project | Campo `Status` con valores `Ready`, `In Progress`, `In Review`, `Done`, `Blocked` |
-| Labels de issue | `status:ready`, `status:in-progress`, `status:in-review`, `status:done`, `status:blocked`, `sdd:divergence` |
+| Convención de status del Project | Campo `Status` con valores `Todo`, `In progress`, `Done` |
+| Labels de issue | `status:ready`, `status:blocked`, `sdd:divergence` |
 
 > **Verificar al inicio de la sesión:** `gh auth status` debe reportar el usuario `martingalara-klg` activo. Si la sesión es de Claude Code en un entorno nuevo, ejecutar `gh repo view martingalara-klg/adminprop-back --json name,owner` para confirmar acceso. Si falla → detenerse y reportar.
 
 ## SDDs de referencia
 
-- Los SDDs viven en `adminprop-back/docs/sdd/`; `adminprop-front/docs/sdd/` se sincroniza vía CI.
+- `docs/sdd/_index.md` §4 — los SDDs viven en `adminprop-back/docs/sdd/`; `adminprop-front/docs/sdd/` se sincroniza vía CI.
 - Backend `CLAUDE.md` §2 "Fuente de verdad" y §8 "Cuando encontrar algo no especificado en el SDD".
 - Frontend `CLAUDE.md` §2 "Regla de oro" — si la API real diverge del SDD, **reportar**, no adaptar.
 
 ## El patrón
 
-El ciclo de vida de una tarea cruza 5 estados del Project:
+El ciclo de vida de una tarea cruza 3 estados del Project:
 
 ```
-Ready → In Progress → In Review → Done
-                    ↓
-                 Blocked  ← sólo si surge una divergencia con el SDD
+Todo → In progress → Done
 ```
+
+El label `status:blocked` puede aplicarse en cualquier momento (no es una
+columna del Project) para señalar que una tarea quedó pausada por una
+divergencia con el SDD — ver "Manejo de divergencias con el SDD" más abajo.
 
 ### Variables de sesión (definir al inicio)
 
@@ -72,7 +74,7 @@ gh project item-list "$PROJECT_NUMBER" \
 
 El body del issue indica qué SDD implementar y qué CA-XX/RN-XX cubrir. **Si hay ambigüedad entre el issue y el SDD, el SDD manda.** Reportar la discrepancia (ver "Manejo de divergencias" más abajo).
 
-### Paso 1 — Mover el issue a "In Progress" y crear el branch
+### Paso 1 — Mover el issue a "In progress" y crear el branch
 
 ```bash
 # Obtener el ID interno del item dentro del Project (necesario para item-edit)
@@ -82,18 +84,18 @@ ITEM_ID=$(gh project item-list "$PROJECT_NUMBER" \
   | jq -r --argjson n "$ISSUE_NUMBER" \
     '.items[] | select(.content.number == $n) | .id')
 
-# Status → "In Progress"
+# Status → "In progress"
 gh project item-edit \
   --id "$ITEM_ID" \
   --project-id "$(gh project view "$PROJECT_NUMBER" --owner "$ORG" --format json | jq -r .id)" \
   --field-id "$(gh project field-list "$PROJECT_NUMBER" --owner "$ORG" --format json \
     | jq -r '.fields[] | select(.name == "Status") | .id')" \
   --single-select-option-id "$(gh project field-list "$PROJECT_NUMBER" --owner "$ORG" --format json \
-    | jq -r '.fields[] | select(.name == "Status") | .options[] | select(.name == "In Progress") | .id')"
+    | jq -r '.fields[] | select(.name == "Status") | .options[] | select(.name == "In progress") | .id')"
 
-# Actualizar labels del issue
+# Actualizar labels del issue (el modelo de 3 estados no tiene label
+# "in-progress"; el estado real vive en el campo Status del Project)
 gh issue edit "$ISSUE_NUMBER" --repo "$ORG/$REPO" \
-  --add-label "status:in-progress" \
   --remove-label "status:ready"
 
 # Definir un slug de 3-5 palabras kebab-case y crear el branch (ver git-workflow.md)
@@ -159,15 +161,14 @@ linkearlo acá.>
 - [x] Si hay migración, está dentro de transacción y RLS está habilitado.
 EOF
 )" \
-  --assignee "@me" \
-  --label "status:in-review"
+  --assignee "@me"
 
 # Capturar referencias para los pasos siguientes
 PR_URL=$(gh pr view --repo "$ORG/$REPO" --json url --jq .url)
 PR_NUMBER=$(gh pr view --repo "$ORG/$REPO" --json number --jq .number)
 ```
 
-### Paso 5 — Vincular el PR al Project y mover el issue a "In Review"
+### Paso 5 — Vincular el PR al Project
 
 ```bash
 # Agregar el PR al Project (lo trackea el campo Status también)
@@ -175,24 +176,15 @@ gh project item-add "$PROJECT_NUMBER" \
   --owner "$ORG" \
   --url "$PR_URL"
 
-# Mover el issue a "In Review"
-gh project item-edit \
-  --id "$ITEM_ID" \
-  --project-id "$(gh project view "$PROJECT_NUMBER" --owner "$ORG" --format json | jq -r .id)" \
-  --field-id "$(gh project field-list "$PROJECT_NUMBER" --owner "$ORG" --format json \
-    | jq -r '.fields[] | select(.name == "Status") | .id')" \
-  --single-select-option-id "$(gh project field-list "$PROJECT_NUMBER" --owner "$ORG" --format json \
-    | jq -r '.fields[] | select(.name == "Status") | .options[] | select(.name == "In Review") | .id')"
-
-# Actualizar labels del issue
-gh issue edit "$ISSUE_NUMBER" --repo "$ORG/$REPO" \
-  --add-label "status:in-review" \
-  --remove-label "status:in-progress"
-
 # Comentario en el issue
 gh issue comment "$ISSUE_NUMBER" --repo "$ORG/$REPO" \
   --body "PR abierto para revisión: $PR_URL"
 ```
+
+El issue permanece en "In progress" durante la revisión: el modelo de 3
+estados (`Todo` / `In progress` / `Done`) no tiene una columna separada para
+"en revisión"; el PR abierto y vinculado al Project es la señal de que la
+tarea está en revisión.
 
 ### Paso 6 — Post-merge (sólo cuando el PR sea aprobado y mergeado)
 
@@ -211,10 +203,6 @@ gh project item-edit \
     | jq -r '.fields[] | select(.name == "Status") | .id')" \
   --single-select-option-id "$(gh project field-list "$PROJECT_NUMBER" --owner "$ORG" --format json \
     | jq -r '.fields[] | select(.name == "Status") | .options[] | select(.name == "Done") | .id')"
-
-gh issue edit "$ISSUE_NUMBER" --repo "$ORG/$REPO" \
-  --add-label "status:done" \
-  --remove-label "status:in-review"
 
 # Limpiar el branch local y remoto
 git checkout develop
@@ -240,7 +228,7 @@ gh issue edit <NUMERO_DESBLOQUEADO> --repo "$ORG/$REPO" \
   --remove-label "status:blocked"
 ```
 
-Mover también esos items a "Ready" en el Project (mismo patrón de `item-edit` que arriba).
+Si el item quedó en una columna distinta de `Todo` mientras estaba bloqueado, moverlo de vuelta a `Todo` en el Project (mismo patrón de `item-edit` que arriba).
 
 ### Manejo de divergencias con el SDD
 
@@ -294,27 +282,24 @@ gh repo view "$ORG/$REPO" --json name >/dev/null || { echo "Sin acceso al repo";
 # 3. Leer la tarea
 gh issue view "$ISSUE_NUMBER" --repo "$ORG/$REPO"
 
-# 4. Mover a In Progress + crear branch (ver Paso 1 arriba)
+# 4. Mover a In progress + crear branch (ver Paso 1 arriba)
 
 # 5. Implementar siguiendo el SDD + git-workflow.md
 
 # 6. Antes del PR: rebase + push (ver Paso 3)
 
-# 7. Crear PR con template (ver Paso 4)
-
-# 8. Mover issue a In Review (ver Paso 5)
+# 7. Crear PR con template (ver Paso 4) y vincular al Project (ver Paso 5)
 ```
 
 ## Checklist pre-commit
 
-- [ ] El issue está en "In Progress" en el Project antes del primer commit.
+- [ ] El issue está en "In progress" en el Project antes del primer commit.
 - [ ] El branch sigue la convención `feature/<issue-number>-<slug>` (ver `git-workflow.md`).
 - [ ] El issue está linkeado en el body del PR con `Closes #N`.
 - [ ] El PR cita el SDD por documento + sección.
 - [ ] El PR enumera los CA-XX y RN-XX implementados.
 - [ ] El PR declara explícitamente si hay divergencias detectadas (o "Ninguna").
-- [ ] El item del Project está en "In Review" tras abrir el PR.
-- [ ] El issue tiene el label `status:in-review`.
+- [ ] El PR está vinculado al Project (Paso 5).
 - [ ] No se cerró el issue antes de que el PR sea mergeado.
 
 ## Antipatrones
@@ -373,4 +358,4 @@ git commit -m "fix(onboarding): validate slug regex on server before insert"
 - `core/sdd_03_api_contracts.md` §"Regla de oro" — ningún contrato API se modifica sin actualizar el SDD primero. Esto refuerza el ciclo de divergencias.
 - Backend `CLAUDE.md` §2 "Regla de conflicto" y §8 "Cuando encontrar algo no especificado en el SDD" — el flujo de pause + report es la regla operacional, este skill lo materializa con comandos `gh`.
 - Frontend `CLAUDE.md` §8 "Cuando la API no coincide con el SDD" — mismo flujo desde el frontend.
-- Los SDDs son source-of-truth en `adminprop-back`; el sync a `adminprop-front` es automático vía GH Actions. Las divergencias se abren contra `adminprop-back`.
+- `docs/sdd/_index.md` §4 — los SDDs son source-of-truth en `adminprop-back`; el sync a `adminprop-front` es automático vía GH Actions. Las divergencias se abren contra `adminprop-back`.
