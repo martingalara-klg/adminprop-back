@@ -27,7 +27,7 @@ Leer **antes de**:
 - `core/sdd_04_nonfunctional.md` §1.3 — SLAs P90/P99 por tipo de tarea, política de retry.
 - `core/sdd_04_nonfunctional.md` §3.3 — strategy de escalado de workers por profundidad de cola.
 - `features/spec_module_05_liquidaciones.md` §RF-02 — reintentos de cálculo/ajuste por índice.
-- `features/spec_module_05_notificaciones.md` §RF-04 — política de reintento de canales.
+- `infrastructure/spec_notificaciones.md` §RF-04 — política de reintento de canales.
 - `features/spec_module_06_mantenimiento.md` — generación de documentos asociados a órdenes de trabajo.
 
 ## El patrón
