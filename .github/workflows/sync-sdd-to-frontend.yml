@@ -1,0 +1,153 @@
+# Requiere secret con permisos sobre adminprop-front — ver guía en clarix-backend/docs/ops/ci-sync-sdd-setup.md (bootstrap, paso 7)
+name: Sync SDDs + runbooks to adminprop-front
+
+# Sincroniza docs/sdd/ y docs/runbooks/ desde este repo (adminprop-back,
+# fuente de verdad) hacia adminprop-front abriendo un PR automático.
+#
+# Decisión adoptada del esqueleto SDD (_index.md #50): copia activa en
+# adminprop-back con sincronización al frontend vía CI.
+#
+# Los SDDs de adminprop aún no existen (se escriben en los pasos 2–5 del
+# diseño SDD) — este workflow queda configurado desde ya y se activa en
+# cuanto aparezca el primer push a main que toque docs/sdd/** o docs/runbooks/**.
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'docs/sdd/**'
+      - 'docs/runbooks/**'
+  workflow_dispatch: {} # permitir ejecución manual desde la UI de Actions
+
+# Cancelar runs concurrentes — si llegan varios pushes en sucesión,
+# solo procesar el último.
+concurrency:
+  group: sync-docs-to-frontend
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    name: Open PR with docs changes in adminprop-front
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read # solo leemos este repo; el otro repo se accede vía SYNC_SDD_TOKEN
+
+    env:
+      FRONTEND_REPO: martingalara-klg/adminprop-front
+      FRONTEND_BASE_BRANCH: master # si el default branch del frontend es 'master', cambiar
+      SYNC_BRANCH: chore/sync-docs
+
+    steps:
+      - name: Checkout adminprop-back
+        uses: actions/checkout@v4
+        with:
+          path: adminprop-back
+          fetch-depth: 1
+
+      - name: Checkout adminprop-front
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.FRONTEND_REPO }}
+          token: ${{ secrets.SYNC_SDD_TOKEN }}
+          path: adminprop-front
+          ref: ${{ env.FRONTEND_BASE_BRANCH }}
+          fetch-depth: 1
+
+      - name: Sync docs/sdd/ and docs/runbooks/ from backend to frontend
+        run: |
+          set -euo pipefail
+
+          # rsync con --delete para reflejar exactamente el estado del backend:
+          # archivos eliminados en el backend también se eliminan en el frontend.
+          # Excluye archivos ocultos del editor / OS pero respeta .gitkeep.
+          rsync -av --delete \
+            --exclude='.DS_Store' \
+            --exclude='Thumbs.db' \
+            adminprop-back/docs/sdd/ \
+            adminprop-front/docs/sdd/
+
+          # Asegurar que docs/runbooks/ existe en el frontend antes del rsync.
+          mkdir -p adminprop-front/docs/runbooks
+
+          rsync -av --delete \
+            --exclude='.DS_Store' \
+            --exclude='Thumbs.db' \
+            adminprop-back/docs/runbooks/ \
+            adminprop-front/docs/runbooks/
+
+          echo "--- Estado tras el sync (docs/sdd/) ---"
+          ls -la adminprop-front/docs/sdd/
+          echo "--- Estado tras el sync (docs/runbooks/) ---"
+          ls -la adminprop-front/docs/runbooks/
+
+      - name: Capture backend commit metadata
+        id: meta
+        working-directory: adminprop-back
+        run: |
+          set -euo pipefail
+          {
+            echo "sha_short=$(git rev-parse --short HEAD)"
+            echo "sha_full=$(git rev-parse HEAD)"
+            echo "subject=$(git log -1 --pretty=%s)"
+            echo "author_name=$(git log -1 --pretty=%an)"
+            echo "author_email=$(git log -1 --pretty=%ae)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Detect changes in adminprop-front
+        id: diff
+        working-directory: adminprop-front
+        run: |
+          set -euo pipefail
+          if [[ -z "$(git status --porcelain docs/sdd/ docs/runbooks/)" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "✓ No hay cambios en docs/sdd/ ni docs/runbooks/. Skipping PR."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Cambios detectados:"
+            git status --porcelain docs/sdd/ docs/runbooks/
+          fi
+
+      - name: Create or update PR in adminprop-front
+        if: steps.diff.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          path: adminprop-front
+          token: ${{ secrets.SYNC_SDD_TOKEN }}
+          branch: ${{ env.SYNC_BRANCH }}
+          base: ${{ env.FRONTEND_BASE_BRANCH }}
+          delete-branch: true
+          add-paths: |
+            docs/sdd
+            docs/runbooks
+          commit-message: |
+            chore(docs): sync sdd + runbooks from adminprop-back@${{ steps.meta.outputs.sha_short }}
+
+            Source commit: ${{ steps.meta.outputs.subject }}
+            Author: ${{ steps.meta.outputs.author_name }} <${{ steps.meta.outputs.author_email }}>
+            See: ${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.meta.outputs.sha_full }}
+          title: "chore(docs): sync sdd + runbooks from adminprop-back@${{ steps.meta.outputs.sha_short }}"
+          body: |
+            Sincronización automática de SDDs (`docs/sdd/`) y runbooks (`docs/runbooks/`) desde [`adminprop-back`](${{ github.server_url }}/${{ github.repository }}).
+
+            **Source commit:** [`${{ steps.meta.outputs.sha_short }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ steps.meta.outputs.sha_full }})
+            **Subject:** ${{ steps.meta.outputs.subject }}
+            **Author:** ${{ steps.meta.outputs.author_name }}
+
+            ---
+
+            > ⚠️ **No editar SDDs ni runbooks directamente en este repo.**
+            > La fuente de verdad es `adminprop-back/docs/sdd/` y `adminprop-back/docs/runbooks/`.
+            > Cualquier edición local se va a sobrescribir en el próximo sync.
+
+            Revisar y mergear cuando el equipo de frontend esté al tanto del cambio.
+            Si el PR queda abierto y llega un nuevo cambio en backend, este mismo PR
+            se actualizará automáticamente con el nuevo contenido.
+          labels: |
+            sdd-sync
+            documentation
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          signoff: false
+          draft: false

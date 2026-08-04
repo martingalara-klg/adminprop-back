@@ -1,0 +1,158 @@
+name: SDD Integrity
+
+# Verifica integridad de los SDDs:
+# - No hay placeholders [DEFINIR] sin resolver bloqueando
+# - Hay rastreabilidad de issues de divergencia abiertos
+# - Los SDDs de infrastructure no rompieron links
+#
+# Agnóstico del dominio — no dispara todavía porque los SDDs de adminprop
+# (docs/sdd/**) no existen aún (se escriben en los pasos 2–5 del diseño SDD).
+# Queda configurado desde ya: se activa en cuanto aparezca el primer archivo
+# bajo docs/sdd/.
+
+on:
+  pull_request:
+    paths:
+      - 'docs/sdd/**'
+
+concurrency:
+  group: sdd-integrity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  check-sdd-integrity:
+    name: Verify SDD integrity
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # para diff vs base
+
+      # ── Placeholders [DEFINIR] no resueltos ───────────────────────────────
+      - name: Count [DEFINIR] placeholders added by this PR
+        id: definir
+        run: |
+          BASE_SHA=$(git merge-base origin/${{ github.base_ref }} HEAD)
+          # Cambios netos en docs/sdd/ — solo placeholders agregados, no preservados
+          ADDED=$(git diff "$BASE_SHA" HEAD -- 'docs/sdd/**' | grep -E '^\+' | grep -c '\[DEFINIR\]' || true)
+          REMOVED=$(git diff "$BASE_SHA" HEAD -- 'docs/sdd/**' | grep -E '^-' | grep -c '\[DEFINIR\]' || true)
+          NET=$((ADDED - REMOVED))
+          echo "Added: $ADDED, Removed: $REMOVED, Net: $NET"
+          echo "net=$NET" >> $GITHUB_OUTPUT
+
+      - name: Block PR if net new [DEFINIR] without justification
+        if: steps.definir.outputs.net > '0'
+        run: |
+          # Aceptar nuevos [DEFINIR] solo si el body del PR explica explícitamente
+          PR_BODY=$(gh pr view ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} \
+            --json body --jq .body)
+          if echo "$PR_BODY" | grep -qi "## Pendientes \[DEFINIR\] introducidos\b"; then
+            echo "✓ Nuevos [DEFINIR] presentes pero justificados en el PR body"
+            exit 0
+          fi
+          echo "❌ Este PR agrega ${{ steps.definir.outputs.net }} nuevos [DEFINIR] sin justificación"
+          echo "Agregar al body del PR una sección '## Pendientes [DEFINIR] introducidos' explicando cada uno"
+          exit 1
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Divergencias abiertas (informativo, no bloqueante) ────────────────
+      - name: List open sdd:divergence issues
+        run: |
+          gh issue list \
+            --repo ${{ github.repository }} \
+            --label "sdd:divergence" \
+            --state open \
+            --json number,title,createdAt \
+            > /tmp/divergences.json
+
+          COUNT=$(jq length /tmp/divergences.json)
+          if [ "$COUNT" -gt 0 ]; then
+            echo "⚠ Divergencias abiertas en este momento:"
+            jq -r '.[] | "  - #\(.number) \(.title) (creada \(.createdAt))"' /tmp/divergences.json
+          else
+            echo "✓ No hay divergencias abiertas"
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Links rotos en SDDs ───────────────────────────────────────────────
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check links (markdown-link-check)
+        run: |
+          npm install -g markdown-link-check@3
+          # Solo archivos cambiados en este PR
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }} HEAD -- 'docs/sdd/**.md')
+          if [ -z "$CHANGED" ]; then
+            echo "No SDDs changed; skipping link check"
+            exit 0
+          fi
+          STATUS=0
+          for FILE in $CHANGED; do
+            echo "─── $FILE ───"
+            # --quiet: solo errores. --config: ignorar links externos en CI (no costanos)
+            cat > /tmp/mlc-config.json <<EOF
+          {
+            "ignorePatterns": [
+              { "pattern": "^https?://" },
+              { "pattern": "^mailto:" }
+            ]
+          }
+          EOF
+            markdown-link-check "$FILE" --config /tmp/mlc-config.json --quiet || STATUS=1
+          done
+          exit $STATUS
+
+      # ── Frontmatter mínimo ────────────────────────────────────────────────
+      - name: Verify SDD frontmatter
+        run: |
+          STATUS=0
+          for FILE in docs/sdd/**/*.md docs/sdd/*.md; do
+            [ -f "$FILE" ] || continue
+            # Saltear _index.md y archivos sin frontmatter requerido
+            BASENAME=$(basename "$FILE")
+            if [ "$BASENAME" = "_index.md" ]; then continue; fi
+
+            # Verificar existencia de las primeras líneas con frontmatter YAML
+            FIRST_LINE=$(head -1 "$FILE")
+            if [ "$FIRST_LINE" != "---" ]; then
+              echo "❌ $FILE no tiene frontmatter YAML"
+              STATUS=1
+              continue
+            fi
+
+            # Verificar campos obligatorios
+            for FIELD in name description; do
+              if ! head -10 "$FILE" | grep -q "^$FIELD:"; then
+                echo "❌ $FILE falta campo frontmatter: $FIELD"
+                STATUS=1
+              fi
+            done
+          done
+          exit $STATUS
+
+      # ── Resumen en PR ─────────────────────────────────────────────────────
+      - name: Comment summary on PR
+        if: always()
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} \
+            --body "## SDD Integrity Check
+
+          - **[DEFINIR] netos agregados:** ${{ steps.definir.outputs.net }}
+          - Job status: ${{ job.status }}
+
+          Verificación completa: ver el workflow run." || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

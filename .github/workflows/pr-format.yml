@@ -1,0 +1,123 @@
+name: PR Format
+
+# Valida que el título y el body del PR respeten el formato de
+# docs/prompts/session-start.md §4.3. No valida contenido de código —
+# eso lo hace ci.yml.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+    branches: [develop, main]
+
+concurrency:
+  group: pr-format-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+
+  check-pr-format:
+    name: Verify PR title & body format
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: write
+
+    steps:
+      - name: Fetch PR title and body
+        id: pr
+        run: |
+          gh pr view ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} \
+            --json title,body \
+            > /tmp/pr.json
+
+          TITLE=$(jq -r '.title' /tmp/pr.json)
+          jq -r '.body' /tmp/pr.json > /tmp/pr_body.md
+
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Clasificar el PR: ligado a un issue ([#N] ...) vs. chore/infra ────
+      # Precedente adoptado del esqueleto SDD: PRs de mantenimiento sin issue
+      # asociado usan título conventional-commit y body libre — no se les
+      # exige el template de Tarea/SDD/CA-XX.
+      - name: Classify PR and validate title
+        id: classify
+        run: |
+          TITLE="${{ steps.pr.outputs.title }}"
+          echo "Título: $TITLE"
+
+          if [[ "$TITLE" =~ ^\[#([0-9]+)\][[:space:]] ]]; then
+            echo "kind=issue" >> "$GITHUB_OUTPUT"
+            echo "issue_number=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+            echo "✓ Título ligado a issue #${BASH_REMATCH[1]} — formato [#N] <título>"
+          elif [[ "$TITLE" =~ ^(chore|fix|feat|test|docs|refactor|build|ci)(\([a-z0-9_.-]+\))?:[[:space:]] ]]; then
+            echo "kind=chore" >> "$GITHUB_OUTPUT"
+            echo "✓ Título conventional-commit (PR de mantenimiento sin issue asociado)"
+          else
+            echo "❌ Título no respeta ningún formato aceptado."
+            echo "   Esperado: '[#<issue>] <título descriptivo>' para PRs de feature/fix ligados a un issue,"
+            echo "   o 'tipo(scope): descripción' (conventional commits) para chores/infra sin issue."
+            echo "   Recibido: '$TITLE'"
+            exit 1
+          fi
+
+      # ── PRs ligados a issue: exigir el template completo ──────────────────
+      - name: Verify required sections (issue-linked PRs)
+        if: steps.classify.outputs.kind == 'issue'
+        run: |
+          MISSING=()
+          for SECTION in \
+            "## Tarea" \
+            "## SDD de referencia" \
+            "## Criterios de aceptación implementados" \
+            "## Reglas de negocio implementadas" \
+            "## Decisiones de implementación" \
+            "## Divergencias del SDD detectadas" \
+            "## Checklist del autor"
+          do
+            if ! grep -qF "$SECTION" /tmp/pr_body.md; then
+              MISSING+=("$SECTION")
+            fi
+          done
+
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "❌ Faltan secciones obligatorias del template (docs/prompts/session-start.md §4.3):"
+            printf '   - %s\n' "${MISSING[@]}"
+            exit 1
+          fi
+          echo "✓ Todas las secciones del template están presentes"
+
+      - name: Verify "Closes #N" matches the issue in the title
+        if: steps.classify.outputs.kind == 'issue'
+        run: |
+          ISSUE="${{ steps.classify.outputs.issue_number }}"
+          if ! grep -qE "Closes #${ISSUE}\b" /tmp/pr_body.md; then
+            echo "❌ El body no tiene 'Closes #${ISSUE}' (debe coincidir con el issue del título)"
+            exit 1
+          fi
+          echo "✓ 'Closes #${ISSUE}' presente y coincide con el título"
+
+      - name: Verify the referenced issue exists and is open
+        if: steps.classify.outputs.kind == 'issue'
+        run: |
+          ISSUE="${{ steps.classify.outputs.issue_number }}"
+          STATE=$(gh issue view "$ISSUE" --repo ${{ github.repository }} --json state --jq .state 2>/dev/null || echo "NOT_FOUND")
+          if [ "$STATE" = "NOT_FOUND" ]; then
+            echo "❌ El issue #${ISSUE} referenciado en el título no existe"
+            exit 1
+          fi
+          echo "✓ Issue #${ISSUE} existe (estado: $STATE)"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Comment summary on PR
+        if: failure()
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} \
+            --body "❌ **PR Format check falló.** Revisar título/body contra \`docs/prompts/session-start.md\` §4.3 (título \`[#N] <título>\` + secciones Tarea/SDD/CA-XX/RN-XX/Decisiones/Divergencias/Checklist), o usar el formato conventional-commit si es un PR de mantenimiento sin issue asociado. Detalle en el run del workflow." || true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
