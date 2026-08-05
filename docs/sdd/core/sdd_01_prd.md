@@ -186,7 +186,7 @@ Como **owner**, quiero generar la liquidación mensual de cada propietario en un
 *Criterios de aceptación:*
 - La liquidación mensual de un propietario consolida todas sus propiedades: **total cobrado − comisión de administración (% del propietario) − impuestos del mes − reparaciones pagadas por la administración − dinero ya rendido** (alquileres transferidos directo a su cuenta).
 - Es exportable en **Excel y PDF** con el detalle por propiedad y por concepto.
-- Una liquidación emitida es inmutable; una corrección se hace con una nueva liquidación complementaria que referencia a la original.
+- Una liquidación emitida puede corregirse y regenerarse (se re-exporta); cada corrección queda registrada en el log de auditoría (quién, cuándo, qué cambió).
 - El historial de liquidaciones de cada propietario es consultable.
 
 ---
@@ -318,7 +318,7 @@ Como **usuario**, quiero recibir los avisos del sistema in-app y por email, para
 
 **R-03:** Los datos de contratos, cobranzas y liquidaciones son visibles únicamente para roles `owner` y `admin`. El rol `maintenance` accede solo al módulo de mantenimiento; el control se aplica en la API.
 
-**R-04:** Las liquidaciones emitidas y los cobros imputados son inmutables. Las correcciones se registran como operaciones nuevas que referencian a la original (nunca edición ni borrado físico).
+**R-04:** Las liquidaciones y los cobros pueden corregirse después de registrados (flexibilidad operativa), pero **toda corrección queda trazada en el log de auditoría** (quién, cuándo, valor anterior y nuevo). Nunca hay borrado físico: las anulaciones son lógicas.
 
 **R-05:** La interfaz es en español (es-AR). Formatos locales: fechas DD/MM/AAAA, números con `.` de miles y `,` decimal, monedas ARS y USD.
 
