@@ -359,26 +359,27 @@ La rendición mensual a un propietario: consolida todas sus propiedades en un pe
 | landlord_id | UUID | FK a Propietario |
 | period | año-mes | Período liquidado |
 | status | enum | `draft` \| `issued` |
-| totals | (por moneda) | total_collected, commission_total, charges_total, repairs_total, already_settled_total, net_amount — **separados por moneda ARS / USD, sin conversión automática** |
+| totals | decimal (ARS) | total_collected, commission_total, charges_total, repairs_total, already_settled_total, net_amount — **todo expresado en ARS** |
+| exchange_rate | decimal | Tipo de cambio ARS/USD ingresado **manualmente al generar** — obligatorio si el propietario tiene montos en USD en el período; null si no hay USD |
 | generated_by / issued_at | UUID / timestamp | Trazabilidad |
 | regenerated_count | entero | Cuántas veces se corrigió/regeneró (cada regeneración queda en auditoría) |
 
-**SettlementLineItem:** cada línea del detalle — `line_type` (`rent_collected` \| `commission` \| `tax_charge` \| `repair` \| `already_settled`), referencia a la entidad origen (cobro, cargo, pedido), propiedad, importe y moneda.
+**SettlementLineItem:** cada línea del detalle — `line_type` (`rent_collected` \| `commission` \| `tax_charge` \| `repair` \| `already_settled`), referencia a la entidad origen (cobro, cargo, pedido), propiedad, importe original con su moneda, e importe convertido a ARS (con el `exchange_rate` de la liquidación si el original es USD).
 
-**Fórmula (por moneda):**
+**Fórmula (todo en ARS; los montos USD se convierten con el TC de la liquidación):**
 ```
-neto a rendir = Σ cobros del período (destino administración)
-              − comisión (% del propietario × alquileres del período, incluidos los directos)
-              − Σ cargos del mes (rentas, muni)                 [solo ARS]
-              − Σ reparaciones cerradas con payer = agency      [pendientes de liquidar]
-              (los cobros con destino cuenta-propietario se listan como "ya rendido",
-               no suman al neto pero sí a la base de comisión)
+neto a rendir (ARS) = Σ cobros del período (destino administración)
+                    − comisión (% del propietario × alquileres del período, incluidos los directos)
+                    − Σ cargos del mes (rentas, muni)
+                    − Σ reparaciones cerradas con payer = agency  [pendientes de liquidar]
+                    (los cobros con destino cuenta-propietario se listan como "ya rendido",
+                     no suman al neto pero sí a la base de comisión)
 ```
 
 **Invariantes:**
 - Única por `(landlord_id, period)` (una corrección regenera la misma liquidación, no crea otra).
 - Una liquidación `issued` puede corregirse y regenerarse; cada regeneración queda registrada en el log de auditoría con quién, cuándo y qué cambió (ver RN-L03).
-- Los montos ARS y USD se liquidan por separado; el sistema no convierte monedas en la liquidación (MVP).
+- Si el propietario tiene montos en USD en el período, el sistema exige el tipo de cambio al generar (ver RN-L06); el detalle muestra el valor USD original junto al convertido.
 - Exportable en Excel y PDF; los archivos generados quedan como Adjuntos de la liquidación.
 
 ---
@@ -442,11 +443,12 @@ Registro append-only de las operaciones sensibles.
 
 ### RN-L — Liquidaciones
 
-- **RN-L01:** Neto a rendir (por moneda) = cobros del período con destino administración − comisión − cargos del mes − reparaciones pagadas por la administración; el dinero ya rendido se lista informativamente.
+- **RN-L01:** Neto a rendir (en ARS) = cobros del período con destino administración − comisión − cargos del mes − reparaciones pagadas por la administración; el dinero ya rendido se lista informativamente.
 - **RN-L02:** La comisión = % del propietario × alquileres del período de todas sus propiedades, **incluidos** los cobrados directo en su cuenta.
 - **RN-L03:** Una liquidación emitida puede corregirse y regenerarse; cada corrección queda trazada en el log de auditoría (quién, cuándo, qué cambió). Nunca hay borrado físico.
 - **RN-L04:** Una reparación entra a la liquidación solo si `payer = agency` y estado `closed`; se descuenta una única vez y queda registrado en qué liquidación.
 - **RN-L05:** Un cambio en el % de comisión del propietario rige para liquidaciones futuras; nunca recalcula períodos ya liquidados.
+- **RN-L06:** La liquidación se emite íntegramente en ARS. Si el propietario tiene montos en USD en el período, el tipo de cambio se ingresa manualmente al generar (obligatorio, > 0) y queda registrado en la liquidación; el detalle conserva los valores USD originales junto a los convertidos.
 
 ### RN-A — Accesos
 
@@ -506,7 +508,7 @@ User 1─N Notification
 - **Cargo del mes:** importe mensual de un concepto recurrente de la propiedad (rentas, municipalidad), ingresado a mano, descontado en la liquidación.
 - **Pedido de reparación / orden de trabajo:** ciclo de arreglo de una propiedad: pedido → cotizaciones → aprobación → ejecución → cierre.
 - **Pagador (Paga: Dueño / Administración):** quién paga una reparación. Administración → se descuenta en la liquidación; Dueño → solo historial.
-- **Liquidación / rendición:** documento mensual por propietario: cobros − comisión − cargos − reparaciones − ya rendido, por moneda. Export Excel + PDF.
+- **Liquidación / rendición:** documento mensual por propietario: cobros − comisión − cargos − reparaciones − ya rendido, **todo en pesos** (si hay montos USD, el TC se ingresa al emitir y queda registrado). Export Excel + PDF.
 - **Comisión por administración:** % propio de cada propietario sobre los alquileres del período de todas sus propiedades.
 - **Soft delete:** eliminación lógica (`deleted_at`); nada se borra físicamente.
 - **RLS (Row-Level Security):** aislamiento físico entre organizaciones en PostgreSQL vía `organization_id`.
