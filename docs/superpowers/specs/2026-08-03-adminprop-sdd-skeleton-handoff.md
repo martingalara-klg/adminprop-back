@@ -56,7 +56,7 @@ Los 21 archivos del esqueleto citan secciones y nombres concretos. Al escribir c
 - **Lista canónica de workers** (los skills declaran `indices_worker`/`notification_worker`/`documents_worker` como ilustrativos y difieren a este doc) + decisión sobre `ANTHROPIC_API_KEY`.
 
 ### `spec_data_model.md` (headings literales)
-- **"Orden de Migración"** con capas Fundación → Propiedades → Personas → Contratos → Cobranzas → Mantenimiento → Liquidaciones → Notificaciones/Auditoría (citado por session-start §1.2).
+- **"Orden de Migración"** con capas Fundación → Personas → Propiedades → Contratos → Cobranzas → Mantenimiento → Liquidaciones → Notificaciones/Auditoría (citado por session-start §1.2; Personas migra antes que Propiedades porque `properties.landlord_id` lo exige).
 - **"Estrategia de Seed Data"** (global vía Alembic idempotente vs per-tenant en `OrganizationProvisioningService`), **"Principios Arquitectónicos"** (RLS canónico), **"Índices PostgreSQL Recomendados"**, Apéndice A (nomenclatura), numeración de capas ("Capa 0 — Fundación", …).
 
 ### Specs de módulo

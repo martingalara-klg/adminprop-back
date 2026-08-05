@@ -79,7 +79,7 @@ gh project item-list "$PROJECT_NUMBER" --owner "$ORG" --format json \
 ### 1.2 Reglas de selección (en orden)
 
 1. Sólo issues con `status:ready` (los `status:blocked` no se tocan).
-2. Priorizar por **fase del roadmap** (Fase 0 > Fase 1 > Fase 2 > …). El orden canónico de capas está en `spec_data_model.md §"Orden de Migración"` (Fundación → Propiedades → Personas → Contratos → Cobranzas → Mantenimiento → Liquidaciones → Notificaciones/Auditoría).
+2. Priorizar por **fase del roadmap** (Fase 0 > Fase 1 > Fase 2 > …). El orden canónico de capas está en `spec_data_model.md §"Orden de Migración"` (Fundación → Personas → Propiedades → Contratos → Cobranzas → Mantenimiento → Liquidaciones → Notificaciones/Auditoría).
 3. Dentro de la misma fase: **el que desbloquea más issues** (revisar `## Bloquea a` / `## Depende de` del body del issue).
 4. Desempate: complejidad **Baja > Media > Alta**.
 
