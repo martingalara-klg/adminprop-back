@@ -28,7 +28,7 @@ Leer **antes de**:
 - `core/sdd_04_nonfunctional.md` §3.3 — strategy de escalado de workers por profundidad de cola.
 - `core/sdd_03_api_contracts.md` §9 — generación mensual de `rent_periods` como job de Celery Beat.
 - `infrastructure/spec_notificaciones.md` §RF-04 — política de reintento de canales.
-- `features/spec_module_06_mantenimiento.md` — generación de documentos asociados a órdenes de trabajo.
+- `features/spec_module_06_mantenimiento.md` — eventos de notificación del ciclo de órdenes de trabajo (`work_order_created`, `quote_submitted`, `work_order_closed`).
 
 ## El patrón
 

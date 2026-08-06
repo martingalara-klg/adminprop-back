@@ -188,9 +188,9 @@ def downgrade() -> None:
 ### Plantilla para columna con encriptación columnar (pgcrypto)
 
 ```python
-"""add_bank_account_encrypted_to_organization_payout_data
+"""add_bank_info_encrypted_to_landlords
 
-SDD: features/spec_module_07_administracion.md §RF-08 (configuración de cobros/pagos)
+SDD: features/spec_module_02_personas.md §RF-01 (datos bancarios del propietario, cifrados)
 + sdd_04 §2.4 (campos sensibles cifrados AES-256 columnar via pgcrypto)
 + nota: la KEK vive en variable de entorno local (.env, no commiteado) en MVP;
   migrar a un gestor de secretos cuando exista infra cloud.
