@@ -80,7 +80,7 @@ async def create_contract(
     organization_id: UUID = Depends(get_current_tenant),
     service: ContractService = Depends(get_contract_service),
 ) -> ContractResponse:
-    """SDD: features/spec_module_03_contratos.md §RF-02. Implements: CA-RF02-01..04, RN-01/03/05/06."""
+    """SDD: features/spec_module_03_contratos.md §RF-02. Implements: CA-03-01..03, RN-01/03/05/06."""
     contract = await service.create(dto, organization_id)
     return ContractResponse.model_validate(contract)
 ```
