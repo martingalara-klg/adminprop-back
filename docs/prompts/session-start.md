@@ -339,8 +339,8 @@ de divergencias"), mover el issue actual a `status:blocked` y esperar.
 - [ ] Test de aislamiento cross-tenant existe y retorna 404 (no 403).
 - [ ] `organization_id` siempre del JWT vía `Depends(get_current_tenant)`, nunca del request.
 - [ ] Endpoints async retornan 202 + `{ data: { <id>, status, estimated_completion_seconds } }`.
-- [ ] Si toca ICL/IPC/Resend: clasifica errores en Retryable* vs NonRetryable*; secretos via variables de entorno locales (`.env`, no commiteado); migrar a un gestor de secretos cuando exista infra cloud.
-- [ ] Logs JSON con `request_id`, `organization_id`, `user_id`, `service`; sin campos sensibles (password, mfa_secret, tokens).
+- [ ] Si toca Resend: clasifica errores en Retryable* vs NonRetryable*; secretos via variables de entorno locales (`.env`, no commiteado); migrar a un gestor de secretos cuando exista infra cloud.
+- [ ] Logs JSON con `request_id`, `organization_id`, `user_id`, `service`; sin campos sensibles (password, tokens, bank_info).
 - [ ] No hay decisiones de diseño sin respaldo en el SDD.
 - [ ] No hay código fuera del scope del issue.
 

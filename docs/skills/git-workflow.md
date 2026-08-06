@@ -293,7 +293,7 @@ git commit -m "asdf"
 
 # ✅ Subjects que describen el cambio
 git commit -m "fix(liquidaciones): reject period reopen with notes < 10 chars"
-git commit -m "feat(indices): wire BCRA ICL fetch into indices_worker"
+git commit -m "feat(liquidaciones): wire settlement PDF generation into documents_worker"
 ```
 
 ```bash

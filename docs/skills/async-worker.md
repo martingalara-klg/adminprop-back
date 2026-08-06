@@ -6,10 +6,10 @@ Leer **antes de**:
 
 - Crear o modificar una tarea Celery.
 - Encolar un job desde un endpoint HTTP (`202 Accepted`).
-- Configurar Celery Beat (schedules: digests, aplicación programada de índices, alertas de vencimiento de contrato).
+- Configurar Celery Beat (schedules: `generate_rent_periods`, `detect_due_adjustments`, `detect_expiring_contracts`).
 - Procesar un dataset largo (cálculo masivo de liquidaciones, generación de documentos).
 
-> Lista canónica de workers: se define en `core/sdd_04_nonfunctional.md` (paso 4 del diseño); los workers de este skill (`indices_worker`, `notification_worker`, `documents_worker`) son ilustrativos.
+> Lista canónica de workers: `core/sdd_04_nonfunctional.md` §1.3 — `notification_worker` + `documents_worker` + las 3 tareas de Celery Beat (`generate_rent_periods`, `detect_due_adjustments`, `detect_expiring_contracts`). No existe un worker de índices: los ajustes por índice son ingreso manual del porcentaje (`sdd_03` §8).
 
 ## Stack relevante
 
@@ -18,15 +18,15 @@ Leer **antes de**:
 | Queue | Celery 5+ | backend `CLAUDE.md` §3 |
 | Broker | Redis 7 | backend `CLAUDE.md` §3 |
 | Scheduler | Celery Beat (cron) | backend `CLAUDE.md` §3 |
-| Workers separados (ilustrativos) | `indices_worker` (obtiene índices ICL/IPC y aplica ajustes programados), `notification_worker` (email + in-app), `documents_worker` (PDFs de recibos y liquidaciones) | backend `CLAUDE.md` §3 |
+| Workers (canónicos) | `notification_worker` (email vía Resend + notificaciones in-app), `documents_worker` (Excel/PDF de liquidaciones) | `sdd_04` §1.3 |
 | Ubicación | `src/adminprop/workers/` (`celery_app.py` + un archivo por worker) | backend `CLAUDE.md` §9 |
 | Result backend | Redis (sólo para estado de tarea, no para datos de negocio) | backend `CLAUDE.md` §3 |
 
 ## SDDs de referencia
 
-- `core/sdd_04_nonfunctional.md` §1.3 — SLAs P90/P99 por tipo de tarea, política de retry.
+- `core/sdd_04_nonfunctional.md` §1.3 — lista canónica de workers, tareas de Celery Beat y política de retry.
 - `core/sdd_04_nonfunctional.md` §3.3 — strategy de escalado de workers por profundidad de cola.
-- `features/spec_module_03_contratos.md` §"Ajustes por índice" — reintentos de aplicación de ajuste por índice.
+- `core/sdd_03_api_contracts.md` §9 — generación mensual de `rent_periods` como job de Celery Beat.
 - `infrastructure/spec_notificaciones.md` §RF-04 — política de reintento de canales.
 - `features/spec_module_06_mantenimiento.md` — generación de documentos asociados a órdenes de trabajo.
 
@@ -46,7 +46,6 @@ celery_app = Celery(
     broker=settings.REDIS_BROKER_URL,
     backend=settings.REDIS_RESULT_BACKEND_URL,
     include=[
-        "adminprop.workers.indices_worker",
         "adminprop.workers.notification_worker",
         "adminprop.workers.documents_worker",
     ],
@@ -66,24 +65,19 @@ celery_app.conf.update(
 )
 
 # ─── Celery Beat (schedulers) ──────────────────────────────────────
-# SDD: spec_notificaciones §RF-01 (digests), spec_module_03_contratos §"Ajustes por índice"
-# (ajustes programados por índice), spec_module_03_contratos (alertas de vencimiento).
+# SDD: sdd_04 §1.3 — lista canónica de tareas programadas.
 celery_app.conf.beat_schedule = {
-    "digest-diario-per-org-08-local": {
-        "task": "adminprop.workers.notification_worker.dispatch_daily_digests",
-        "schedule": 60 * 15,   # cada 15 min; el worker filtra por timezone-org == 08:00
+    "generate-rent-periods-monthly": {
+        "task": "adminprop.workers.notification_worker.generate_rent_periods",
+        "schedule": {"hour": 0, "minute": 30},   # 1° de cada mes, 00:30 (tz de la org); idempotente
     },
-    "digest-semanal-lunes-am": {
-        "task": "adminprop.workers.notification_worker.dispatch_weekly_digests",
-        "schedule": 60 * 60,   # cada hora; el worker filtra lunes AM por timezone
+    "detect-due-adjustments-daily": {
+        "task": "adminprop.workers.notification_worker.detect_due_adjustments",
+        "schedule": {"hour": 1, "minute": 0},   # diaria, 01:00 — crea ajustes pending (RN-C03)
     },
-    "apply-scheduled-index-adjustments-03-utc": {
-        "task": "adminprop.workers.indices_worker.apply_scheduled_adjustments",
-        "schedule": {"hour": 3, "minute": 0},   # 03:00 UTC — batch diario
-    },
-    "contract-expiration-alert-09-local": {
-        "task": "adminprop.workers.notification_worker.dispatch_contract_expiration_alerts",
-        "schedule": 60 * 15,   # cada 15 min; filtra orgs cuyo 09:00 local cae en esta ventana
+    "detect-expiring-contracts-daily": {
+        "task": "adminprop.workers.notification_worker.detect_expiring_contracts",
+        "schedule": {"hour": 1, "minute": 30},   # diaria, 01:30 — notifica contratos por vencer
     },
 }
 ```
@@ -100,8 +94,8 @@ Cada tarea debe:
 6. Loggear con `request_id` + `organization_id` + `user_id` propagados.
 
 ```python
-# src/adminprop/workers/indices_worker.py
-# SDD: features/spec_module_03_contratos.md §"Ajustes por índice"
+# src/adminprop/workers/documents_worker.py
+# SDD: core/sdd_03_api_contracts.md §11 "Liquidaciones"
 
 from datetime import datetime
 from uuid import UUID
@@ -112,99 +106,99 @@ from celery import Task
 
 from adminprop.workers.celery_app import celery_app
 from adminprop.db.session import async_session_factory, set_tenant_context
-from adminprop.modules.contracts.models import Contract
-from adminprop.modules.contracts.repository import ContractRepository
-from adminprop.shared.indices.bcra import get_icl_index
+from adminprop.modules.settlements.repository import SettlementRepository
+from adminprop.shared.documents.excel import build_settlement_excel
+from adminprop.shared.documents.pdf import build_settlement_pdf
 from adminprop.shared.errors.retryable import (
-    RetryableIndexError,
-    NonRetryableIndexError,
+    RetryableError,
+    NonRetryableError,
 )
 
 
 logger = logging.getLogger(__name__)
 
 
-# ─── Política de reintentos: spec_module_03_contratos §"Ajustes por índice" + sdd_04 §1.3 ──
+# ─── Política de reintentos: sdd_04 §1.3 ───────────────────────────
 # Máximo 3 intentos; backoff exponencial con jitter.
-class IndicesTask(Task):
-    autoretry_for = (RetryableIndexError,)
+class DocumentsTask(Task):
+    autoretry_for = (RetryableError,)
     retry_backoff = True
     retry_backoff_max = 600          # 10 min cap
     retry_jitter = True
     max_retries = 3
 
 
-@celery_app.task(base=IndicesTask, bind=True, name="adminprop.workers.indices_worker.aplicar_ajuste_contrato")
-def aplicar_ajuste_contrato(self, contract_id: str, organization_id: str, request_id: str) -> None:
+@celery_app.task(base=DocumentsTask, bind=True, name="adminprop.workers.documents_worker.generate_settlement_files")
+def generate_settlement_files(self, settlement_id: str, organization_id: str, request_id: str) -> None:
     """
-    Aplica el ajuste programado por índice (ICL/IPC) a un contrato.
-    SDD: spec_module_03_contratos.md §"Ajustes por índice".
-    Implements: RN-L01 (un ajuste aplicado por período), RN-D01 (scoping multi-tenant).
+    Genera el Excel (openpyxl) y el PDF (WeasyPrint) de una liquidación.
+    SDD: core/sdd_03_api_contracts.md §11 "POST /settlements/generate".
+    Implements: RN-L03 (regeneración auditada), RN-D01 (scoping multi-tenant).
     """
-    contract_uuid = UUID(contract_id)
+    settlement_uuid = UUID(settlement_id)
     org_uuid = UUID(organization_id)
 
     # request_id propagado para distributed tracing
     logger.info(
-        "aplicar_ajuste_contrato start",
+        "generate_settlement_files start",
         extra={
             "request_id": request_id,
             "organization_id": organization_id,
-            "contract_id": contract_id,
+            "settlement_id": settlement_id,
             "attempt": self.request.retries + 1,
-            "service": "indices_worker",
+            "service": "documents_worker",
         },
     )
 
-    asyncio.run(_aplicar_ajuste_contrato_async(contract_uuid, org_uuid, request_id))
+    asyncio.run(_generate_settlement_files_async(settlement_uuid, org_uuid, request_id))
 
 
-async def _aplicar_ajuste_contrato_async(contract_id: UUID, org_id: UUID, request_id: str) -> None:
+async def _generate_settlement_files_async(settlement_id: UUID, org_id: UUID, request_id: str) -> None:
     async with async_session_factory() as session:
         # Setear contexto de tenant antes de cualquier query — adminprop_app usa RLS.
         await set_tenant_context(session, org_id)
 
-        repo = ContractRepository(session)
-        contract = await repo.get_by_id(contract_id, org_id)
-        if contract is None:
-            # Contrato borrado entre encolar y procesar: terminar limpio
-            logger.warning("contract not found, skipping", extra={"contract_id": str(contract_id)})
+        repo = SettlementRepository(session)
+        settlement = await repo.get_by_id(settlement_id, org_id)
+        if settlement is None:
+            # Liquidación borrada entre encolar y procesar: terminar limpio
+            logger.warning("settlement not found, skipping", extra={"settlement_id": str(settlement_id)})
             return
 
-        # Estado → adjusting
-        contract.adjustment_status = "processing"
+        # Estado → processing
+        settlement.status = "processing"
         await session.flush()
 
         try:
-            index_value = await get_icl_index(contract.adjustment_reference_date)
+            excel_path = await build_settlement_excel(settlement)
+            pdf_path = await build_settlement_pdf(settlement)
 
-            new_amount = contract.monthly_amount * (1 + index_value.variation_percent / 100)
-            await repo.apply_adjustment(
-                contract_id=contract_id,
+            await repo.attach_generated_files(
+                settlement_id=settlement_id,
                 organization_id=org_id,
-                new_monthly_amount=new_amount,
-                index_value_used=index_value.variation_percent,
-                applied_at=datetime.utcnow(),
+                excel_path=str(excel_path),
+                pdf_path=str(pdf_path),
+                generated_at=datetime.utcnow(),
             )
-            contract.adjustment_status = "completed"
+            settlement.status = "completed"
             await session.flush()
             await session.commit()
 
-        except RetryableIndexError as exc:
-            # Retryable: dejá que IndicesTask reintente.
+        except RetryableError as exc:
+            # Retryable: dejá que DocumentsTask reintente.
             await session.rollback()
-            contract.adjustment_status = "pending"   # vuelve a pending para próximo intento
+            settlement.status = "pending"   # vuelve a pending para próximo intento
             await session.commit()
             raise
 
-        except NonRetryableIndexError as exc:
+        except NonRetryableError as exc:
             # Non-retryable: marcar como failed inmediatamente.
             await session.rollback()
-            contract.adjustment_status = "failed"
-            contract.metadata = {**(contract.metadata or {}), "last_error": str(exc)}
+            settlement.status = "failed"
+            settlement.metadata = {**(settlement.metadata or {}), "last_error": str(exc)}
             await session.commit()
-            # Notificar al owner/admin (Módulo notificaciones evento CONTRACT_ADJUSTMENT_FAILED)
-            await notify_adjustment_failure(contract_id, org_id, str(exc))
+            # Notificar al owner/admin (Módulo notificaciones evento DOCUMENTO_FALLIDO)
+            await notify_document_generation_failure(settlement_id, org_id, str(exc))
             raise
 ```
 
@@ -237,30 +231,30 @@ async def set_tenant_context(session: AsyncSession, organization_id: UUID | None
 ### Encolar desde un endpoint
 
 ```python
-# src/adminprop/modules/contracts/service.py
+# src/adminprop/modules/settlements/service.py
 from uuid import UUID
-from adminprop.workers.indices_worker import aplicar_ajuste_contrato as celery_aplicar_ajuste
+from adminprop.workers.documents_worker import generate_settlement_files as celery_generate_settlement_files
 
 
-class ContractService:
-    async def request_index_adjustment(self, contract_id: UUID, organization_id: UUID, request_id: str) -> None:
-        # 1. Marcar el contrato en estado pending de ajuste
-        await self._repo.mark_adjustment_pending(contract_id, organization_id)
+class SettlementService:
+    async def generate(self, landlord_id: UUID, period: str, organization_id: UUID, request_id: str) -> UUID:
+        # 1. Crear la liquidación en estado pending
+        settlement_id = await self._repo.create_pending(landlord_id, period, organization_id)
 
         # 2. Encolar el job. Args: IDs serializables, no objetos ORM.
-        celery_aplicar_ajuste.apply_async(
-            args=[str(contract_id), str(organization_id), request_id],
-            queue="indices",   # un worker dedicado consume sólo esta cola
+        celery_generate_settlement_files.apply_async(
+            args=[str(settlement_id), str(organization_id), request_id],
+            queue="documents",   # un worker dedicado consume sólo esta cola
         )
+        return settlement_id
 ```
 
 ### Política de reintentos por tipo de tarea
 
 | Worker | Reintentables | No reintentables | Política |
 |---|---|---|---|
-| `indices_worker.aplicar_ajuste_contrato` | 429/5xx/timeouts del servicio de índices (BCRA/INDEC) | valor de índice inexistente para el período, contrato en estado inválido | `max_retries=3`, backoff exponencial con jitter (30s → 90s → 270s). Tras agotar: `contract.adjustment_status = 'failed'` + evento `CONTRACT_ADJUSTMENT_FAILED`. |
+| `documents_worker.generate_settlement_files` | I/O / generación de Excel/PDF temporal | Datos inexistentes para el período (genera el documento con mensaje "sin datos", no falla) | `max_retries=3`, backoff 15 min. Sin éxito → notificación `DOCUMENTO_FALLIDO`. |
 | `notification_worker` (por canal) | 429, 5xx del proveedor (Resend) | 400 (email inválido), 404 (destinatario eliminado) | `max_retries=3`, backoff (30s, 5min, 30min). |
-| `documents_worker` | I/O / generación de PDF temporal | Datos inexistentes para el período (genera PDF con mensaje "sin datos", no falla) | `max_retries=3`, backoff 15 min. Sin éxito → notificación `DOCUMENTO_FALLIDO`. |
 
 ### Categorización reintentable vs no reintentable
 
@@ -274,12 +268,8 @@ class RetryableError(Exception):
     """Base para errores donde el retry es razonable."""
 
 
-class RetryableIndexError(RetryableError):
-    """Servicio de índices (BCRA/INDEC) temporal: 429, 5xx, timeouts."""
-
-
 class RetryableNotificationError(RetryableError):
-    """Resend transient."""
+    """Resend transient: 429, 5xx, timeouts."""
 
 
 # Excepciones que NO deben reintentarse (matar el job inmediatamente)
@@ -287,8 +277,8 @@ class NonRetryableError(Exception):
     """Base para errores estructurales: input inválido, credencial mala, regla de negocio."""
 
 
-class NonRetryableIndexError(NonRetryableError):
-    """Valor de índice inexistente para el período, o contrato en estado inválido."""
+class NonRetryableNotificationError(NonRetryableError):
+    """Email inválido (400) o destinatario eliminado (404) en Resend."""
 
 
 def is_retryable(exc: Exception) -> bool:
@@ -298,25 +288,25 @@ def is_retryable(exc: Exception) -> bool:
 Mapping de errores HTTP de proveedores a categorías:
 
 ```python
-def classify_index_service_error(exc: Exception) -> Type[Exception]:
+def classify_provider_error(exc: Exception) -> Type[Exception]:
     from httpx import HTTPStatusError, TimeoutException
 
     if isinstance(exc, TimeoutException):
-        return RetryableIndexError
+        return RetryableError
     if isinstance(exc, HTTPStatusError):
         status = exc.response.status_code
         if status in {429, 500, 502, 503, 504}:
-            return RetryableIndexError
+            return RetryableError
         if status in {400, 404}:
-            return NonRetryableIndexError
-    return RetryableIndexError   # default conservador
+            return NonRetryableError
+    return RetryableError   # default conservador
 ```
 
 ### Tracking del estado de un job
 
 Para tareas que el cliente polea vía `GET /<resource>/:id`, el estado vive en la propia tabla del recurso (no en el result backend de Celery):
 
-- `contracts.adjustment_status` ∈ `pending|processing|completed|failed`.
+- `settlements.status` ∈ `pending|processing|completed|failed|draft|issued`.
 - `settlement_batches.status` ∈ `pending|processing|completed|with_errors|failed`.
 - `work_orders.status` ∈ `open|in_progress|closed|cancelled`.
 - `generated_documents.status` ∈ `generating|ready|sent|failed`.
@@ -413,7 +403,7 @@ async def _<task_name>_async(
 - [ ] La tarea está en `src/adminprop/workers/<worker>.py` y se importa en `celery_app.include`.
 - [ ] La tarea declara `name="adminprop.workers.<worker>.<task_name>"` explícito (no auto-generado).
 - [ ] Antes de cualquier query a una tabla tenant-scoped, llama a `set_tenant_context(session, organization_id)`.
-- [ ] El estado del recurso (`contracts.adjustment_status`, `settlement_batches.status`, etc.) se actualiza en cada transición.
+- [ ] El estado del recurso (`settlements.status`, `settlement_batches.status`, etc.) se actualiza en cada transición.
 - [ ] Diferencia `RetryableError` de `NonRetryableError`.
 - [ ] La clase base `<Module>Task` declara `autoretry_for`, `retry_backoff`, `retry_jitter`, `max_retries`.
 - [ ] El número máximo de reintentos respeta lo que el SDD especifica (típicamente 3).
@@ -428,55 +418,55 @@ async def _<task_name>_async(
 
 ```python
 # ❌ Pasar objetos ORM a la tarea
-celery_aplicar_ajuste.apply_async(args=[contract])   # ¡Falla la serialización JSON!
+celery_generate_settlement_files.apply_async(args=[settlement])   # ¡Falla la serialización JSON!
 
 # ✅ Pasar IDs como string
-celery_aplicar_ajuste.apply_async(args=[str(contract.id), str(org_id), request_id])
+celery_generate_settlement_files.apply_async(args=[str(settlement.id), str(org_id), request_id])
 ```
 
 ```python
 # ❌ Worker sin setear tenant context
-async def _aplicar_ajuste_contrato_async(contract_id, org_id):
+async def _generate_settlement_files_async(settlement_id, org_id):
     async with async_session_factory() as session:
         # ¡No se setea app.current_tenant_id!
-        repo = ContractRepository(session)
-        contract = await repo.get_by_id(contract_id)
-        # RLS bloquea la query → 0 filas → "contrato no encontrado" silencioso.
+        repo = SettlementRepository(session)
+        settlement = await repo.get_by_id(settlement_id)
+        # RLS bloquea la query → 0 filas → "liquidación no encontrada" silencioso.
 
 # ✅ Setear contexto al inicio
-async def _aplicar_ajuste_contrato_async(contract_id, org_id, request_id):
+async def _generate_settlement_files_async(settlement_id, org_id, request_id):
     async with async_session_factory() as session:
         await set_tenant_context(session, org_id)
-        repo = ContractRepository(session)
-        contract = await repo.get_by_id(contract_id, org_id)
+        repo = SettlementRepository(session)
+        settlement = await repo.get_by_id(settlement_id, org_id)
 ```
 
 ```python
 # ❌ Tratar todo error como reintentable
 @celery_app.task(autoretry_for=(Exception,), max_retries=10)
-def aplicar_ajuste_contrato(contract_id):
+def generate_settlement_files(settlement_id):
     ...
-# Si el índice no existe para el período (404 estructural), retry no va a cambiar el resultado.
-# Consume cuota, eleva costos, mantiene el contrato en estado ambiguo por horas.
+# Si los datos del período no existen (404 estructural), retry no va a cambiar el resultado.
+# Consume cuota, eleva costos, mantiene la liquidación en estado ambiguo por horas.
 
 # ✅ Diferenciar reintentables
-@celery_app.task(base=IndicesTask, autoretry_for=(RetryableIndexError,), max_retries=3)
-def aplicar_ajuste_contrato(contract_id):
+@celery_app.task(base=DocumentsTask, autoretry_for=(RetryableError,), max_retries=3)
+def generate_settlement_files(settlement_id):
     try:
-        result = get_icl_index(...)
+        result = build_settlement_excel(...)
         return result
-    except RetryableIndexError:
+    except RetryableError:
         raise   # Celery reintenta
-    except NonRetryableIndexError as exc:
-        # marcar contract.adjustment_status = 'failed' + notificar admin
+    except NonRetryableError as exc:
+        # marcar settlement.status = 'failed' + notificar admin
         ...
 ```
 
 ```python
 # ❌ No actualizar el estado del recurso al terminar
-async def _aplicar_ajuste_contrato_async(contract_id, org_id, ...):
-    contract = await repo.get(...)
-    contract.adjustment_status = "processing"
+async def _generate_settlement_files_async(settlement_id, org_id, ...):
+    settlement = await repo.get(...)
+    settlement.status = "processing"
     await session.flush()
     # ... procesar ...
     # ¡Falta marcar completed! El cliente lo verá en "processing" para siempre.
@@ -484,15 +474,15 @@ async def _aplicar_ajuste_contrato_async(contract_id, org_id, ...):
 # ✅ Actualizar el estado al final (en try/except)
 try:
     # ... procesar ...
-    contract.adjustment_status = "completed"
+    settlement.status = "completed"
     await session.commit()
 except RetryableError:
-    contract.adjustment_status = "pending"   # vuelve a estado inicial para próximo intento
+    settlement.status = "pending"   # vuelve a estado inicial para próximo intento
     await session.commit()
     raise
 except NonRetryableError as exc:
-    contract.adjustment_status = "failed"
-    contract.metadata = {**(contract.metadata or {}), "last_error": str(exc)}
+    settlement.status = "failed"
+    settlement.metadata = {**(settlement.metadata or {}), "last_error": str(exc)}
     await session.commit()
     raise
 ```
@@ -500,29 +490,29 @@ except NonRetryableError as exc:
 ```python
 # ❌ Bloquear el thread principal con I/O sincrónico
 @celery_app.task
-def aplicar_ajuste_contrato(contract_id):
-    contract = sync_db.query(Contract).filter_by(id=contract_id).first()
-    response = requests.get("https://api.bcra.gob.ar/estadisticas/v3.0/monetarias/40", ...)  # blocking
-    contract.monthly_amount = response.json()["valor"]
+def generate_settlement_files(settlement_id):
+    settlement = sync_db.query(Settlement).filter_by(id=settlement_id).first()
+    excel_bytes = build_excel_sync(settlement)  # blocking, I/O pesado
+    settlement.excel_path = save_to_disk(excel_bytes)
     sync_db.commit()
-# Si el servicio del índice tarda 5s, el worker está ocioso 5s. Throughput cae.
+# Si la generación del documento tarda varios segundos, el worker está ocioso. Throughput cae.
 
 # ✅ Async dentro de una tarea Celery: usar asyncio.run
 @celery_app.task(bind=True)
-def aplicar_ajuste_contrato(self, contract_id, org_id, request_id):
-    asyncio.run(_aplicar_ajuste_contrato_async(UUID(contract_id), UUID(org_id), request_id))
+def generate_settlement_files(self, settlement_id, org_id, request_id):
+    asyncio.run(_generate_settlement_files_async(UUID(settlement_id), UUID(org_id), request_id))
 ```
 
 ```python
 # ❌ Ignorar el request_id
 @celery_app.task
-def aplicar_ajuste_contrato(contract_id):
+def generate_settlement_files(settlement_id):
     logger.info("processing")   # sin request_id → debug imposible
 
 # ✅ Propagar request_id desde el endpoint hasta el log del worker
 @celery_app.task(bind=True)
-def aplicar_ajuste_contrato(self, contract_id, org_id, request_id):
-    logger.info("processing", extra={"request_id": request_id, "contract_id": contract_id})
+def generate_settlement_files(self, settlement_id, org_id, request_id):
+    logger.info("processing", extra={"request_id": request_id, "settlement_id": settlement_id})
 ```
 
 ```python
@@ -554,8 +544,8 @@ def send_contract_notice_email(contract_id):
 - Backend `CLAUDE.md` §3 "Cola y caché" — workers separados por dominio.
 - Backend `CLAUDE.md` §4 "Flujos asíncronos identificados" — lista exhaustiva de endpoints async.
 - Backend `CLAUDE.md` §8 — "encolar tareas largas en Celery, retornar 202 Accepted" + "request_id propagado".
-- `core/sdd_04_nonfunctional.md` §1.3 — SLAs P90/P99 + política de reintentos por tipo de tarea.
+- `core/sdd_04_nonfunctional.md` §1.3 — lista canónica de workers, tareas Beat y política de reintentos por tipo de tarea.
 - `core/sdd_04_nonfunctional.md` §3.3 — escalado de workers por profundidad de cola.
-- `features/spec_module_03_contratos.md` §"Ajustes por índice" — pipeline de ajuste programado por índice.
+- `core/sdd_03_api_contracts.md` §11 "Liquidaciones" — generación 202 + polling, regeneración auditada.
 - `infrastructure/spec_notificaciones.md` §"Apéndice" — política de reintento por canal (email/in-app).
 - `_index.md` §4 #8 — Celery + Redis con workers separados.

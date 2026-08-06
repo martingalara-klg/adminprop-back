@@ -19,7 +19,7 @@ Define la nomenclatura, cobertura mínima y la pirámide de testing que aplica a
 | E2E tests | (delegado al frontend) | **Playwright** |
 | Component docs | — | Storybook (desde MVP) |
 | Cobertura mínima | **95% global** (excl. DTOs, modelos declarativos sin método custom y boilerplate trivial) | No definida por SDD; default sugerido: 80% en lógica de hooks y utils, sin métrica obligatoria sobre componentes presentacionales |
-| Mocks de servicios externos (backend) | Fixtures JSON del índice ICL (BCRA) y del webhook de Resend en `tests/fixtures/external/` | N/A |
+| Mocks de servicios externos (backend) | Fixtures JSON de Resend (envío + webhook) en `tests/fixtures/external/` | N/A |
 
 Fuente: backend `CLAUDE.md` §3 "Tests" y §10; frontend `CLAUDE.md` §3 "Stack de frontend".
 
@@ -27,7 +27,7 @@ Fuente: backend `CLAUDE.md` §3 "Tests" y §10; frontend `CLAUDE.md` §3 "Stack 
 
 - `core/sdd_01_prd.md` §3 — define los UC-01..UC-N que dan nombre a los tests E2E principales.
 - `core/sdd_02_domain_model.md` §3 — define las invariantes RN-C (contratos), RN-P (pagos), RN-L (liquidaciones), RN-A (accesos), RN-D que cada test debe cubrir.
-- `core/sdd_03_api_contracts.md` — define los códigos de error custom (`VALIDATION_ERROR`, `PERIOD_LOCKED`, etc.) que los tests deben verificar literalmente.
+- `core/sdd_03_api_contracts.md` — define los códigos de error custom (`VALIDATION_ERROR`, `CONTRACT_OVERLAP`, etc.) que los tests deben verificar literalmente.
 - `core/sdd_04_nonfunctional.md` §2.5 — define los rate limits que los tests de rate-limit deben enforzar.
 - Cada `spec_module_XX_*.md` — su sección "Criterios de Aceptación" lista los CA-XX a cubrir.
 
@@ -222,14 +222,12 @@ class TestInvitationExpired:
 
 ### Mocks de servicios externos (backend)
 
-Las integraciones externas (índice ICL del BCRA, IPC de datos.gob.ar/INDEC, email vía Resend) **no se testean contra el servicio real en CI**. Usar fixtures JSON deterministas:
+El único servicio externo del MVP (email vía Resend) **no se testea contra el servicio real en CI**. Usar fixtures JSON deterministas:
 
 ```
 tests/fixtures/external/
-├── bcra_icl_index_ok.json
-├── bcra_icl_index_not_found.json
-├── indec_ipc_index_ok.json
 ├── resend_send_ok.json
+├── resend_send_error.json
 ├── resend_webhook_delivered.json
 └── ...
 ```
@@ -240,17 +238,15 @@ El cliente HTTP se reemplaza por un mock determinista que retorna fixtures segú
 # tests/conftest.py (fragmento)
 
 @pytest.fixture
-def mock_icl_client(monkeypatch):
-    """Sustituye el cliente HTTP del índice ICL por uno que retorna fixtures."""
-    from adminprop.shared.indices import bcra
+def mock_resend_client(monkeypatch):
+    """Sustituye el cliente HTTP de Resend por uno que retorna fixtures."""
+    from adminprop.shared.email import sender
 
-    class FakeBcraClient:
-        async def get_icl_index(self, reference_date):
-            if reference_date.year < 2020:
-                return load_fixture("bcra_icl_index_not_found.json")
-            return load_fixture("bcra_icl_index_ok.json")
+    class FakeResendClient:
+        async def send_email(self, **kwargs):
+            return load_fixture("resend_send_ok.json")
 
-    monkeypatch.setattr(bcra, "get_client", lambda *_args, **_kwargs: FakeBcraClient())
+    monkeypatch.setattr(sender, "send_email", FakeResendClient().send_email)
 ```
 
 ### Tests de rate-limit
@@ -296,8 +292,8 @@ Cada flujo del frontend tiene los siguientes estados que deben cubrirse (ver `fl
 describe('Login flow', () => {
   it('UC-LOGIN-01: success → guarda sesión y redirige a /', async () => { ... })
   it('UC-LOGIN-02: 401 UNAUTHORIZED → muestra "Credenciales incorrectas." (anti-enumeration)', async () => { ... })
-  it('UC-LOGIN-03: 403 ACCOUNT_LOCKED → muestra countdown de 30 min', async () => { ... })
-  it('UC-LOGIN-04: 200 mfa_challenge_required → redirige a /login/mfa-challenge', async () => { ... })
+  it('UC-LOGIN-03: 401 ACCOUNT_LOCKED tras 5 intentos → muestra countdown de 30 min', async () => { ... })
+  it('UC-LOGIN-04: 200 authenticated → redirige a /', async () => { ... })
   it('UC-LOGIN-05: 429 RATE_LIMIT_EXCEEDED → muestra Retry-After', async () => { ... })
 })
 ```
@@ -407,7 +403,7 @@ test.describe('<UC-XX> — <título del flujo>', () => {
 - [ ] Para backend: los tests verifican el `error.code` exacto del SDD (no sólo el status code).
 - [ ] Para frontend: cada estado del flujo (idle, loading, success, error, expired, empty) está cubierto.
 - [ ] Los mensajes de error de seguridad (anti-enumeration, MFA, etc.) se verifican textualmente.
-- [ ] Si hay integraciones externas (ICL, IPC, Resend): usa fixtures JSON, no llama al servicio real.
+- [ ] Si hay integración con Resend: usa fixtures JSON, no llama al servicio real.
 - [ ] Si hay rate-limit: existe un test que llega al límite y verifica 429.
 - [ ] Backend: cobertura del módulo cubierto en el PR ≥ 95% (excluyendo DTOs y modelos sin lógica).
 
@@ -440,17 +436,17 @@ class TestRF03GenerateSettlementPerProperty:
 
 ```python
 # ❌ Test que sólo verifica el status code, no el error.code
-async def test_create_settlement_without_fiscal_module():
-    response = await client.post("/v1/settlements/calculate", ...)
-    assert response.status_code == 403   # ¿FORBIDDEN, FEATURE_NOT_ACTIVATED, ROLE_REQUIRED?
+async def test_create_settlement_with_overlapping_contract():
+    response = await client.post("/v1/contracts", ...)
+    assert response.status_code == 409   # ¿CONFLICT, CONTRACT_OVERLAP?
 
 # ✅ Verificar el error.code exacto del SDD (sdd_03 §"Códigos de Error Globales")
-async def test_create_settlement_without_module_active_returns_feature_not_activated():
-    response = await client.post("/v1/settlements/calculate", ...)
-    assert response.status_code == 403
+async def test_create_contract_overlapping_existing_returns_contract_overlap():
+    response = await client.post("/v1/contracts", ...)
+    assert response.status_code == 409
     body = response.json()
-    assert body["error"]["code"] == "FEATURE_NOT_ACTIVATED"
-    assert body["error"]["message"]   # mensaje legible
+    assert body["error"]["code"] == "CONTRACT_OVERLAP"
+    assert body["error"]["details"]["conflicting_contract_id"]
 ```
 
 ```python
@@ -478,17 +474,17 @@ expect(screen.getByText('Credenciales incorrectas.')).toBeVisible()
 ```
 
 ```python
-# ❌ Llamar al servicio del índice ICL real en CI
-def test_calculate_settlement_with_index():
-    response = client.post(f"/v1/settlements/{settlement_id}/apply-index", ...)
-    # ❌ Esto golpea la API pública del BCRA y rompe CI si el servicio está caído.
+# ❌ Llamar al servicio real de Resend en CI
+def test_accept_invitation_sends_welcome_email():
+    response = client.post("/v1/auth/accept-invitation", json={...})
+    # ❌ Esto golpea la API real de Resend y rompe CI si el servicio está caído
+    # (o consume cuota de la cuenta real).
 
 # ✅ Mockear con fixtures JSON
-def test_calculate_settlement_with_index(mock_icl_client):
-    # mock_icl_client retorna bcra_icl_index_ok.json
-    response = client.post(f"/v1/settlements/{settlement_id}/apply-index", ...)
-    assert response.status_code == 200
-    assert response.json()["data"]["index_value"] == 123.45   # del fixture
+def test_accept_invitation_sends_welcome_email(mock_resend_client):
+    # mock_resend_client retorna resend_send_ok.json
+    response = client.post("/v1/auth/accept-invitation", json={...})
+    assert response.status_code == 201
 ```
 
 ## Referencias

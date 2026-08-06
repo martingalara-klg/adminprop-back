@@ -50,7 +50,6 @@ Editar `.env` con valores para desarrollo local. **Todos los campos con `change-
 | Variable | Cómo obtener |
 |---|---|
 | `SECRET_KEY` | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
-| `ANTHROPIC_API_KEY` | https://console.anthropic.com/settings/keys (si la sesión usa asistencia IA en algún flujo) |
 | `RESEND_API_KEY` | https://resend.com/api-keys (gratis hasta 100 emails/día) |
 | `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` | Generar con paso 2.3 |
 | `SENTRY_DSN` | Dejar vacío en local — el SDK detecta y desactiva |
@@ -176,7 +175,7 @@ make migrate
 
 | Comando | Hace |
 |---|---|
-| `make up` | Levanta toda la infra local (api + workers ilustrativos + postgres + redis) |
+| `make up` | Levanta toda la infra local (api + workers + postgres + redis) |
 | `make down` | Apaga todos los containers |
 | `make logs` | Logs en vivo de todos los servicios |
 | `make logs service=api` | Logs solo de la API |
@@ -187,7 +186,7 @@ make migrate
 | `docker compose -f docker/docker-compose.yml exec api alembic downgrade -1` | Rollback una migración |
 | `docker compose -f docker/docker-compose.yml exec postgres psql -U adminprop -d adminprop` | Shell SQL |
 
-**Workers ilustrativos** (Celery): `indices_worker` (obtiene índices ICL/IPC y aplica ajustes programados), `notification_worker` (email + in-app), `documents_worker` (PDFs de recibos y liquidaciones). Lista canónica de workers: se define en `sdd_04_nonfunctional.md` (paso 4 del diseño); estos son ilustrativos.
+**Workers** (Celery): `notification_worker` (email vía Resend + in-app), `documents_worker` (Excel/PDF de liquidaciones) + Celery Beat (`generate_rent_periods`, `detect_due_adjustments`, `detect_expiring_contracts`). Lista canónica: `sdd_04_nonfunctional.md` §1.3.
 
 ---
 

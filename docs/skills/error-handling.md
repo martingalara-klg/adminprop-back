@@ -6,7 +6,7 @@ Leer **antes de**:
 
 - Crear o usar una excepción de dominio.
 - Definir un `error.code` nuevo.
-- Mapear un error de proveedor externo (índice ICL/BCRA, IPC/INDEC, Resend) a una respuesta HTTP.
+- Mapear un error de proveedor externo (Resend) a una respuesta HTTP.
 - Configurar el exception handler global.
 
 ## Stack relevante
@@ -16,7 +16,7 @@ Leer **antes de**:
 | Formato de error | **CUSTOM** `{ "error": { "code", "message", "field", "details" } }` — NO RFC 7807 | `sdd_03` §"Formato de respuesta" |
 | Logger | `python-json-logger` (JSON estructurado, `request_id` propagado) | backend `CLAUDE.md` §3 |
 | Tracker de errores | Sentry | backend `CLAUDE.md` §3 |
-| Política de scrubbing | Nunca aparecen `password`, `password_hash`, `mfa_secret`, `access_token`, `refresh_token`, `billing_info` | backend `CLAUDE.md` §7 |
+| Política de scrubbing | Nunca aparecen `password`, `password_hash`, `access_token`, `refresh_token`, `bank_info`, `billing_info` | backend `CLAUDE.md` §7 |
 
 ## SDDs de referencia
 
@@ -112,13 +112,10 @@ class RoleRequiredException(AdminPropException):
     error_code = "ROLE_REQUIRED"
 
 
-class FeatureNotActivatedException(AdminPropException):
-    status_code = 403
-    error_code = "FEATURE_NOT_ACTIVATED"
-    message = (
-        "El módulo solicitado no está activado en esta organización. "
-        "El owner debe completar el wizard de activación."
-    )
+class ContractOverlapException(AdminPropException):
+    status_code = 409
+    error_code = "CONTRACT_OVERLAP"
+    message = "La propiedad ya tiene un contrato vigente en ese rango de fechas."
 
 
 class SuperAdminRequiredException(AdminPropException):
@@ -131,10 +128,10 @@ class AccountLockedException(AdminPropException):
     error_code = "ACCOUNT_LOCKED"
 
 
-class MaintenanceWorkOrderNotAssignedException(AdminPropException):
-    status_code = 403
-    error_code = "MAINTENANCE_WORK_ORDER_NOT_ASSIGNED"
-    message = "No tenés acceso a esa orden de trabajo."
+class AdjustmentPendingExistsException(AdminPropException):
+    status_code = 409
+    error_code = "ADJUSTMENT_PENDING_EXISTS"
+    message = "Ya existe un ajuste pendiente para este contrato."
 
 
 class NotFoundException(AdminPropException):
@@ -148,14 +145,16 @@ class ConflictException(AdminPropException):
     error_code = "CONFLICT"
 
 
-class PeriodLockedException(AdminPropException):
+class SettlementAlreadyExistsException(AdminPropException):
     status_code = 409
-    error_code = "PERIOD_LOCKED"
+    error_code = "SETTLEMENT_ALREADY_EXISTS"
+    message = "Ya existe una liquidación para este propietario y período."
 
 
-class PeriodOverlapException(AdminPropException):
+class AdjustmentAlreadyAppliedException(AdminPropException):
     status_code = 409
-    error_code = "PERIOD_OVERLAP"
+    error_code = "ADJUSTMENT_ALREADY_APPLIED"
+    message = "El ajuste ya fue aplicado y no puede volver a aplicarse."
 
 
 class EntityHasDependenciesException(AdminPropException):
@@ -215,42 +214,28 @@ class InvalidStatusTransitionException(AdminPropException):
     error_code = "INVALID_STATUS_TRANSITION"
 
 
-class IndexValueNotFoundException(AdminPropException):
+class ExchangeRateRequiredException(AdminPropException):
+    status_code = 400
+    error_code = "EXCHANGE_RATE_REQUIRED"
+    message = "Se requiere el tipo de cambio porque la moneda del pago difiere de la del contrato."
+
+
+class SettlementExchangeRateRequiredException(AdminPropException):
+    status_code = 400
+    error_code = "SETTLEMENT_EXCHANGE_RATE_REQUIRED"
+    message = "Se requiere el tipo de cambio para generar la liquidación en USD."
+
+
+class RentPeriodAlreadyPaidException(AdminPropException):
     status_code = 422
-    error_code = "INDEX_VALUE_NOT_FOUND"
-    message = "No se encontró el valor del índice para el período solicitado."
-
-
-class MfaInvalidCodeException(AdminPropException):
-    status_code = 422
-    error_code = "MFA_INVALID_CODE"
-
-
-class MfaTokenInvalidException(AdminPropException):
-    status_code = 401
-    error_code = "MFA_TOKEN_INVALID"
-
-
-class MfaConfirmationInvalidException(AdminPropException):
-    status_code = 422
-    error_code = "MFA_CONFIRMATION_INVALID"
-
-
-class WizardIncompleteException(AdminPropException):
-    status_code = 422
-    error_code = "WIZARD_INCOMPLETE"
+    error_code = "RENT_PERIOD_ALREADY_PAID"
+    message = "El período ya fue pagado en su totalidad."
 
 
 class RateLimitExceededException(AdminPropException):
     status_code = 429
     error_code = "RATE_LIMIT_EXCEEDED"
     message = "Demasiadas solicitudes. Esperá unos segundos e intentá nuevamente."
-
-
-class IndexServiceUnavailableException(AdminPropException):
-    status_code = 502
-    error_code = "INDEX_SERVICE_UNAVAILABLE"
-    message = "Servicio de índices no disponible (BCRA/INDEC). Reintentá en unos minutos."
 
 
 class InternalError(AdminPropException):
@@ -351,7 +336,7 @@ def register_exception_handlers(app: FastAPI) -> None:
 # src/adminprop/modules/contracts/service.py
 from adminprop.shared.errors.codes import (
     PaymentExceedsContractBalanceException,
-    PeriodLockedException,
+    ExchangeRateRequiredException,
     InvalidStatusTransitionException,
 )
 
@@ -372,15 +357,13 @@ class PaymentService:
                 },
             )
 
-        # RN-P04
-        period = await self._repo.get_period_for_date(organization_id, dto.payment_date)
-        if period and period.status == "locked":
-            raise PeriodLockedException(
-                field="payment_date",
+        # sdd_03 §9: exchange_rate obligatorio si la moneda del pago difiere de la del contrato
+        if dto.currency != contract.currency and dto.exchange_rate is None:
+            raise ExchangeRateRequiredException(
+                field="exchange_rate",
                 details={
-                    "period_id": str(period.id),
-                    "period_start": period.period_start.isoformat(),
-                    "period_end": period.period_end.isoformat(),
+                    "contract_currency": contract.currency,
+                    "payment_currency": dto.currency,
                 },
             )
 
@@ -400,15 +383,10 @@ from pythonjsonlogger import jsonlogger
 SENSITIVE_KEYS = {
     "password",
     "password_hash",
-    "mfa_secret",
-    "mfa_recovery_code",
-    "totp_code",
-    "recovery_code",
-    "confirmation_totp_code",
-    "confirmation_recovery_code",
     "access_token",
     "refresh_token",
     "authorization",
+    "bank_info",
     "billing_info",
     "card_number",
 }
@@ -524,11 +502,11 @@ assert body["error"]["details"]["<clave>"] == <valor_esperado>
 
 ```python
 # ❌ Usar HTTPException con detail=string
-raise HTTPException(status_code=409, detail="Period locked")
-# El frontend recibe { "detail": "Period locked" } — sin error.code, sin field.
+raise HTTPException(status_code=409, detail="Contract overlap")
+# El frontend recibe { "detail": "Contract overlap" } — sin error.code, sin field.
 
 # ✅ Excepción de dominio que el handler global traduce al shape custom
-raise PeriodLockedException(field="payment_date", details={"period_id": str(period.id)})
+raise ContractOverlapException(field="start_date", details={"conflicting_contract_id": str(other.id)})
 ```
 
 ```python
@@ -588,7 +566,7 @@ logger.warning("refresh failed", extra={"jti": jwt_jti, "user_id": user_id})
 ## Referencias
 
 - `core/sdd_03_api_contracts.md` §"Formato de respuesta" — formato custom canónico.
-- `core/sdd_03_api_contracts.md` §"Códigos de Error Globales" — catálogo completo (incluye códigos por dominio: contratos, cobros, liquidaciones, MFA, invitaciones, etc.).
+- `core/sdd_03_api_contracts.md` §"Códigos de Error Globales" — catálogo completo (incluye códigos por dominio: contratos, cobros, liquidaciones, mantenimiento, invitaciones, etc.).
 - `core/sdd_04_nonfunctional.md` §4.1 — formato de log JSON + campos obligatorios + regla de scrubbing.
 - `core/sdd_04_nonfunctional.md` §2.1 — exposición de secretos en logs como vector de amenaza.
 - Backend `CLAUDE.md` §6 "Códigos de error transversales" — listado por dominio.

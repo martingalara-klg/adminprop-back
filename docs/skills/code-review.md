@@ -74,7 +74,7 @@ Para hacer el comentario procesable:
 - [ ] El **request body** acepta exactamente los campos del SDD, ni más ni menos.
 - [ ] Las validaciones (Pydantic) cubren las reglas del SDD: longitudes mínimas/máximas, regex, tipos, valores enum.
 - [ ] **Formato de error CUSTOM** (no RFC 7807): `{ "error": { "code", "message", "field", "details" } }`.
-- [ ] Cada FA del SDD tiene un `error.code` específico (`PERIOD_LOCKED`, `LAST_OWNER_REQUIRED`, `INVITATION_EXPIRED`, etc.), no un `INTERNAL_ERROR` genérico.
+- [ ] Cada FA del SDD tiene un `error.code` específico (`CONTRACT_OVERLAP`, `LAST_OWNER_REQUIRED`, `INVITATION_EXPIRED`, etc.), no un `INTERNAL_ERROR` genérico.
 - [ ] El rate-limit declarado en `sdd_04 §2.5` está aplicado al endpoint.
 - [ ] `organization_id` se extrae del JWT, **nunca** del body/path/query (salvo en `/superadmin/*` donde es opcional).
 - [ ] El endpoint declara el permiso requerido (decorator `@requires_permission("contract:read")` o equivalente).
@@ -256,12 +256,12 @@ Para el autor del PR:
 ```python
 # ❌ Review: aprobar sin verificar formato de error
 "LGTM, status code 409 está correcto."
-# Pero el body retorna { "detail": "Period locked" } sin error.code.
+# Pero el body retorna { "detail": "Contract overlap" } sin error.code.
 
 # ✅ Verificar que el shape exacto del error coincide con el SDD
 [BLOCKING] El body del 409 no sigue el formato del SDD §"Convenciones
 Generales". Debe ser:
-{ "error": { "code": "PERIOD_LOCKED", "message": "...", "field": "date", "details": {} } }
+{ "error": { "code": "CONTRACT_OVERLAP", "message": "...", "field": "start_date", "details": { "conflicting_contract_id": "..." } } }
 ```
 
 ```python
