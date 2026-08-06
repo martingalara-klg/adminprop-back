@@ -369,7 +369,8 @@ La rendición mensual a un propietario: consolida todas sus propiedades en un pe
 **Fórmula (todo en ARS; los montos USD se convierten con el TC de la liquidación):**
 ```
 neto a rendir (ARS) = Σ cobros del período (destino administración)
-                    − comisión (% del propietario × alquileres del período, incluidos los directos)
+                    − comisión (% del propietario × [alquileres + intereses cobrados] del período,
+                                incluidos los directos)
                     − Σ cargos del mes (rentas, muni)
                     − Σ reparaciones cerradas con payer = agency  [pendientes de liquidar]
                     (los cobros con destino cuenta-propietario se listan como "ya rendido",
@@ -444,7 +445,7 @@ Registro append-only de las operaciones sensibles.
 ### RN-L — Liquidaciones
 
 - **RN-L01:** Neto a rendir (en ARS) = cobros del período con destino administración − comisión − cargos del mes − reparaciones pagadas por la administración; el dinero ya rendido se lista informativamente.
-- **RN-L02:** La comisión = % del propietario × alquileres del período de todas sus propiedades, **incluidos** los cobrados directo en su cuenta.
+- **RN-L02:** La comisión = % del propietario × (alquileres del período + intereses de mora cobrados) de todas sus propiedades, **incluidos** los cobrados directo en su cuenta.
 - **RN-L03:** Una liquidación emitida puede corregirse y regenerarse; cada corrección queda trazada en el log de auditoría (quién, cuándo, qué cambió). Nunca hay borrado físico.
 - **RN-L04:** Una reparación entra a la liquidación solo si `payer = agency` y estado `closed`; se descuenta una única vez y queda registrado en qué liquidación.
 - **RN-L05:** Un cambio en el % de comisión del propietario rige para liquidaciones futuras; nunca recalcula períodos ya liquidados.

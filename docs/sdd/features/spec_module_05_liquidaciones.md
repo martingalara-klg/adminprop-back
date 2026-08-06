@@ -44,14 +44,14 @@ Todo en ARS; los montos USD se convierten con el `exchange_rate` de la liquidaci
 
 ```
 neto a rendir = Σ cobros del período con destino administración (capital + intereses cobrados)
-              − comisión = commission_pct del propietario × alquileres (capital) del período,
+              − comisión = commission_pct del propietario × (alquileres + intereses cobrados) del período,
                            incluidos los cobrados directo por el dueño (RN-L02)
               − Σ cargos del mes (rentas, municipalidad, otros)
               − Σ reparaciones closed con payer = agency aún no liquidadas (RN-L04)
 ```
 
 - Los cobros `landlord_account` se listan como **"ya rendido"**: no suman al neto, sí a la base de comisión (RN-P07).
-- Los **intereses de mora cobrados** integran lo que se rinde al propietario; la comisión se calcula solo sobre los alquileres (capital).
+- Los **intereses de mora cobrados** integran lo que se rinde al propietario, y **pagan comisión igual que el alquiler** (la base de comisión es capital + intereses cobrados).
 - `commission_pct_used` congela el % usado (RN-L05).
 - Line items por tipo: `rent_collected` / `commission` / `tax_charge` / `repair` / `already_settled`, cada uno con referencia a su origen (cobro, cargo, pedido) y propiedad.
 
@@ -85,7 +85,7 @@ Flujo guiado del frontend (`flow-implementation.md`):
 ## Reglas de Negocio (del módulo)
 
 - **RN-01:** Neto y totales siempre en ARS; conversión solo con el TC manual de la liquidación (= RN-L06).
-- **RN-02:** Comisión sobre los alquileres del período de todas las propiedades del dueño, incluidos los directos (= RN-L02); solo sobre capital, no sobre intereses.
+- **RN-02:** Comisión sobre los alquileres del período **más los intereses de mora cobrados**, de todas las propiedades del dueño, incluidos los directos (= RN-L02).
 - **RN-03:** Regeneración libre pero siempre auditada; nunca se borra una liquidación (= RN-L03, RN-D02).
 - **RN-04:** Una reparación se descuenta una sola vez, en una sola liquidación (= RN-L04; `settled_in_settlement_id`).
 - **RN-05:** Una liquidación por propietario y período; correcciones = regeneración, no duplicado.
