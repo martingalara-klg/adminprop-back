@@ -1,0 +1,164 @@
+---
+name: AdminProp — Índice maestro de SDDs
+description: Mapa de los 15 SDDs de AdminProp, dependencias, registro de decisiones arquitectónicas, estructura de repos y convención de versionado
+type: project
+version: 1.0
+fecha: 2026-08-06
+---
+
+# AdminProp — Índice maestro de Specification-Driven Development
+
+Este archivo es el **mapa de navegación** de toda la documentación SDD del proyecto. Antes de implementar cualquier feature, leer el SDD correspondiente. Si el código del repo (backend o frontend) diverge del SDD, **el SDD manda**: señalar la divergencia y esperar instrucción.
+
+---
+
+## 1. Tabla maestra de SDDs
+
+| Código | Nombre | Categoría | Estado | Versión | Backend | Frontend |
+|---|---|---|---|---|---|---|
+| `project_adminprop` | Contexto general del proyecto | (raíz) | Activo | 1.0 | ✅ | ✅ |
+| `sdd_01_prd` | Product Requirements Document (UC-01..UC-20, R-XX, S-XX) | core | Activo | 1.0 | ✅ | ✅ |
+| `sdd_02_domain_model` | Modelo de dominio + invariantes (RN-C/P/L/A/D) | core | Activo | 1.0 | ✅ | ✅ (lectura) |
+| `sdd_03_api_contracts` | Contratos REST de la API | core | Activo | 1.0 | ✅ | ✅ **compartido — vinculante** |
+| `sdd_04_nonfunctional` | Requisitos no funcionales | core | Activo | 1.0 | ✅ | ✅ (parcial: §2) |
+| `spec_module_00_superadmin` | Módulo 0 — Super Admin & onboarding | core | Activo | 1.0 | ✅ | ✅ (rutas /superadmin) |
+| `spec_module_01_propiedades` | Módulo 1 — Propiedades y cuentas de servicio | features | Activo | 1.0 | ✅ | ✅ |
+| `spec_module_02_personas` | Módulo 2 — Propietarios e inquilinos | features | Activo | 1.0 | ✅ | ✅ |
+| `spec_module_03_contratos` | Módulo 3 — Contratos + ajustes por índice | features | Activo | 1.0 | ✅ | ✅ |
+| `spec_module_04_cobranzas` | Módulo 4 — Cobranzas y mora | features | Activo | 1.0 | ✅ | ✅ |
+| `spec_module_05_liquidaciones` | Módulo 5 — Liquidaciones a propietarios | features | Activo | 1.0 | ✅ | ✅ |
+| `spec_module_06_mantenimiento` | Módulo 6 — Mantenimiento y cotizaciones | features | Activo | 1.0 | ✅ | ✅ |
+| `spec_module_07_administracion` | Módulo 7 — Usuarios, roles, configuración, auditoría | features | Activo | 1.0 | ✅ | ✅ |
+| `spec_data_model` | Modelo de datos físico (22 tablas, RLS, migraciones) | infrastructure | Activo | 1.0 | ✅ | ⚪ |
+| `spec_notificaciones` | Notificaciones (transversal: in-app + email) | infrastructure | Activo | 1.0 | ✅ | ✅ (panel in-app) |
+
+**Leyenda:** ✅ referencia primaria (leer antes de implementar) · ⚪ referencia secundaria · ❌ no aplica.
+
+---
+
+## 2. Dependencias entre SDDs
+
+```
+project_adminprop ──► sdd_01_prd
+                          │
+        ┌─────────────────┼──────────────────┐
+        ▼                 ▼                  ▼
+  sdd_02_domain     sdd_03_api         sdd_04_nonfunctional
+  (RN-XX)           (contratos REST)   (seguridad, workers)
+        │                 │                  │
+        └────────┬────────┴─────────┬────────┘
+                 ▼                  ▼
+        spec_data_model     spec_notificaciones
+        (22 tablas, RLS)    (eventos, retry)
+                 │
+                 ▼
+   spec_module_00_superadmin ──► spec_module_07_administracion
+                 │
+     ┌───────────┼───────────┐
+     ▼           ▼           ▼
+  spec_01     spec_02     (personas antes que propiedades:
+  propiedades personas     properties.landlord_id)
+     └─────┬─────┘
+           ▼
+  spec_module_03_contratos (+ ajustes por índice)
+           │
+           ▼
+  spec_module_04_cobranzas
+           │
+     ┌─────┴──────────────┐
+     ▼                    ▼
+  spec_module_05      spec_module_06
+  liquidaciones ◄──── mantenimiento (gastos payer=agency)
+```
+
+### Reglas de lectura
+
+- **Implementar un módulo de `features/`** → leer `sdd_02`, `sdd_03`, el SDD del módulo y `spec_data_model` (sus tablas). Si tiene UI: además `sdd_04` §2.
+- **Implementar cobranzas o liquidaciones** → leer también `spec_module_03_contratos` (el monto vigente y la mora nacen del contrato).
+- **Implementar auth/usuarios** → `sdd_04` §2.2/2.2a, `sdd_03` §1, `spec_module_00` (flujo de activación), `spec_module_07` §RF-01/02.
+- **Cualquier worker o job** → `sdd_04` §1.3 + `spec_notificaciones` §RF-04.
+
+---
+
+## 3. Glosario
+
+El glosario unificado del dominio vive en `sdd_02_domain_model.md` §5. Términos clave para no perderse:
+
+- **Tenant = organización (administradora)** — nunca el inquilino.
+- **Landlord = propietario · Renter = inquilino** (naming para evitar la colisión con "tenant").
+- **Período de alquiler** (rent_period), **día de gracia**, **dinero ya rendido**, **cargo del mes**, **Paga: Dueño/Administración**, **liquidación/rendición** — ver definiciones completas en `sdd_02` §5.
+
+---
+
+## 4. Decisiones arquitectónicas registradas
+
+Numeración heredada del sistema de referencia donde los skills la citan (#2..#66); las decisiones propias de AdminProp continúan desde #101.
+
+| # | Decisión | Origen | Estado |
+|---|---|---|---|
+| 1 | Stack: Python FastAPI + PostgreSQL 16 + Celery/Redis; React 18 + Vite + TS | Diseño §2, `sdd_01` R-07 | ✅ Tomada |
+| 2 | Multi-tenant **shared schema** con `organization_id` y RLS PostgreSQL (+FORCE) | `sdd_04` §2.3, `spec_data_model` | ✅ Tomada |
+| 3 | `organization_id` siempre derivado del JWT — nunca de body/path/query | `sdd_03` §Convenciones | ✅ Tomada |
+| 5 | No auto-registro público — toda alta nace de invitación | `spec_module_00`, `spec_module_07` | ✅ Tomada |
+| 6 | RBAC data-driven con permisos atómicos en JWT (`permissions[]`) | `sdd_03` §Catálogo de Permisos | ✅ Tomada |
+| 7 | Roles de sistema (`owner`/`admin`/`maintenance`) inmutables; custom post-MVP | `spec_module_07` RF-03 | ✅ Tomada |
+| 8 | Procesamiento async vía Celery + Redis; workers separados `notification_worker` + `documents_worker` + Beat | `sdd_04` §1.3 | ✅ Tomada |
+| 9 | Soft delete universal (`deleted_at`); nunca DELETE físico | RN-D02, `spec_data_model` Apéndice B | ✅ Tomada |
+| 20 | **JWT en HttpOnly Secure cookies** (no localStorage); refresh 30d rotativo single-use | `sdd_04` §2.2 | ✅ Tomada |
+| 23 | Naming Alembic: **timestamp ISO** (`YYYYMMDD_HHMMSS_<slug>.py`) | `spec_data_model` Apéndice A | ✅ Tomada |
+| 24 | Logging JSON con **`python-json-logger`** | `sdd_04` §4.1 | ✅ Tomada |
+| 27 | Sin PgBouncer en MVP (escala chica); se incorpora con la infra cloud | `sdd_04` §1.2 | ✅ Tomada |
+| 28 | Rate limiter: **Redis token bucket** | `sdd_04` §2.5 | ✅ Tomada |
+| 42 | **Bypass de RLS para Super Admin:** rol PostgreSQL `adminprop_superadmin` con `BYPASSRLS`; el resto opera con `adminprop_app` | `sdd_04` §2.3 | ✅ Tomada |
+| 43 | **CSRF:** `SameSite=Lax` + `Secure` + HttpOnly; sin header CSRF custom | `sdd_04` §2.4 | ✅ Tomada |
+| 44 | Cobertura mínima de tests backend: **95%** (excluye DTOs, modelos declarativos, boilerplate) | `testing.md` | ✅ Tomada |
+| 49 | **No existe endpoint de switch de organización** — logout + login | `sdd_03` §Convenciones | ✅ Tomada |
+| 50 | SDDs viven en `adminprop-back/docs/sdd/`; sync a `adminprop-front` vía PR automático de CI (solo `docs/sdd/**`) | Diseño §5, `sync-sdd-to-frontend.yml` | ✅ Tomada |
+| 66 | **Seed híbrida:** global en migraciones (ninguno en MVP) + per-tenant en `OrganizationProvisioningService` (roles + settings) | `spec_data_model` §Estrategia de Seed Data | ✅ Tomada |
+| 101 | **Ajustes por índice = ingreso manual del %**; el índice del contrato (ICL/IPC Córdoba/otro) es informativo; sin tablas de índices ni APIs externas | `sdd_01` S-03, `spec_module_03` RF-04 | ✅ Tomada |
+| 102 | **Mora sugerida, imputación libre:** % diario por contrato, día de gracia por org (default 10, día 11 = 1 día); perdón total/parcial siempre registrado | `sdd_01` S-05, RN-P02..P04 | ✅ Tomada |
+| 103 | **Liquidación toda en ARS** con TC manual obligatorio si hay USD; detalle con valor original + convertido | RN-L06, `spec_module_05` | ✅ Tomada |
+| 104 | **Comisión** = % por propietario × (alquileres + intereses cobrados), incluidos los cobros directos ("ya rendido") | RN-L02, decisión 2026-08-06 | ✅ Tomada |
+| 105 | **Liquidaciones editables/regenerables** con rastro completo en auditoría (sin inmutabilidad de documentos); cobros se anulan (void), nunca se editan | `sdd_01` R-04, RN-L03/RN-D04 | ✅ Tomada |
+| 106 | **MFA post-MVP**; login simple con lockout y anti-enumeration | `sdd_04` §2.2b, decisión 2026-08-05 | ✅ Tomada |
+| 107 | **Frontend: una única app Vite** (sin Turborepo); rutas `/superadmin/*` protegidas por `is_super_admin` | Diseño §5 | ✅ Tomada |
+| 108 | **Reparaciones con pagador** (`Paga: Dueño / Administración`): agency → descuenta en liquidación; landlord → solo historial | `spec_module_06`, RN-L04 | ✅ Tomada |
+| 109 | Naming del dominio: `landlord`/`renter` en código; "tenant" reservado para la organización | `sdd_02` §5, `spec_data_model` | ✅ Tomada |
+| 110 | `ACCOUNT_LOCKED` responde **403** (con countdown) | `sdd_03` §Códigos | ✅ Tomada |
+| 111 | **Infra cloud diferida:** MVP corre en Docker Compose local; archivos en filesystem (volumen); sin CD (merge a develop = solo CI) | Diseño §2, `sdd_04` §3.1 | ✅ Tomada |
+| 112 | El % de ajuste puede ser **negativo** (renegociación a la baja) con confirmación explícita en UI | `spec_module_03` §Validaciones, decisión 2026-08-06 | ✅ Tomada |
+
+### Decisiones aún pendientes
+
+*(Ninguna bloqueante para iniciar la implementación. Operativas del bootstrap — `PROJECT_NUMBER`, secret del sync, promoción develop→main — registradas en el handoff del esqueleto.)*
+
+---
+
+## 5. Estructura de repositorios y referencia primaria
+
+Dos repositorios independientes comunicados por la API REST de `sdd_03`:
+
+- **`adminprop-back`** (Python FastAPI): fuente de verdad de los SDDs (`docs/sdd/`). Referencia primaria: todos los SDDs.
+- **`adminprop-front`** (React 18 + Vite + TS): recibe `docs/sdd/` como **copia sincronizada vía CI** (PR automático en cada push a `main` de adminprop-back que toque `docs/sdd/**`). Nunca editar SDDs en el front. Referencia primaria: `sdd_01`, `sdd_03` (vinculante), `sdd_04` §2, todas las specs de módulo (cada flujo UI tiene una) y `spec_notificaciones` (panel in-app).
+
+### SDDs compartidos — sincronización obligatoria
+
+| SDD | Implicancia |
+|---|---|
+| `sdd_03_api_contracts` | **Contrato vinculante.** Todo cambio se escribe acá ANTES de implementarse en cualquier repo. El front nunca compensa divergencias: reporta. |
+| `sdd_02_domain_model` | Las RN-XX son la única fuente de verdad de comportamiento; el front valida con Zod un subconjunto, el back enforza el total. |
+| `sdd_04_nonfunctional` | Reglas de seguridad y comportamiento ante 401/403/429/5xx atraviesan ambos repos. |
+
+---
+
+## 6. Estado de los SDDs
+
+Todos los SDDs están en versión **1.0**, estado **Activo** (aprobados por el usuario durante los pasos 2–5 del diseño, 2026-08-04 → 2026-08-06).
+
+**Convención de versionado:**
+
+- `1.0` = primera versión funcional para iniciar implementación.
+- `1.x` = adiciones backwards-compatible (nuevos endpoints opcionales, nuevos campos opcionales).
+- `2.0` = breaking changes (renombre, eliminación, cambio de contrato).
+
+Los breaking changes a SDDs compartidos (`sdd_03`, `sdd_02`, `sdd_04`) requieren actualizar este índice y coordinar back+front antes del merge.
