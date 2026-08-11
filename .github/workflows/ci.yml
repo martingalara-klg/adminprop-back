@@ -165,12 +165,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Skip si el proyecto aún no está scaffoldeado
+      - name: Skip si aún no hay tests de integración
         id: guard
         run: |
-          if [ ! -f pyproject.toml ]; then
+          if [ ! -f pyproject.toml ] || [ -z "$(find tests/integration -name 'test_*.py' -print -quit 2>/dev/null)" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Proyecto sin scaffolding todavía — CI en no-op"
+            echo "Sin tests de integración todavía — job en no-op (llegan con los módulos de negocio)"
           fi
 
       - name: Set up Python
@@ -363,12 +363,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Skip si el proyecto aún no está scaffoldeado
+      - name: Skip si aún no existen los Dockerfiles
         id: guard
         run: |
-          if [ ! -f pyproject.toml ]; then
+          if [ ! -f docker/Dockerfile.api ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Proyecto sin scaffolding todavía — CI en no-op"
+            echo "Sin Dockerfiles todavía — job en no-op (llegan con el issue #2)"
           fi
 
       - name: Set up Docker Buildx
