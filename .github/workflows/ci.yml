@@ -112,6 +112,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-unit
+          include-hidden-files: true
           path: |
             .coverage.unit
             coverage.xml
@@ -165,12 +166,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Skip si el proyecto aún no está scaffoldeado
+      - name: Skip si aún no hay tests de integración
         id: guard
         run: |
-          if [ ! -f pyproject.toml ]; then
+          if [ ! -f pyproject.toml ] || [ -z "$(find tests/integration -name 'test_*.py' -print -quit 2>/dev/null)" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Proyecto sin scaffolding todavía — CI en no-op"
+            echo "Sin tests de integración todavía — job en no-op (llegan con los módulos de negocio)"
           fi
 
       - name: Set up Python
@@ -245,6 +246,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-integration
+          include-hidden-files: true
           path: |
             .coverage.integration
             coverage.xml
@@ -286,6 +288,9 @@ jobs:
 
       - name: Download integration coverage data
         if: steps.guard.outputs.skip != 'true'
+        # integration-tests puede saltearse mientras no existan tests de
+        # integracion — en ese caso no hay artifact y no es un error.
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: coverage-integration
@@ -293,7 +298,7 @@ jobs:
       - name: Combine and enforce coverage threshold
         if: steps.guard.outputs.skip != 'true'
         run: |
-          coverage combine .coverage.unit .coverage.integration
+          coverage combine $(ls .coverage.unit .coverage.integration 2>/dev/null)
           coverage report -m --fail-under=95
 
   # ── Verificación de cobertura SDD (CA-XX → test) ──────────────────────────────
@@ -363,12 +368,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Skip si el proyecto aún no está scaffoldeado
+      - name: Skip si aún no existen los Dockerfiles
         id: guard
         run: |
-          if [ ! -f pyproject.toml ]; then
+          if [ ! -f docker/Dockerfile.api ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "Proyecto sin scaffolding todavía — CI en no-op"
+            echo "Sin Dockerfiles todavía — job en no-op (llegan con el issue #2)"
           fi
 
       - name: Set up Docker Buildx
