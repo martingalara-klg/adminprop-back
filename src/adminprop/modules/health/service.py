@@ -16,5 +16,5 @@ async def check_tcp(url: str, timeout: float) -> str:
         writer.close()
         await writer.wait_closed()
         return "ok"
-    except (OSError, asyncio.TimeoutError):
+    except (TimeoutError, OSError):
         return "unreachable"
