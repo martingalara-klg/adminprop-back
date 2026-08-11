@@ -2,7 +2,7 @@
 
 Usar al inicio de cada sesión de implementación en `adminprop-back`.
 Claude Code lee este archivo y opera autónomamente hasta tener un PR
-listo en `In Progress` (el Project solo tiene Todo / In progress / Done).
+listo en `In Progress` (el Project solo tiene Todo / In Progress / Done).
 
 ### Reglas de merge del proyecto
 
@@ -18,7 +18,7 @@ listo en `In Progress` (el Project solo tiene Todo / In progress / Done).
 ```bash
 REPO="adminprop-back"
 ORG="martingalara-klg"
-PROJECT_NUMBER=1   # ⚠ confirmar al crear el Project en el bootstrap (paso 7 del diseño)
+PROJECT_NUMBER=1   # AdminProp Backend — confirmado en el bootstrap (2026-08-06)
 
 # Cachear IDs del Project una sola vez por sesión (gh project item-edit
 # los requiere; calcularlos cada vez es ruido):
@@ -29,9 +29,9 @@ status_option() {
   gh project field-list "$PROJECT_NUMBER" --owner "$ORG" --format json \
     | jq -r ".fields[] | select(.name == \"Status\") | .options[] | select(.name == \"$1\") | .id"
 }
-# El Project tiene tres estados: "Todo" / "In progress" / "Done"
+# El Project tiene tres estados: "Todo" / "In Progress" / "Done"
 # (no existe "In Review" ni "Blocked" en el Project de este repo)
-STATUS_IN_PROGRESS_ID=$(status_option "In progress")
+STATUS_IN_PROGRESS_ID=$(status_option "In Progress")
 ```
 
 ---
@@ -418,7 +418,7 @@ asociación bidireccional vive en GitHub así:
 ```bash
 # ─── Paso 1: PR al Project (idempotente; a veces GitHub lo agrega solo)
 gh project item-add "$PROJECT_NUMBER" --owner "$ORG" --url "$PR_URL"
-# El Project se mantiene en "In progress" — el usuario lo mueve a "Done"
+# El Project se mantiene en "In Progress" — el usuario lo mueve a "Done"
 # al mergear. No intentar usar STATUS_IN_REVIEW_ID (no existe en este repo).
 
 # ─── Paso 2: actualizar el body del issue

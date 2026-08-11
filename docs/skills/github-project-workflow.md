@@ -21,7 +21,7 @@ Este skill define el contrato exacto entre Claude Code y los dos GitHub Projects
 | Project backend | Project del repo (owner `martingalara-klg`; el número se confirma en el bootstrap — paso 7 del diseño) |
 | Project frontend | Project del repo (owner `martingalara-klg`; el número se confirma en el bootstrap — paso 7 del diseño) |
 | CLI | `gh` v2.x (autenticado como `martingalara-klg`, scopes `repo, project, read:org`) |
-| Convención de status del Project | Campo `Status` con valores `Todo`, `In progress`, `Done` |
+| Convención de status del Project | Campo `Status` con valores `Todo`, `In Progress`, `Done` |
 | Labels de issue | `status:ready`, `status:blocked`, `sdd:divergence` |
 
 > **Verificar al inicio de la sesión:** `gh auth status` debe reportar el usuario `martingalara-klg` activo. Si la sesión es de Claude Code en un entorno nuevo, ejecutar `gh repo view martingalara-klg/adminprop-back --json name,owner` para confirmar acceso. Si falla → detenerse y reportar.
@@ -37,7 +37,7 @@ Este skill define el contrato exacto entre Claude Code y los dos GitHub Projects
 El ciclo de vida de una tarea cruza 3 estados del Project:
 
 ```
-Todo → In progress → Done
+Todo → In Progress → Done
 ```
 
 El label `status:blocked` puede aplicarse en cualquier momento (no es una
@@ -74,7 +74,7 @@ gh project item-list "$PROJECT_NUMBER" \
 
 El body del issue indica qué SDD implementar y qué CA-XX/RN-XX cubrir. **Si hay ambigüedad entre el issue y el SDD, el SDD manda.** Reportar la discrepancia (ver "Manejo de divergencias" más abajo).
 
-### Paso 1 — Mover el issue a "In progress" y crear el branch
+### Paso 1 — Mover el issue a "In Progress" y crear el branch
 
 ```bash
 # Obtener el ID interno del item dentro del Project (necesario para item-edit)
@@ -84,14 +84,14 @@ ITEM_ID=$(gh project item-list "$PROJECT_NUMBER" \
   | jq -r --argjson n "$ISSUE_NUMBER" \
     '.items[] | select(.content.number == $n) | .id')
 
-# Status → "In progress"
+# Status → "In Progress"
 gh project item-edit \
   --id "$ITEM_ID" \
   --project-id "$(gh project view "$PROJECT_NUMBER" --owner "$ORG" --format json | jq -r .id)" \
   --field-id "$(gh project field-list "$PROJECT_NUMBER" --owner "$ORG" --format json \
     | jq -r '.fields[] | select(.name == "Status") | .id')" \
   --single-select-option-id "$(gh project field-list "$PROJECT_NUMBER" --owner "$ORG" --format json \
-    | jq -r '.fields[] | select(.name == "Status") | .options[] | select(.name == "In progress") | .id')"
+    | jq -r '.fields[] | select(.name == "Status") | .options[] | select(.name == "In Progress") | .id')"
 
 # Actualizar labels del issue (el modelo de 3 estados no tiene label
 # "in-progress"; el estado real vive en el campo Status del Project)
@@ -181,8 +181,8 @@ gh issue comment "$ISSUE_NUMBER" --repo "$ORG/$REPO" \
   --body "PR abierto para revisión: $PR_URL"
 ```
 
-El issue permanece en "In progress" durante la revisión: el modelo de 3
-estados (`Todo` / `In progress` / `Done`) no tiene una columna separada para
+El issue permanece en "In Progress" durante la revisión: el modelo de 3
+estados (`Todo` / `In Progress` / `Done`) no tiene una columna separada para
 "en revisión"; el PR abierto y vinculado al Project es la señal de que la
 tarea está en revisión.
 
@@ -282,7 +282,7 @@ gh repo view "$ORG/$REPO" --json name >/dev/null || { echo "Sin acceso al repo";
 # 3. Leer la tarea
 gh issue view "$ISSUE_NUMBER" --repo "$ORG/$REPO"
 
-# 4. Mover a In progress + crear branch (ver Paso 1 arriba)
+# 4. Mover a In Progress + crear branch (ver Paso 1 arriba)
 
 # 5. Implementar siguiendo el SDD + git-workflow.md
 
@@ -293,7 +293,7 @@ gh issue view "$ISSUE_NUMBER" --repo "$ORG/$REPO"
 
 ## Checklist pre-commit
 
-- [ ] El issue está en "In progress" en el Project antes del primer commit.
+- [ ] El issue está en "In Progress" en el Project antes del primer commit.
 - [ ] El branch sigue la convención `feature/<issue-number>-<slug>` (ver `git-workflow.md`).
 - [ ] El issue está linkeado en el body del PR con `Closes #N`.
 - [ ] El PR cita el SDD por documento + sección.
