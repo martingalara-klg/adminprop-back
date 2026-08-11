@@ -1,0 +1,18 @@
+# docker/Dockerfile.worker — imagen compartida por notification_worker,
+# documents_worker y beat (issue #2; los workers en sí llegan con el
+# issue #4 — CLAUDE.md §3, sdd_04 §1.3). Mismo entorno que la API para no
+# duplicar wheels; el comando de arranque lo define docker-compose.yml
+# por servicio (celery worker -Q ... / celery beat ...), no esta imagen.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY tests ./tests
+
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -e ".[dev]"
+
+# Sin CMD por default: docker-compose.yml fija el comando real (worker de
+# notificaciones, worker de documentos o beat) por servicio.

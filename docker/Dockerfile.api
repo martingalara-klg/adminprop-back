@@ -1,0 +1,25 @@
+# docker/Dockerfile.api — imagen de la API FastAPI (issue #2).
+# Nombre alineado con .github/workflows/ci.yml (job docker-build), que ya
+# esperaba docker/Dockerfile.api / docker/Dockerfile.worker antes de que
+# este issue creara el compose.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Nota: las dependencias de sistema para WeasyPrint (PDF de liquidaciones)
+# no se agregan todavía — openpyxl/WeasyPrint no son dependencias del
+# proyecto en esta fase (pyproject.toml sólo declara fastapi/uvicorn/
+# pydantic-settings/python-json-logger). Se agregarán en el issue que
+# introduzca esa dependencia real, para no acoplar el compose de #2 a
+# paquetes que el código todavía no usa.
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY tests ./tests
+
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -e ".[dev]"
+
+EXPOSE 8000
+
+CMD ["uvicorn", "adminprop.main:app", "--host", "0.0.0.0", "--port", "8000"]
