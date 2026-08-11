@@ -286,6 +286,9 @@ jobs:
 
       - name: Download integration coverage data
         if: steps.guard.outputs.skip != 'true'
+        # integration-tests puede saltearse mientras no existan tests de
+        # integracion — en ese caso no hay artifact y no es un error.
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: coverage-integration
@@ -293,7 +296,7 @@ jobs:
       - name: Combine and enforce coverage threshold
         if: steps.guard.outputs.skip != 'true'
         run: |
-          coverage combine .coverage.unit .coverage.integration
+          coverage combine $(ls .coverage.unit .coverage.integration 2>/dev/null)
           coverage report -m --fail-under=95
 
   # ── Verificación de cobertura SDD (CA-XX → test) ──────────────────────────────
