@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.0
-fecha: 2026-08-05
+version: 1.1
+fecha: 2026-08-11
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.0
+**Versión:** 1.1
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -64,7 +64,7 @@ El frontend discrimina por `error.code`, muestra `error.message`, asocia `error.
 `CONTRACT_OVERLAP` (409, con `details.conflicting_contract_id`) · `CONTRACT_NOT_ACTIVE` (422) · `ADJUSTMENT_PENDING_EXISTS` (409) · `ADJUSTMENT_ALREADY_APPLIED` (409) · `ADJUSTMENT_PCT_REQUIRED` (400)
 
 **Cobranzas:**
-`RENT_PERIOD_ALREADY_PAID` (422) · `PAYMENT_EXCEEDS_CONTRACT_BALANCE` (422) · `EXCHANGE_RATE_REQUIRED` (400) · `PAYMENT_ALREADY_VOIDED` (409)
+`RENT_PERIOD_ALREADY_PAID` (422) · `PAYMENT_EXCEEDS_CONTRACT_BALANCE` (422) · `EXCHANGE_RATE_REQUIRED` (400) · `PAYMENT_ALREADY_VOIDED` (409) · `RENTER_HAS_DEBT` (422, con el detalle de lo adeudado en `details`)
 
 **Liquidaciones:**
 `SETTLEMENT_ALREADY_EXISTS` (409) · `SETTLEMENT_EXCHANGE_RATE_REQUIRED` (400) · `CHARGE_ENTRY_ALREADY_EXISTS` (409)
@@ -200,6 +200,8 @@ GET    /rent-periods/:id
 GET    /rent-periods/:id/interest-preview  (?payment_date= — interés sugerido a esa fecha, RN-P03)
 POST   /rent-periods/:id/payments        (registrar cobro — RN-P04/P05/P06/P07)
 POST   /payments/:id/void                (anulación lógica con motivo; auditada — RN-D04)
+GET    /payments/:id/receipt             (genera bajo demanda y descarga el recibo PDF del cobro — RN-P08; sobre un cobro anulado → 422 BUSINESS_RULE_VIOLATION)
+POST   /renters/:id/debt-certificate     (emite el certificado de libre deuda en PDF — RN-P08; con deuda → 422 RENTER_HAS_DEBT con el detalle en details)
 GET    /debt                             (?landlord_id=&renter_id=&min_days= — estado de deuda global, UC-10)
 ```
 

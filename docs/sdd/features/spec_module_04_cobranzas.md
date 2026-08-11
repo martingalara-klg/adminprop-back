@@ -2,12 +2,12 @@
 name: AdminProp — Módulo 4 — Cobranzas y Mora
 description: Generación mensual de alquileres pendientes, registro de cobros (medio, moneda, TC, destino), mora sugerida con perdón total/parcial, pagos parciales y estado de deuda
 type: project
-version: 1.0
-fecha: 2026-08-06
+version: 1.1
+fecha: 2026-08-11
 ---
 # Módulo 4 — Cobranzas y Mora
 
-**Versión:** 1.0 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-06
+**Versión:** 1.1 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-06
 
 ## Propósito
 
@@ -62,6 +62,19 @@ El flujo de plata que entra: cada mes el sistema genera los alquileres pendiente
 
 - `GET /debt` consolidado: por inquilino y propiedad, períodos adeudados, saldo, días de mora, interés sugerido acumulado. Filtros: propietario, inquilino, `min_days` (antigüedad). Es la vista de gestión de morosos (UC-10).
 
+### RF-07 — Recibo de cobro (opcional)
+
+- `GET /payments/:id/receipt` genera bajo demanda el **recibo en PDF** del cobro (una página, WeasyPrint, generación sincrónica): encabezado de la administradora (Módulo 7 RF-04), inquilino, propiedad, período, capital cobrado, interés cobrado, TC si aplicó, medio de pago y fecha.
+- El PDF generado queda como Adjunto del cobro.
+- Sobre un cobro anulado no se emite recibo (`422 BUSINESS_RULE_VIOLATION`).
+- Es **opcional**: la UI ofrece "Descargar recibo" después de registrar el cobro; no es un paso obligatorio del flujo (RN-P08).
+
+### RF-08 — Certificado de libre deuda
+
+- `POST /renters/:id/debt-certificate` emite el **libre deuda en PDF** (sincrónico): encabezado de la administradora, datos del inquilino, sus contratos/propiedades y fecha de emisión.
+- **Solo se emite si el inquilino no registra períodos impagos ni saldos parciales** en ninguno de sus contratos (RN-P08). Con deuda → `422 RENTER_HAS_DEBT` con el detalle de lo adeudado en `details`.
+- Cada emisión queda como Adjunto del inquilino y registrada en el log de auditoría (`debt_certificate.issued`).
+
 ## Reglas de Negocio (del módulo)
 
 - **RN-01:** Un rent_period por contrato y mes; la generación es idempotente (= RN-P01).
@@ -89,6 +102,9 @@ El flujo de plata que entra: cada mes el sistema genera los alquileres pendiente
 - [ ] **CA-04-07:** Anular un cobro recompone el saldo del período, conserva el cobro visible como anulado, y queda auditado con motivo; anular dos veces devuelve `409 PAYMENT_ALREADY_VOIDED`.
 - [ ] **CA-04-08:** Un cobro con destino "cuenta del propietario" aparece en la liquidación como "ya rendido": descuenta del neto pero paga comisión (verificable en Módulo 5).
 - [ ] **CA-04-09:** El estado de deuda muestra por inquilino los períodos adeudados con saldo, días de mora e interés sugerido acumulado, filtrable por antigüedad.
+- [ ] **CA-04-10:** Tras registrar un cobro se puede descargar su recibo PDF con capital, interés, TC (si aplicó) y el encabezado de la administradora; un cobro anulado no emite recibo.
+- [ ] **CA-04-11:** Un inquilino sin deuda obtiene su certificado de libre deuda en PDF, y la emisión queda auditada.
+- [ ] **CA-04-12:** Un inquilino con períodos impagos o saldos parciales recibe `422 RENTER_HAS_DEBT` con el detalle de lo adeudado.
 
 ## Integraciones
 

@@ -2,12 +2,12 @@
 name: AdminProp — PRD (Product Requirements Document)
 description: Problema, propuesta de valor, usuarios, casos de uso, MVP vs futuro, restricciones y métricas de éxito de AdminProp
 type: project
-version: 1.0
-fecha: 2026-08-04
+version: 1.1
+fecha: 2026-08-11
 ---
 # AdminProp — Product Requirements Document (PRD)
 
-**Versión:** 1.0
+**Versión:** 1.1
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-04
 
@@ -145,6 +145,7 @@ Como **admin**, quiero registrar cada cobro con su medio, moneda y destino, para
 - Si un contrato en USD se paga en pesos, el sistema permite ingresar **libremente el tipo de cambio** aplicado.
 - El cobro registra el destino: **cuenta de la administración** o **cuenta del propietario** — en el segundo caso queda marcado como "dinero ya rendido" y se descuenta en la liquidación.
 - Se permiten pagos parciales; el saldo restante queda como deuda del inquilino.
+- Al registrar el cobro se puede generar **opcionalmente el recibo en PDF** para el inquilino (encabezado de la administradora, propiedad, período, capital e intereses cobrados, TC si aplica).
 
 ---
 
@@ -165,6 +166,17 @@ Como **owner**, quiero ver el estado de deuda de cada inquilino, para saber qui�
 *Criterios de aceptación:*
 - La vista de deuda muestra por inquilino: períodos adeudados, saldos parciales, días de mora e interés acumulado sugerido.
 - Se puede filtrar por propiedad, propietario y antigüedad de la deuda.
+
+---
+
+**UC-10b**
+Como **admin**, quiero generar un certificado de **libre deuda** para un inquilino, para entregárselo cuando lo solicita (fin de contrato, garantías, trámites).
+
+*Criterios de aceptación:*
+- El certificado solo se emite si el inquilino no registra períodos impagos ni saldos parciales en ninguno de sus contratos.
+- Es un PDF con el encabezado de la administradora, datos del inquilino, sus contratos/propiedades y la fecha de emisión.
+- Si el inquilino tiene deuda, el sistema lo rechaza mostrando el detalle de lo adeudado.
+- Cada emisión queda registrada en el log de auditoría.
 
 ---
 
@@ -287,7 +299,7 @@ Como **usuario**, quiero recibir los avisos del sistema in-app y por email, para
 | Propiedades | ABM de propiedades con cuentas de servicios informativas |
 | Personas | ABM de propietarios (con % comisión) e inquilinos |
 | Contratos | ABM de contratos ARS/USD, % mora diaria, ajustes con ingreso manual del % (aviso automático + historial), aviso de vencimiento |
-| Cobranzas | Generación mensual de pendientes, registro de cobros (medio/moneda/TC libre/destino), mora sugerida con perdón total/parcial, pagos parciales, estado de deuda |
+| Cobranzas | Generación mensual de pendientes, registro de cobros (medio/moneda/TC libre/destino), mora sugerida con perdón total/parcial, pagos parciales, estado de deuda, recibo PDF opcional por cobro, certificado de libre deuda |
 | Liquidaciones | Conceptos recurrentes por propiedad (rentas, muni) con importe mensual manual, liquidación mensual por propietario con export Excel + PDF, historial |
 | Mantenimiento | Pedidos → cotizaciones (con fotos) → aprobación → ejecución → cierre; pagador Dueño/Administración; historial por propiedad |
 | Administración | Usuarios y roles (owner/admin/maintenance), configuración de la org, log de auditoría |
@@ -305,6 +317,7 @@ Como **usuario**, quiero recibir los avisos del sistema in-app y por email, para
 | Multi-idioma (EN) | Mercado inicial 100% hispanohablante |
 | Cobranza SaaS integrada (planes, gateway de pagos) | Una sola administradora en el arranque; enforcement de planes cuando haya demanda |
 | App móvil nativa | Web responsive cubre la necesidad |
+| Gestión de depósitos de garantía | Decisión explícita (2026-08-11): fuera del alcance — no se registra ni trackea el depósito |
 
 ---
 

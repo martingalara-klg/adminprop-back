@@ -2,12 +2,12 @@
 name: AdminProp — Especificación del Modelo de Datos
 description: Tablas físicas PostgreSQL (22 tablas en 8 capas), RLS, índices, orden de migración, seed data y convenciones de nomenclatura
 type: project
-version: 1.0
-fecha: 2026-08-05
+version: 1.1
+fecha: 2026-08-11
 ---
 # AdminProp — Especificación del Modelo de Datos
 
-**Versión:** 1.0
+**Versión:** 1.1
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -358,7 +358,7 @@ ALTER TABLE contracts ADD CONSTRAINT contracts_no_overlap
 |---|---|---|---|
 | id | UUID | PK | |
 | organization_id | UUID | NOT NULL, FK | RLS |
-| entity_type | TEXT | NOT NULL CHECK IN (`work_order`,`work_order_quote`,`settlement`) | Extensible |
+| entity_type | TEXT | NOT NULL CHECK IN (`work_order`,`work_order_quote`,`settlement`,`payment`,`renter`) | `payment` = recibo de cobro; `renter` = libre deuda |
 | entity_id | UUID | NOT NULL | Sin FK física (polimórfica); integridad app-level |
 | file_path | TEXT | NOT NULL | Filesystem local en MVP |
 | file_name / mime_type | TEXT | NOT NULL | |

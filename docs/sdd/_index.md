@@ -17,19 +17,19 @@ Este archivo es el **mapa de navegación** de toda la documentación SDD del pro
 | Código | Nombre | Categoría | Estado | Versión | Backend | Frontend |
 |---|---|---|---|---|---|---|
 | `project_adminprop` | Contexto general del proyecto | (raíz) | Activo | 1.0 | ✅ | ✅ |
-| `sdd_01_prd` | Product Requirements Document (UC-01..UC-20, R-XX, S-XX) | core | Activo | 1.0 | ✅ | ✅ |
-| `sdd_02_domain_model` | Modelo de dominio + invariantes (RN-C/P/L/A/D) | core | Activo | 1.0 | ✅ | ✅ (lectura) |
-| `sdd_03_api_contracts` | Contratos REST de la API | core | Activo | 1.0 | ✅ | ✅ **compartido — vinculante** |
+| `sdd_01_prd` | Product Requirements Document (UC-01..UC-20, R-XX, S-XX) | core | Activo | 1.1 | ✅ | ✅ |
+| `sdd_02_domain_model` | Modelo de dominio + invariantes (RN-C/P/L/A/D) | core | Activo | 1.1 | ✅ | ✅ (lectura) |
+| `sdd_03_api_contracts` | Contratos REST de la API | core | Activo | 1.1 | ✅ | ✅ **compartido — vinculante** |
 | `sdd_04_nonfunctional` | Requisitos no funcionales | core | Activo | 1.0 | ✅ | ✅ (parcial: §2) |
 | `spec_module_00_superadmin` | Módulo 0 — Super Admin & onboarding | core | Activo | 1.0 | ✅ | ✅ (rutas /superadmin) |
 | `spec_module_01_propiedades` | Módulo 1 — Propiedades y cuentas de servicio | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_module_02_personas` | Módulo 2 — Propietarios e inquilinos | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_module_03_contratos` | Módulo 3 — Contratos + ajustes por índice | features | Activo | 1.0 | ✅ | ✅ |
-| `spec_module_04_cobranzas` | Módulo 4 — Cobranzas y mora | features | Activo | 1.0 | ✅ | ✅ |
+| `spec_module_04_cobranzas` | Módulo 4 — Cobranzas y mora | features | Activo | 1.1 | ✅ | ✅ |
 | `spec_module_05_liquidaciones` | Módulo 5 — Liquidaciones a propietarios | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_module_06_mantenimiento` | Módulo 6 — Mantenimiento y cotizaciones | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_module_07_administracion` | Módulo 7 — Usuarios, roles, configuración, auditoría | features | Activo | 1.0 | ✅ | ✅ |
-| `spec_data_model` | Modelo de datos físico (22 tablas, RLS, migraciones) | infrastructure | Activo | 1.0 | ✅ | ⚪ |
+| `spec_data_model` | Modelo de datos físico (22 tablas, RLS, migraciones) | infrastructure | Activo | 1.1 | ✅ | ⚪ |
 | `spec_notificaciones` | Notificaciones (transversal: in-app + email) | infrastructure | Activo | 1.0 | ✅ | ✅ (panel in-app) |
 
 **Leyenda:** ✅ referencia primaria (leer antes de implementar) · ⚪ referencia secundaria · ❌ no aplica.
@@ -127,6 +127,8 @@ Numeración heredada del sistema de referencia donde los skills la citan (#2..#6
 | 110 | `ACCOUNT_LOCKED` responde **403** (con countdown) | `sdd_03` §Códigos | ✅ Tomada |
 | 111 | **Infra cloud diferida:** MVP corre en Docker Compose local; archivos en filesystem (volumen); sin CD (merge a develop = solo CI) | Diseño §2, `sdd_04` §3.1 | ✅ Tomada |
 | 112 | El % de ajuste puede ser **negativo** (renegociación a la baja) con confirmación explícita en UI | `spec_module_03` §Validaciones, decisión 2026-08-06 | ✅ Tomada |
+| 113 | **Recibo de cobro opcional** (PDF sincrónico bajo demanda) y **certificado de libre deuda** (solo sin saldos impagos, auditado) | `spec_module_04` RF-07/RF-08, RN-P08, decisión 2026-08-11 | ✅ Tomada |
+| 114 | **Depósito de garantía: fuera del alcance del MVP** — no se registra ni trackea | `sdd_01` §4 Futuras, decisión 2026-08-11 | ✅ Tomada |
 
 ### Decisiones aún pendientes
 
