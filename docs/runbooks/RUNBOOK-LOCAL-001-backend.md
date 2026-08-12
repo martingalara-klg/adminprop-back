@@ -6,7 +6,7 @@ Referencias:
 - Modelo de datos: `docs/sdd/infrastructure/spec_data_model.md` (se crea en el paso 3 del diseño SDD — este link resolverá cuando exista)
 - Arquitectura general: `docs/sdd/core/sdd_04_nonfunctional.md` (se crea en el paso 4 del diseño SDD — este link resolverá cuando exista)
 
-> **Estado de la infraestructura:** `docker/docker-compose.yml` (issue #2) ya existe con los servicios `postgres`, `redis` y `api` operativos por default, más healthchecks y `make up`/`make migrate`/`make test`. Los workers Celery (`notification_worker`, `documents_worker`, `beat`) están declarados en el compose bajo el profile `workers` (desactivado por default) porque el código todavía no existe — llegan con el issue #4; se activan con `docker compose -f docker/docker-compose.yml --profile workers up` una vez implementados. No hay infra cloud en el MVP: todo corre local vía Docker Compose + CI de tests.
+> **Estado de la infraestructura:** `docker/docker-compose.yml` (issue #2) ya existe con los servicios `postgres`, `redis` y `api` operativos por default, más healthchecks y `make up`/`make migrate`/`make test`. Los workers Celery (`notification_worker`, `documents_worker`, `beat`) ya tienen código (issue #4: `src/adminprop/workers/`) y están declarados en el compose bajo el profile `workers` (desactivado por default, decisión de implementación del issue #2 para no acoplar el arranque básico a Celery) — se activan con `make up-workers` o `docker compose -f docker/docker-compose.yml --profile workers up`. No hay infra cloud en el MVP: todo corre local vía Docker Compose + CI de tests.
 
 ---
 
@@ -78,7 +78,8 @@ make up
 ```
 
 Esto levanta `postgres`, `redis` y `api`. Los workers Celery no se levantan
-con este comando (ver nota de infraestructura arriba) hasta el issue #4.
+con este comando (profile `workers` desactivado por default, ver nota de
+infraestructura arriba) — usar `make up-workers` para incluirlos.
 
 Espera ~30 segundos a que postgres + redis estén healthy:
 
@@ -179,7 +180,7 @@ make migrate
 | Comando | Hace |
 |---|---|
 | `make up` | Levanta `postgres` + `redis` + `api` (build incluido) |
-| `make up-workers` | Además levanta los workers Celery bajo el profile `workers` (no funcional hasta el issue #4) |
+| `make up-workers` | Además levanta los workers Celery bajo el profile `workers` (`notification_worker`, `documents_worker`, `beat` — issue #4) |
 | `make down` | Apaga todos los containers |
 | `make logs` | Logs en vivo de todos los servicios |
 | `make logs service=api` | Logs solo de la API |

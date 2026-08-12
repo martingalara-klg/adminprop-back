@@ -6,13 +6,13 @@ COMPOSE := docker compose -f $(COMPOSE_FILE)
 .PHONY: up down logs shell migrate test build ps
 
 ## Levanta postgres, redis y api (build incluido). Los workers Celery
-## (notification_worker, documents_worker, beat) llegan con el issue #4 y
-## se activan aparte con `make up-workers` una vez que existan.
+## (notification_worker, documents_worker, beat — issue #4) se activan
+## aparte con `make up-workers`.
 up:
 	$(COMPOSE) up --build -d
 
 ## Levanta además los workers Celery (profile "workers" — ver
-## docker/docker-compose.yml). No funcional hasta el issue #4.
+## docker/docker-compose.yml. notification_worker, documents_worker, beat).
 up-workers:
 	$(COMPOSE) --profile workers up --build -d
 
