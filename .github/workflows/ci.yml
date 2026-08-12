@@ -201,20 +201,13 @@ jobs:
           PGPASSWORD=adminprop psql -h localhost -U adminprop -d adminprop_test -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
           PGPASSWORD=adminprop psql -h localhost -U adminprop -d adminprop_test -c "\dx"
 
-      - name: Create adminprop_app and adminprop_superadmin roles
-        if: steps.guard.outputs.skip != 'true'
-        run: |
-          PGPASSWORD=adminprop psql -h localhost -U adminprop -d adminprop_test <<'SQL'
-          CREATE ROLE adminprop_app LOGIN PASSWORD 'adminprop';
-          CREATE ROLE adminprop_superadmin LOGIN PASSWORD 'adminprop' BYPASSRLS;
-          GRANT CONNECT ON DATABASE adminprop_test TO adminprop_app, adminprop_superadmin;
-          GRANT USAGE ON SCHEMA public TO adminprop_app, adminprop_superadmin;
-          ALTER DEFAULT PRIVILEGES IN SCHEMA public
-            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO adminprop_app, adminprop_superadmin;
-          ALTER DEFAULT PRIVILEGES IN SCHEMA public
-            GRANT USAGE, SELECT ON SEQUENCES TO adminprop_app, adminprop_superadmin;
-          SQL
-
+      # Nota (issue #3): los roles adminprop_app/adminprop_superadmin y sus
+      # grants ya NO se crean a mano aca. La migracion
+      # 20260812_114322_setup_extensions_and_roles.py es la unica fuente
+      # de verdad (idempotente via DO + chequeo contra pg_roles) — crearlos
+      # tambien aca duplicaria el CREATE ROLE (sin IF NOT EXISTS en
+      # Postgres) y el paso "Run Alembic migrations" de abajo fallaria con
+      # "role already exists".
       - name: Run Alembic migrations
         if: steps.guard.outputs.skip != 'true'
         run: alembic upgrade head

@@ -12,6 +12,10 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "pydantic-settings>=2.2",
     "python-json-logger>=2.0.7",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "psycopg2-binary>=2.9",
+    "asyncpg>=0.29",
 ]
 
 [project.optional-dependencies]

@@ -13,7 +13,7 @@ WORKDIR /app
 # introduzca esa dependencia real, para no acoplar el compose de #2 a
 # paquetes que el código todavía no usa.
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md alembic.ini ./
 COPY src ./src
 COPY tests ./tests
 

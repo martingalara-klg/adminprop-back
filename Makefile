@@ -28,7 +28,7 @@ logs:
 shell:
 	$(COMPOSE) exec api bash
 
-## alembic upgrade head (no funcional hasta el issue #3 — Alembic + roles).
+## alembic upgrade head (issue #3 — Alembic + roles PostgreSQL + RLS).
 migrate:
 	$(COMPOSE) run --rm api alembic upgrade head
 

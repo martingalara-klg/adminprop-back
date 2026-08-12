@@ -18,7 +18,7 @@ Leer **antes de**:
 | DB | PostgreSQL 16 + extensión `pgcrypto` | backend `CLAUDE.md` §3 |
 | Pool de conexiones | PgBouncer (transaction-scoped) | backend `CLAUDE.md` §3 |
 | Encriptación columnar | AES-256 vía `pgcrypto`; clave (KEK) en variable de entorno local (`.env`, no commiteado) en MVP — migrar a un gestor de secretos cuando exista infra cloud | backend `CLAUDE.md` §3 |
-| RLS | Política `USING (organization_id = current_setting('app.current_tenant_id')::uuid)` | backend `CLAUDE.md` §4 |
+| RLS | Política `USING (organization_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)` | backend `CLAUDE.md` §4 |
 | Roles DB | `adminprop_app` (default, sujeto a RLS), `adminprop_superadmin` (BYPASSRLS) | backend `CLAUDE.md` §3, `_index.md` §4 #42 |
 | Ubicación | `src/adminprop/db/migrations/versions/` | backend `CLAUDE.md` §9 |
 
@@ -170,8 +170,8 @@ def upgrade() -> None:
     # FastAPI al inicio de cada request (ver tenant-isolation.md).
     op.execute("""
         CREATE POLICY contracts_tenant_isolation ON contracts
-        USING (organization_id = current_setting('app.current_tenant_id', true)::uuid)
-        WITH CHECK (organization_id = current_setting('app.current_tenant_id', true)::uuid)
+        USING (organization_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+        WITH CHECK (organization_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
     """)
 
     # FORCE RLS: aplica también para el owner de la tabla (adminprop_app).
@@ -184,6 +184,8 @@ def downgrade() -> None:
 ```
 
 > **Nota sobre `current_setting('app.current_tenant_id', true)`:** el segundo argumento `true` significa "missing_ok" — si el setting no está definido (worker o test sin contexto), retorna NULL y la política falla cerrando el acceso. Esto previene leaks si el middleware no se ejecutó.
+>
+> **Nota sobre `NULLIF(..., '')`:** `missing_ok=true` solo cubre el caso "el setting nunca se seteo" (retorna NULL real). Si algo lo limpia seteándolo a string vacío (`set_config('app.current_tenant_id', '', true)` — el patrón que usa `set_tenant_context(session, None)` en `db/session.py` para rutas `/superadmin/*`), `current_setting(...)` devuelve `''` y `''::uuid` lanza `invalid input syntax for type uuid`, un 500 en vez de un 404/0-filas. `NULLIF(valor, '')` normaliza ambos casos a NULL antes del cast. Verificado con Postgres real en el issue #3 (`docs/skills/tenant-isolation.md` tiene el antipatrón/fix completo).
 
 ### Plantilla para columna con encriptación columnar (pgcrypto)
 
@@ -319,8 +321,8 @@ def upgrade() -> None:
     op.execute("ALTER TABLE <tabla> ENABLE ROW LEVEL SECURITY")
     op.execute("""
         CREATE POLICY <tabla>_tenant_isolation ON <tabla>
-        USING (organization_id = current_setting('app.current_tenant_id', true)::uuid)
-        WITH CHECK (organization_id = current_setting('app.current_tenant_id', true)::uuid)
+        USING (organization_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+        WITH CHECK (organization_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
     """)
     op.execute("ALTER TABLE <tabla> FORCE ROW LEVEL SECURITY")
 
@@ -333,7 +335,7 @@ def downgrade() -> None:
 
 - [ ] El archivo está en `src/adminprop/db/migrations/versions/` con nombre `YYYYMMDD_HHMMSS_<slug>.py`.
 - [ ] Los nombres y tipos de columna coinciden **exactamente** con `spec_data_model.md`.
-- [ ] Si la tabla tiene `organization_id`: `ENABLE ROW LEVEL SECURITY` está habilitado **+** política `USING (... current_setting('app.current_tenant_id', true)::uuid)` **+** `FORCE ROW LEVEL SECURITY`.
+- [ ] Si la tabla tiene `organization_id`: `ENABLE ROW LEVEL SECURITY` está habilitado **+** política `USING (... NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)` **+** `FORCE ROW LEVEL SECURITY`.
 - [ ] Los índices declarados en el SDD están creados (incluido el de `organization_id` solo o compuesto).
 - [ ] `gen_random_uuid()` se usa como default para UUID primary keys (no `BIGSERIAL`).
 - [ ] Money fields usan `NUMERIC(14,2)` o `NUMERIC(14,4)`; nunca `FLOAT/REAL`.
@@ -441,11 +443,13 @@ op.execute("""
 # críptico en lugar de retornar 0 filas.
 # Sin FORCE → el owner de la tabla (adminprop_app) puede leer cualquier tenant.
 
-# ✅ missing_ok=true + FORCE
+# ✅ missing_ok=true + FORCE + NULLIF (protege tambien contra un contexto
+# limpiado a string vacio, no solo contra el caso "nunca seteado" —
+# verificado con Postgres real en issue #3, ver tenant-isolation.md)
 op.execute("""
     CREATE POLICY contracts_iso ON contracts
-    USING (organization_id = current_setting('app.current_tenant_id', true)::uuid)
-    WITH CHECK (organization_id = current_setting('app.current_tenant_id', true)::uuid)
+    USING (organization_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+    WITH CHECK (organization_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
 """)
 op.execute("ALTER TABLE contracts FORCE ROW LEVEL SECURITY")
 ```

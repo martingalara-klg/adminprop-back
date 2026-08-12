@@ -437,6 +437,23 @@ USING (organization_id = current_setting('app.current_tenant_id', true)::uuid)
 ```
 
 ```python
+# ❌ missing_ok=true no alcanza si el contexto se LIMPIA con un string
+# vacio (ej: set_tenant_context(session, None) en rutas /superadmin/*
+# que aun corren bajo el rol adminprop_app en algun punto intermedio).
+# current_setting(...) devuelve '' (no NULL) y ''::uuid revienta con
+# "invalid input syntax for type uuid" -> 500 en vez de negar acceso.
+# Verificado en issue #3 con una tabla RLS de prueba contra Postgres real.
+CREATE POLICY payments_iso ON payments
+USING (organization_id = current_setting('app.current_tenant_id', true)::uuid)
+
+# ✅ NULLIF normaliza '' a NULL antes del cast -> 0 filas, sin error,
+# tanto si el setting nunca se seteo como si se limpio explicitamente.
+CREATE POLICY payments_iso ON payments
+USING (organization_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+WITH CHECK (organization_id = NULLIF(current_setting('app.current_tenant_id', true), '')::uuid)
+```
+
+```python
 # ❌ Permitir que adminprop_app lea audit_logs sin discriminar tenant
 # adminprop_app es el rol del backend en runtime. Si la query a audit_logs
 # no setea tenant, ¿qué retorna? Depende de la política — si no hay,
