@@ -16,13 +16,17 @@ dependencies = [
     "alembic>=1.13",
     "psycopg2-binary>=2.9",
     "asyncpg>=0.29",
+    # issue #4 — Celery/Redis workers (notification_worker, documents_worker,
+    # Beat) + cliente HTTP para Resend (docs/skills/async-worker.md,
+    # docs/skills/external-integrations.md).
+    "celery[redis]>=5.3",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    "httpx>=0.27",
     "pytest-cov>=5.0",
     "ruff>=0.4",
     "pyyaml>=6.0",
