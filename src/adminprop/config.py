@@ -23,6 +23,19 @@ class Settings(BaseSettings):
     # timeout de los checks de /health (sdd_04 §4.7)
     health_check_timeout_seconds: float = 1.0
 
+    # issue #4 — Celery/Redis: mismo Redis para broker y result backend
+    # (docs/skills/async-worker.md). Decision de implementacion: el volumen
+    # de jobs del MVP (sdd_04 §1.2) no justifica una segunda variable de
+    # entorno/instancia separada; separar si el volumen crece post-MVP.
+    #
+    # Resend (docs/skills/external-integrations.md, spec_notificaciones.md
+    # §Email): API key en variable de entorno local (.env, no commiteado);
+    # el placeholder no es un secreto real, replica el patron de
+    # app_role_password/superadmin_role_password de arriba. El dominio del
+    # sender es "provisorio hasta definir infra" (spec_notificaciones.md).
+    resend_api_key: str = "re_local_dev_placeholder"
+    resend_from_domain: str = "adminprop.local"
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -6,14 +6,15 @@ name: adminprop-back
 # - docs/sdd/core/sdd_04_nonfunctional.md §3.1 — ambiente local: Postgres 16 +
 #   Redis 7 + API + workers.
 #
-# Decisión de implementación (issue #2): los workers Celery
-# (notification_worker, documents_worker, beat — CLAUDE.md §3 y
-# sdd_04 §1.3) todavía no existen en el código; llegan con el issue #4.
-# Se declaran acá bajo el profile "workers" (desactivado por default) para
-# que `docker compose up` (sin --profile) levante sólo lo operativo hoy
-# (postgres, redis, api) sin fallar por un comando/módulo Celery inexistente.
-# Se activan explícitamente con:
+# Decisión de implementación (issue #2, completado por el issue #4): los
+# workers Celery (notification_worker, documents_worker, beat — CLAUDE.md
+# §3 y sdd_04 §1.3) ya existen en el código (src/adminprop/workers/). Se
+# mantienen acá bajo el profile "workers" (desactivado por default) para
+# que `docker compose up` (sin --profile) levante sólo lo operativo por
+# default (postgres, redis, api) — activarlos es una decisión explícita.
+# Se activan con:
 #   docker compose -f docker/docker-compose.yml --profile workers up
+#   (o `make up-workers`)
 
 services:
   postgres:
@@ -64,10 +65,10 @@ services:
       - ../tests:/app/tests
     command: ["uvicorn", "adminprop.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
-  # --- Workers Celery (issue #4 — no implementados todavía) -----------------
-  # Servicios declarados para que el compose ya documente la topología final
-  # (CLAUDE.md §9), pero desactivados por default vía profile "workers" hasta
-  # que src/adminprop/workers/celery_app.py exista.
+  # --- Workers Celery (issue #4) ---------------------------------------------
+  # Desactivados por default vía profile "workers" (decisión de
+  # implementación del issue #2, ver nota de arriba) — activar con
+  # `make up-workers` o `docker compose ... --profile workers up`.
   notification_worker:
     profiles: ["workers"]
     build:
@@ -78,6 +79,10 @@ services:
       LOG_LEVEL: INFO
       DATABASE_URL: postgresql://adminprop:adminprop@postgres:5432/adminprop
       REDIS_URL: redis://redis:6379/0
+      # Resend (issue #4, docs/skills/external-integrations.md): unico
+      # servicio externo del MVP. Tomado del .env local del host (nunca
+      # commiteado); el default cubre desarrollo local sin key real.
+      RESEND_API_KEY: ${RESEND_API_KEY:-re_local_dev_placeholder}
     depends_on:
       postgres:
         condition: service_healthy
