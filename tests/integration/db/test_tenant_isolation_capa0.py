@@ -9,8 +9,9 @@ issue #5.
 
 SDD: core/sdd_02_domain_model.md §3 RN-D01
      + docs/skills/tenant-isolation.md
-Implements: CA-5-02 (RLS + FORCE) — verificado end-to-end con
-            `set_tenant_context`, no solo inspeccionando el catalogo.
+Implements: CA-5-03 (test de aislamiento cross-tenant) — verificado
+            end-to-end con `set_tenant_context`, no solo inspeccionando
+            el catalogo (eso lo cubre CA-5-02 en test_capa0_fundacion.py).
 """
 
 import uuid
@@ -68,8 +69,8 @@ async def two_orgs_with_one_role_each() -> AsyncGenerator[None]:
         )
 
 
-async def test_ca_5_02_tenant_a_solo_ve_sus_propios_roles(two_orgs_with_one_role_each):
-    """CA-5-02 / RN-D01: con `app.current_tenant_id = ORG_A`, `adminprop_app`
+async def test_ca_5_03_tenant_a_solo_ve_sus_propios_roles(two_orgs_with_one_role_each):
+    """CA-5-03 / RN-D01: con `app.current_tenant_id = ORG_A`, `adminprop_app`
     solo ve el rol de la organizacion A.
     """
     session_factory = get_session_factory()
@@ -82,8 +83,8 @@ async def test_ca_5_02_tenant_a_solo_ve_sus_propios_roles(two_orgs_with_one_role
     assert seen == {ORG_A}
 
 
-async def test_ca_5_02_tenant_b_solo_ve_sus_propios_roles(two_orgs_with_one_role_each):
-    """CA-5-02 / RN-D01: con `app.current_tenant_id = ORG_B`, `adminprop_app`
+async def test_ca_5_03_tenant_b_solo_ve_sus_propios_roles(two_orgs_with_one_role_each):
+    """CA-5-03 / RN-D01: con `app.current_tenant_id = ORG_B`, `adminprop_app`
     solo ve el rol de la organizacion B (simetrico al test de A).
     """
     session_factory = get_session_factory()
@@ -96,8 +97,8 @@ async def test_ca_5_02_tenant_b_solo_ve_sus_propios_roles(two_orgs_with_one_role
     assert seen == {ORG_B}
 
 
-async def test_ca_5_02_sin_contexto_seteado_no_ve_ningun_rol(two_orgs_with_one_role_each):
-    """CA-5-02 / RN-D01: `adminprop_app` sin `set_tenant_context` previo no ve
+async def test_ca_5_03_sin_contexto_seteado_no_ve_ningun_rol(two_orgs_with_one_role_each):
+    """CA-5-03 / RN-D01: `adminprop_app` sin `set_tenant_context` previo no ve
     filas de ninguna organizacion (fail-closed — missing_ok=true + NULLIF
     cierran el acceso en vez de tirar un error 500).
     """
@@ -110,10 +111,10 @@ async def test_ca_5_02_sin_contexto_seteado_no_ve_ningun_rol(two_orgs_with_one_r
     assert rows == []
 
 
-async def test_ca_5_02_contexto_limpiado_a_none_no_ve_ningun_rol_ni_revienta(
+async def test_ca_5_03_contexto_limpiado_a_none_no_ve_ningun_rol_ni_revienta(
     two_orgs_with_one_role_each,
 ):
-    """CA-5-02 / RN-D01: `set_tenant_context(session, None)` (limpieza explicita,
+    """CA-5-03 / RN-D01: `set_tenant_context(session, None)` (limpieza explicita,
     patron de rutas `/superadmin/*`) no revienta el cast a uuid — devuelve 0
     filas en vez de un error 500 (fix NULLIF, issue #3).
     """
