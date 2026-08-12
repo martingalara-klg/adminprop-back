@@ -94,9 +94,7 @@ async def test_ca_5_01_organizations_tiene_columnas_y_check_de_status_del_spec()
     assert set(columns) == expected_columns
     assert columns["slug"].is_nullable == "NO"
     assert columns["status"].column_default == "'pending_owner'::text"
-    assert any(
-        "pending_owner" in d and "active" in d and "disabled" in d for d in check_defs
-    )
+    assert any("pending_owner" in d and "active" in d and "disabled" in d for d in check_defs)
 
 
 async def test_ca_5_01_users_es_tabla_global_con_email_unique_y_password_hash():
@@ -104,10 +102,7 @@ async def test_ca_5_01_users_es_tabla_global_con_email_unique_y_password_hash():
     engine = get_engine()
     async with engine.connect() as conn:
         columns_result = await conn.execute(
-            sa.text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name = 'users'"
-            )
+            sa.text("SELECT column_name FROM information_schema.columns WHERE table_name = 'users'")
         )
         columns = {row[0] for row in columns_result}
 
@@ -213,8 +208,7 @@ async def test_ca_5_02_rls_habilitado_y_forzado_en_tablas_tenant_scoped(table: s
     async with engine.connect() as conn:
         result = await conn.execute(
             sa.text(
-                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
-                "WHERE relname = :table"
+                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = :table"
             ),
             {"table": table},
         )

@@ -89,7 +89,9 @@ def upgrade() -> None:
             deleted_at      TIMESTAMPTZ
         )
     """)
-    op.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON users TO adminprop_app, adminprop_superadmin")
+    op.execute(
+        "GRANT SELECT, INSERT, UPDATE, DELETE ON users TO adminprop_app, adminprop_superadmin"
+    )
 
     # ─── roles ────────────────────────────────────────────────────────────
     # spec_data_model.md §Capa 0 "roles": RBAC data-driven, sembrado por
