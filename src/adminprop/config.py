@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://adminprop:adminprop@localhost:5432/adminprop"
     redis_url: str = "redis://localhost:6379/0"
 
+    # Passwords de los roles PostgreSQL RLS (issue #3, sdd_04 §2.3).
+    # Defaults de desarrollo local no sensibles — paridad con
+    # POSTGRES_PASSWORD hardcodeado en docker/docker-compose.yml.
+    app_role_password: str = "adminprop_app_local_only"
+    superadmin_role_password: str = "adminprop_superadmin_local_only"
+
     # timeout de los checks de /health (sdd_04 §4.7)
     health_check_timeout_seconds: float = 1.0
 
