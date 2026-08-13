@@ -1,20 +1,23 @@
 """Refresh tokens server-side en Redis: rotativo single-use, revocacion de
 familia ante reuso (issue #6).
 
-SDD: core/sdd_04_nonfunctional.md §2.2 ("refresh token 30 dias rotativo
-single-use (reuso de un refresh ya rotado -> revoca la familia completa).
-Refresh tokens server-side en Redis (revocables).").
+SDD: core/sdd_04_nonfunctional.md parrafo 2.2 ("refresh token 30 dias
+rotativo single-use (reuso de un refresh ya rotado -> revoca la familia
+completa). Refresh tokens server-side en Redis (revocables).").
 
 Diseno:
-- El valor de cookie (`raw token`) es un secreto opaco de alta entropia
-  (`secrets.token_urlsafe`). Redis nunca guarda el valor en claro -- se
-  indexa por su hash SHA-256, mismo patron que `organization_invitations.token`
-  (issue #5: "token es UNIQUE (hash del token, nunca el token en claro)").
-- Cada token pertenece a una "familia" (`family_id`, un UUID por sesion de
-  login). Rotar reemplaza el token activo de la familia por uno nuevo con
-  TTL fresco; si alguien presenta un token ya usado (robado y reutilizado
-  tras la rotacion legitima), se interpreta como robo -> se revoca toda la
-  familia y el intento falla con UNAUTHORIZED (fuerza re-login).
+- El valor de cookie (raw token) es un secreto opaco de alta entropia
+  (secrets.token_urlsafe). Redis nunca guarda el valor en claro -- se
+  indexa por su hash SHA-256, mismo patron que organization_invitations.token
+  (issue #5: token es UNIQUE, hash del token, nunca el token en claro).
+- Cada token pertenece a una "familia" (family_id, un UUID por sesion de
+  login). Cada registro guarda un flag `used`: al rotar, el token
+  presentado se marca usado (no se borra) y se emite uno nuevo en la
+  misma familia. Si el mismo token vuelve a presentarse ya marcado
+  `used=true`, es reuso (robo tras la rotacion legitima) -> se revoca
+  toda la familia y el intento falla con UnauthorizedException. Guardar
+  el registro usado (en vez de borrarlo) es lo que permite trazar el
+  reuso hasta su familia -- un registro borrado no tiene a donde volver.
 """
 
 from __future__ import annotations
@@ -87,6 +90,7 @@ class RefreshTokenStore:
             "user_id": str(user_id),
             "organization_id": str(organization_id) if organization_id is not None else "",
             "family_id": family_id,
+            "used": False,
         }
         ttl = self._ttl_seconds
         async with self._redis.pipeline(transaction=True) as pipe:
@@ -99,28 +103,32 @@ class RefreshTokenStore:
     async def rotate(self, raw_token: str) -> tuple[RefreshTokenRecord, RefreshTokenIssued]:
         """Valida `raw_token` (single-use) y emite el siguiente token de la familia.
 
-        Reuso de un token ya rotado (no encontrado pero la familia todavia
-        existe con otros miembros, o directamente ausente) -> se interpreta
-        como robo: revoca la familia completa y levanta `UnauthorizedException`.
+        Token desconocido/expirado -> UnauthorizedException (no hay familia
+        a la que asociarlo). Token conocido pero ya marcado `used` -> reuso
+        detectado -> revoca la familia completa y levanta
+        UnauthorizedException. Caso normal: marca `used=true` y emite el
+        siguiente token de la misma familia.
         """
         token_hash = _hash_token(raw_token)
         raw_record = await self._redis.get(_token_key(token_hash))
         if raw_record is None:
-            # Token desconocido/expirado. Si todavia referencia una familia
-            # viva no podemos saberlo sin el hash -- tratamos como invalido.
             raise UnauthorizedException()
 
         data = json.loads(raw_record)
         family_id = data["family_id"]
 
-        # Single-use: al leerlo, se borra atomicamente. Si dos requests
-        # llegan a la vez con el mismo token, solo una gana la carrera.
-        deleted = await self._redis.delete(_token_key(token_hash))
-        await self._redis.srem(_family_key(family_id), token_hash)
-        if deleted == 0:
-            # Ya fue consumido por otra request concurrente -- reuso -> revocar familia.
+        if data.get("used"):
+            # Reuso: alguien presenta un token ya rotado -- robo probable.
             await self.revoke_family(family_id)
             raise UnauthorizedException()
+
+        ttl = await self._redis.ttl(_token_key(token_hash))
+        data["used"] = True
+        await self._redis.set(
+            _token_key(token_hash),
+            json.dumps(data),
+            ex=ttl if ttl and ttl > 0 else self._ttl_seconds,
+        )
 
         record = RefreshTokenRecord(
             user_id=UUID(data["user_id"]),
@@ -133,7 +141,7 @@ class RefreshTokenStore:
         return record, issued
 
     async def revoke_family(self, family_id: str) -> None:
-        """Revoca todos los tokens vivos de la familia (reuso detectado o logout)."""
+        """Revoca todos los tokens (usados o no) de la familia (reuso o logout)."""
         members = await self._redis.smembers(_family_key(family_id))
         if members:
             await self._redis.delete(*(_token_key(member) for member in members))

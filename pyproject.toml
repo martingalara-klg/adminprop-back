@@ -48,6 +48,11 @@ pythonpath = ["src"]
 
 [tool.coverage.run]
 source = ["src/adminprop"]
+# SQLAlchemy async (asyncpg) usa greenlet para puentear sync/async --
+# sin esto, coverage.py no traza las lineas que corren dentro del
+# greenlet, subestimando la cobertura real de repository.py/service.py
+# (issue #6, descubierto al medir el modulo auth).
+concurrency = ["greenlet", "thread"]
 
 [tool.coverage.report]
 # CLAUDE.md §3: cobertura minima 95% (excluye boilerplate trivial)

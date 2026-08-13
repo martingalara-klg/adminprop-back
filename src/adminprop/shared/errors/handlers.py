@@ -54,6 +54,13 @@ def register_exception_handlers(app: FastAPI) -> None:
         field = ".".join(
             str(part) for part in first.get("loc", []) if part not in ("body", "query", "path")
         )
+        # pydantic incluye en `ctx` los objetos Python originales (ej: la
+        # ValueError de un @field_validator) -- no son JSON-serializables.
+        # Se serializan solo loc/msg/type, sin ctx crudo.
+        safe_errors = [
+            {"loc": list(e.get("loc", [])), "msg": e.get("msg"), "type": e.get("type")}
+            for e in errors
+        ]
         return JSONResponse(
             status_code=400,
             content={
@@ -61,7 +68,7 @@ def register_exception_handlers(app: FastAPI) -> None:
                     "code": "VALIDATION_ERROR",
                     "message": first.get("msg", "Validacion fallida."),
                     "field": field or None,
-                    "details": {"errors": errors},
+                    "details": {"errors": safe_errors},
                 }
             },
         )
