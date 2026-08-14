@@ -21,6 +21,12 @@ dependencies = [
     # docs/skills/external-integrations.md).
     "celery[redis]>=5.3",
     "httpx>=0.27",
+    # issue #6 — Auth: JWT RS256 (sdd_04 §2.2), bcrypt cost 12 (passwords),
+    # cliente Redis async para refresh tokens/lockout/rate-limit
+    # (docs/skills/api-endpoint.md "Rate limiting", tenant-isolation.md).
+    "pyjwt[crypto]>=2.8",
+    "bcrypt>=4.1",
+    "redis>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +48,11 @@ pythonpath = ["src"]
 
 [tool.coverage.run]
 source = ["src/adminprop"]
+# SQLAlchemy async (asyncpg) usa greenlet para puentear sync/async --
+# sin esto, coverage.py no traza las lineas que corren dentro del
+# greenlet, subestimando la cobertura real de repository.py/service.py
+# (issue #6, descubierto al medir el modulo auth).
+concurrency = ["greenlet", "thread"]
 
 [tool.coverage.report]
 # CLAUDE.md §3: cobertura minima 95% (excluye boilerplate trivial)
@@ -51,3 +62,11 @@ exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+
+[tool.ruff.lint]
+# B008: FastAPI usa Depends(...) como valor default de parametro por
+# diseno (docs/skills/api-endpoint.md, module-structure.md) -- no es un
+# mutable-default-argument real (bugbear lo confunde con ese antipatron).
+# Primer modulo con Depends en runtime real (issue #6); se deja el
+# ignore documentado aca para que los modulos siguientes no lo repitan.
+ignore = ["B008"]

@@ -10,3 +10,6 @@ dist/
 *.egg-info/
 # artefactos internos de sesiones de agente
 .superpowers/
+
+# claves RS256 de JWT (issue #6, sdd_04 §2.2) — nunca commitear
+keys/
