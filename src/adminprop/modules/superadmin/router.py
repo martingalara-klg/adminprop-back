@@ -135,9 +135,7 @@ async def invite_owner(
     service: OrganizationService = Depends(get_organization_service),
 ) -> InvitationResponse:
     """RF-03 + CA-00-02: invita al owner inicial; expira a las 72h."""
-    invitation = await service.invite_owner(
-        organization_id, dto.email, _request_id(), payload.sub
-    )
+    invitation = await service.invite_owner(organization_id, dto.email, _request_id(), payload.sub)
     return InvitationResponse(data=InvitationSummary.model_validate(invitation))
 
 

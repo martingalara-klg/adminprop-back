@@ -99,9 +99,7 @@ class TestRequiresSuperAdmin:
         async def _noop_record_access_denied(**kwargs: object) -> None:
             return None
 
-        monkeypatch.setattr(
-            dependencies_module, "record_access_denied", _noop_record_access_denied
-        )
+        monkeypatch.setattr(dependencies_module, "record_access_denied", _noop_record_access_denied)
 
         request = _make_request(auth_header="Bearer irrelevant")
         payload = jwt_module.JWTPayload(
@@ -123,9 +121,7 @@ class TestRequiresSuperAdmin:
         async def _noop_record_access_denied(**kwargs: object) -> None:
             return None
 
-        monkeypatch.setattr(
-            dependencies_module, "record_access_denied", _noop_record_access_denied
-        )
+        monkeypatch.setattr(dependencies_module, "record_access_denied", _noop_record_access_denied)
 
         request = _make_request(auth_header="Bearer irrelevant")
         payload = jwt_module.JWTPayload(

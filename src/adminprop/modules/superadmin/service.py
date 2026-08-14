@@ -51,9 +51,7 @@ class OrganizationService:
         self._repo = repo
         self._settings = settings
 
-    async def create(
-        self, name: str, timezone_name: str, actor_user_id: UUID
-    ) -> OrganizationRow:
+    async def create(self, name: str, timezone_name: str, actor_user_id: UUID) -> OrganizationRow:
         """RF-02 + CA-00-01: slug autogenerado unico + 3 roles + settings
         default, todo en la misma transaccion (repository.create_organization_with_roles)."""
         slug = await self._generate_unique_slug(name)
