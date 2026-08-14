@@ -78,9 +78,26 @@ class TestRequiresPermission:
 
         assert result is payload
 
-    async def test_rejects_payload_without_permission(self):
+    async def test_rejects_payload_without_permission(self, monkeypatch):
         """sdd_03 §"Resumen de Autorizacion por Recurso": el chequeo es
-        por permiso atomico, nunca por `role_name`."""
+        por permiso atomico, nunca por `role_name`.
+
+        Issue #10: `requires_permission` ahora audita `access.denied` en
+        `audit_logs` (RN-A04) -- este test unitario fabrica un
+        `org_id` inexistente en Postgres a proposito (no depende de
+        Postgres, ver `tests/integration/shared/test_access_denied_audit.py`
+        para la cobertura real del INSERT con datos sembrados), asi que
+        se mockea `record_access_denied` para mantenerlo un test unitario
+        puro de la logica de gating."""
+        from adminprop.shared import rbac as rbac_module
+
+        audit_calls: list[dict] = []
+
+        async def _fake_record_access_denied(**kwargs: object) -> None:
+            audit_calls.append(kwargs)
+
+        monkeypatch.setattr(rbac_module, "record_access_denied", _fake_record_access_denied)
+
         payload = JWTPayload(
             sub=uuid.uuid4(),
             org_id=uuid.uuid4(),
@@ -92,3 +109,11 @@ class TestRequiresPermission:
 
         with pytest.raises(ForbiddenException):
             await check(payload)
+
+        assert audit_calls == [
+            {
+                "organization_id": payload.org_id,
+                "user_id": payload.sub,
+                "details": {"permission": "user:manage"},
+            }
+        ]

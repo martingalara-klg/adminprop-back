@@ -76,11 +76,34 @@ async def client(rsa_keypair) -> AsyncGenerator[AsyncClient]:
 
 
 @pytest.fixture()
-def super_admin_headers(rsa_keypair) -> dict[str, str]:
-    """JWT `is_super_admin=true`, sin `org` ni `role` (RN-01) -- no requiere
-    fila en `users`: `requires_super_admin` solo lee el claim del JWT."""
+async def super_admin_headers(rsa_keypair) -> dict[str, str]:
+    """JWT `is_super_admin=true`, sin `org` ni `role` (RN-01).
+
+    Issue #10: `OrganizationService` audita sus operaciones (`org.created`,
+    `invitation.sent`, `org.disabled`/`org.enabled`) con
+    `user_id=actor_user_id`, y `audit_logs.user_id` tiene
+    `REFERENCES users(id)` (spec_data_model.md §Capa 7) -- antes alcanzaba
+    con el claim del JWT (`requires_super_admin` no consulta `users`),
+    pero ahora se siembra una fila real para que el INSERT de auditoria
+    no viole la FK.
+    """
+    user_id = uuid.uuid4()
+    session_factory = get_session_factory()
+    async with session_factory() as session, session.begin():
+        await session.execute(
+            sa.text(
+                "INSERT INTO users (id, email, password_hash, full_name, is_super_admin) "
+                "VALUES (:id, :email, :password_hash, :full_name, TRUE)"
+            ),
+            {
+                "id": str(user_id),
+                "email": f"superadmin-{user_id.hex[:12]}@example.com",
+                "password_hash": "not-used-in-tests",
+                "full_name": "Super Admin Test",
+            },
+        )
     token = create_access_token(
-        user_id=uuid.uuid4(),
+        user_id=user_id,
         organization_id=None,
         role=None,
         permissions=[],
@@ -91,12 +114,41 @@ def super_admin_headers(rsa_keypair) -> dict[str, str]:
 
 
 @pytest.fixture()
-def owner_headers(rsa_keypair) -> dict[str, str]:
+async def owner_headers(rsa_keypair) -> dict[str, str]:
     """JWT de un usuario `owner` de una organizacion (no super admin) --
-    CA-00-05: debe recibir 403 SUPERADMIN_REQUIRED en /superadmin/*."""
+    CA-00-05: debe recibir 403 SUPERADMIN_REQUIRED en /superadmin/*.
+
+    Issue #10: el 403 ahora audita `access.denied` en `audit_logs`
+    (`organization_id`/`user_id` con FK a `organizations`/`users`) -- se
+    siembran filas reales que coinciden con los claims del JWT.
+    """
+    organization_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    session_factory = get_session_factory()
+    async with session_factory() as session, session.begin():
+        await session.execute(
+            sa.text("INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, :name)"),
+            {
+                "id": str(organization_id),
+                "slug": f"org-{organization_id.hex[:8]}",
+                "name": "Org de Test CA-00-05",
+            },
+        )
+        await session.execute(
+            sa.text(
+                "INSERT INTO users (id, email, password_hash, full_name, is_super_admin) "
+                "VALUES (:id, :email, :password_hash, :full_name, FALSE)"
+            ),
+            {
+                "id": str(user_id),
+                "email": f"owner-{user_id.hex[:12]}@example.com",
+                "password_hash": "not-used-in-tests",
+                "full_name": "Owner Test",
+            },
+        )
     token = create_access_token(
-        user_id=uuid.uuid4(),
-        organization_id=uuid.uuid4(),
+        user_id=user_id,
+        organization_id=organization_id,
         role="owner",
         permissions=["contract:manage", "user:manage"],
         is_super_admin=False,

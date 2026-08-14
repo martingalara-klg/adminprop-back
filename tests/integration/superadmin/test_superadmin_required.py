@@ -7,10 +7,41 @@ import logging
 import uuid
 
 import pytest
+import sqlalchemy as sa
 
+from adminprop.db.session import get_session_factory
 from adminprop.shared.auth.jwt import create_access_token
 
 pytestmark = pytest.mark.asyncio
+
+
+async def _seed_org_and_user(*, organization_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    """Issue #10: `record_access_denied` inserta en `audit_logs`
+    (`organization_id`/`user_id` con FK a `organizations`/`users`) --
+    estos tests fabrican JWTs sin pasar por un `Seeder`, asi que se
+    siembran filas minimas que coincidan con los claims."""
+    session_factory = get_session_factory()
+    async with session_factory() as session, session.begin():
+        await session.execute(
+            sa.text("INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, :name)"),
+            {
+                "id": str(organization_id),
+                "slug": f"org-{organization_id.hex[:8]}",
+                "name": "Org de Test CA-00-05",
+            },
+        )
+        await session.execute(
+            sa.text(
+                "INSERT INTO users (id, email, password_hash, full_name, is_super_admin) "
+                "VALUES (:id, :email, :password_hash, :full_name, FALSE)"
+            ),
+            {
+                "id": str(user_id),
+                "email": f"user-{user_id.hex[:12]}@example.com",
+                "password_hash": "not-used-in-tests",
+                "full_name": "Org Role Test",
+            },
+        )
 
 
 class TestCA0005SuperAdminRequired:
@@ -43,9 +74,12 @@ class TestCA0005SuperAdminRequired:
     ):
         """El chequeo es sobre `is_super_admin`, nunca sobre `role`/`permissions`
         -- ningun rol de organizacion puede colarse via permisos amplios."""
+        organization_id = uuid.uuid4()
+        user_id = uuid.uuid4()
+        await _seed_org_and_user(organization_id=organization_id, user_id=user_id)
         token = create_access_token(
-            user_id=uuid.uuid4(),
-            organization_id=uuid.uuid4(),
+            user_id=user_id,
+            organization_id=organization_id,
             role=role_name,
             permissions=["contract:manage", "user:manage", "work-order:read"],
             is_super_admin=False,
