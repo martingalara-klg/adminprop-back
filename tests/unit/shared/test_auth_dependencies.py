@@ -7,8 +7,11 @@ from starlette.requests import Request
 
 from adminprop.shared.auth import jwt as jwt_module
 from adminprop.shared.auth.cookies import ACCESS_TOKEN_COOKIE
-from adminprop.shared.auth.dependencies import get_current_access_token_payload
-from adminprop.shared.errors.codes import UnauthorizedException
+from adminprop.shared.auth.dependencies import (
+    get_current_access_token_payload,
+    requires_super_admin,
+)
+from adminprop.shared.errors.codes import SuperAdminRequiredException, UnauthorizedException
 
 
 def _make_request(*, cookie_header: str | None = None, auth_header: str | None = None) -> Request:
@@ -70,3 +73,46 @@ class TestGetCurrentAccessTokenPayload:
         request = _make_request(auth_header="Basic some-token")
         with pytest.raises(UnauthorizedException):
             await get_current_access_token_payload(request)
+
+
+class TestRequiresSuperAdmin:
+    """issue #7 -- CA-00-05: SUPERADMIN_REQUIRED para JWTs sin is_super_admin."""
+
+    async def test_returns_payload_when_is_super_admin_true(self):
+        request = _make_request(auth_header="Bearer irrelevant")
+        payload = jwt_module.JWTPayload(
+            sub=uuid4(), org_id=None, role=None, permissions=[], is_super_admin=True
+        )
+
+        result = await requires_super_admin(request, payload)
+
+        assert result is payload
+
+    async def test_raises_superadmin_required_for_non_super_admin_payload(self):
+        request = _make_request(auth_header="Bearer irrelevant")
+        payload = jwt_module.JWTPayload(
+            sub=uuid4(),
+            org_id=uuid4(),
+            role="owner",
+            permissions=["contract:manage", "user:manage"],
+            is_super_admin=False,
+        )
+
+        with pytest.raises(SuperAdminRequiredException):
+            await requires_super_admin(request, payload)
+
+    async def test_denied_attempt_is_logged_with_user_id_and_path(self, caplog):
+        import logging
+
+        request = _make_request(auth_header="Bearer irrelevant")
+        payload = jwt_module.JWTPayload(
+            sub=uuid4(), org_id=uuid4(), role="admin", permissions=[], is_super_admin=False
+        )
+
+        with (
+            caplog.at_level(logging.WARNING, logger="adminprop.shared.auth.dependencies"),
+            pytest.raises(SuperAdminRequiredException),
+        ):
+            await requires_super_admin(request, payload)
+
+        assert any("superadmin access denied" in record.message for record in caplog.records)
