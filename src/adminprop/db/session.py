@@ -105,6 +105,34 @@ async def get_db_session() -> AsyncGenerator[AsyncSession]:
         yield session
 
 
+async def get_superadmin_db_session() -> AsyncGenerator[AsyncSession]:
+    """Dependency FastAPI para `/superadmin/*`: sesion bajo el rol BYPASSRLS.
+
+    docs/skills/tenant-isolation.md "Super Admin: rol DB privilegiado" +
+    core/spec_module_00_superadmin.md RN-01/RN-06: el portal Super Admin
+    opera sobre `organizations` (raiz, sin RLS) y sobre tablas tenant-scoped
+    (`roles`, `organization_invitations`) sin un `organization_id` propio
+    -- necesita `adminprop_superadmin` (BYPASSRLS) para poder leerlas/
+    escribirlas a traves de organizaciones distintas.
+
+    No existe todavia el middleware global que conmuta el rol de sesion
+    segun el JWT (`tenant-isolation.md` lo describe como responsabilidad
+    del middleware, issue futuro); esta dependency es el equivalente
+    explicito para los endpoints `/superadmin/*` mientras tanto. El
+    `SET ROLE`/`RESET ROLE` es hoy un no-op funcional en este entorno
+    (issue #42 -- PgBouncer transaction-scoped todavia no esta configurado
+    en docker-compose local) pero se aplica igual para que el codigo quede
+    correcto cuando la infra lo soporte.
+    """
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        await session.execute(text("SET ROLE adminprop_superadmin"))
+        try:
+            yield session
+        finally:
+            await session.execute(text("RESET ROLE"))
+
+
 @asynccontextmanager
 async def tenant_scoped_session(
     organization_id: UUID | None,

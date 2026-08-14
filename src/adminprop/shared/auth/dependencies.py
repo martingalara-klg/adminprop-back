@@ -11,11 +11,15 @@ para testing/server-to-server."
 
 from __future__ import annotations
 
-from fastapi import Request
+import logging
+
+from fastapi import Depends, Request
 
 from adminprop.shared.auth.cookies import ACCESS_TOKEN_COOKIE
 from adminprop.shared.auth.jwt import JWTPayload, decode_access_token
-from adminprop.shared.errors.codes import UnauthorizedException
+from adminprop.shared.errors.codes import SuperAdminRequiredException, UnauthorizedException
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_raw_access_token(request: Request) -> str:
@@ -32,3 +36,34 @@ def _extract_raw_access_token(request: Request) -> str:
 async def get_current_access_token_payload(request: Request) -> JWTPayload:
     """Decodifica el access token de la cookie (o header Bearer en tests/server-to-server)."""
     return decode_access_token(_extract_raw_access_token(request))
+
+
+async def requires_super_admin(
+    request: Request,
+    payload: JWTPayload = Depends(get_current_access_token_payload),
+) -> JWTPayload:
+    """Dependency de `/superadmin/*` (issue #7).
+
+    SDD: core/spec_module_00_superadmin.md RN-01 ("el JWT del Super Admin
+    no contiene `org` ni `role`; opera con el rol PostgreSQL
+    adminprop_superadmin solo en /superadmin/*") + CA-00-05 ("un usuario
+    owner/admin/maintenance que intenta acceder a /superadmin/* recibe
+    403 SUPERADMIN_REQUIRED y el intento queda auditado").
+
+    TODO(#10): persistir el intento denegado en `audit_logs` (la tabla no
+    existe todavia -- issue #10). Por ahora se deja constancia estructurada
+    en el logger de la app (request_id ya viaja via ContextVar, sdd_04
+    §4.1) para no perder trazabilidad mientras el modulo de auditoria no
+    esta implementado.
+    """
+    if not payload.is_super_admin:
+        logger.warning(
+            "superadmin access denied",
+            extra={
+                "user_id": str(payload.sub),
+                "path": request.url.path,
+                "service": "superadmin",
+            },
+        )
+        raise SuperAdminRequiredException()
+    return payload
