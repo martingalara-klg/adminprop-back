@@ -111,6 +111,14 @@ class AdministracionRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @property
+    def session(self) -> AsyncSession:
+        """Expuesto para que `service.py` pueda pasar la MISMA sesion a
+        `AuditService.audit()` (issue #10) -- el evento de auditoria debe
+        persistirse en la misma transaccion que la operacion de negocio,
+        confirmada junto con ella por `commit()`."""
+        return self._session
+
     # ─── users (identidad global, sin RLS) ─────────────────────────────
 
     async def get_user_id_by_email(self, email: str) -> UUID | None:

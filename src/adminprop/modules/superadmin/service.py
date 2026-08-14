@@ -6,7 +6,6 @@ SDD: core/spec_module_00_superadmin.md RF-01..RF-05.
 from __future__ import annotations
 
 import hashlib
-import logging
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -26,14 +25,13 @@ from adminprop.modules.superadmin.repository import (
     SuperAdminRepository,
     get_superadmin_repository,
 )
+from adminprop.shared.audit.service import audit
 from adminprop.shared.errors.codes import (
     InvitationPendingExistsException,
     NotFoundException,
     ValidationError,
 )
 from adminprop.workers.notification_worker import send_transactional_email
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -53,17 +51,32 @@ class OrganizationService:
         self._repo = repo
         self._settings = settings
 
-    async def create(self, name: str, timezone_name: str) -> OrganizationRow:
+    async def create(self, name: str, timezone_name: str, actor_user_id: UUID) -> OrganizationRow:
         """RF-02 + CA-00-01: slug autogenerado unico + 3 roles + settings
         default, todo en la misma transaccion (repository.create_organization_with_roles)."""
         slug = await self._generate_unique_slug(name)
-        return await self._repo.create_organization_with_roles(
+        org = await self._repo.create_organization_with_roles(
             name=name,
             slug=slug,
             timezone=timezone_name,
             settings=dict(DEFAULT_ORGANIZATION_SETTINGS),
             role_definitions=ROLE_DEFINITIONS,
         )
+
+        # sdd_02 §2.17 / RN-05: creacion de organizacion auditada, en la
+        # MISMA transaccion que el INSERT de arriba (repository ya no
+        # comitea internamente, ver issue #10).
+        await audit(
+            self._repo.session,
+            organization_id=org.id,
+            action="org.created",
+            entity_type="organization",
+            entity_id=org.id,
+            after={"name": org.name, "slug": org.slug, "status": org.status},
+            user_id=actor_user_id,
+        )
+        await self._repo.commit()
+        return org
 
     async def _generate_unique_slug(self, name: str) -> str:
         """RF-02: kebab-case, unico global; colisiones se sufijan -2, -3, ..."""
@@ -87,7 +100,7 @@ class OrganizationService:
         return await self._repo.get_organization_by_id(organization_id)
 
     async def invite_owner(
-        self, organization_id: UUID, email: str, request_id: str
+        self, organization_id: UUID, email: str, request_id: str, actor_user_id: UUID
     ) -> InvitationRow:
         """RF-03: primera invitacion de owner de la organizacion.
 
@@ -116,6 +129,9 @@ class OrganizationService:
         issued = await self._issue_invitation(
             organization_id=organization_id, email=email, role_id=role_id
         )
+        await self._audit_invitation_sent(
+            organization_id=organization_id, issued=issued, actor_user_id=actor_user_id
+        )
         self._send_invitation_email(
             to=email,
             organization_name=org.name,
@@ -124,7 +140,9 @@ class OrganizationService:
         )
         return issued.row
 
-    async def resend_invitation(self, organization_id: UUID, request_id: str) -> InvitationRow:
+    async def resend_invitation(
+        self, organization_id: UUID, request_id: str, actor_user_id: UUID
+    ) -> InvitationRow:
         """RF-04: reenvio -- regenera token/expiracion; la anterior queda `revoked`."""
         org = await self._repo.get_organization_by_id(organization_id)
         if org is None:
@@ -141,6 +159,9 @@ class OrganizationService:
         issued = await self._issue_invitation(
             organization_id=organization_id, email=existing.email, role_id=existing.role_id
         )
+        await self._audit_invitation_sent(
+            organization_id=organization_id, issued=issued, actor_user_id=actor_user_id
+        )
         self._send_invitation_email(
             to=issued.row.email,
             organization_name=org.name,
@@ -148,6 +169,25 @@ class OrganizationService:
             request_id=request_id,
         )
         return issued.row
+
+    async def _audit_invitation_sent(
+        self, *, organization_id: UUID, issued: IssuedInvitation, actor_user_id: UUID
+    ) -> None:
+        """sdd_02 §2.17 (issue #10): `invitation.sent` en la MISMA
+        transaccion que `_issue_invitation` (repository ya no comitea
+        internamente) -- confirmada por `commit()` antes de que
+        `_send_invitation_email` encole el mail (nunca mandar el email de
+        una invitacion cuya escritura todavia no confirmo)."""
+        await audit(
+            self._repo.session,
+            organization_id=organization_id,
+            action="invitation.sent",
+            entity_type="organization_invitation",
+            entity_id=issued.row.id,
+            after={"email": issued.row.email, "role": "owner"},
+            user_id=actor_user_id,
+        )
+        await self._repo.commit()
 
     async def _issue_invitation(
         self, *, organization_id: UUID, email: str, role_id: UUID
@@ -202,19 +242,20 @@ class OrganizationService:
         if not updated:  # pragma: no cover -- defensivo, race entre el check y el UPDATE
             raise NotFoundException()
 
-        # RN-05: toda operacion de Super Admin se audita (creacion, invitacion,
-        # disable/enable) con actor y motivo. TODO(#10): persistir en
-        # `audit_logs` -- la tabla todavia no existe (issue #10); se deja
-        # constancia estructurada en el logger de la app mientras tanto.
-        logger.info(
-            "organization disabled",
-            extra={
-                "organization_id": str(organization_id),
-                "actor_user_id": str(actor_user_id),
-                "reason": reason,
-                "service": "superadmin",
-            },
+        # RN-05 (issue #10): toda operacion de Super Admin se audita
+        # (creacion, invitacion, disable/enable) con actor y motivo, en la
+        # MISMA transaccion que el UPDATE de arriba.
+        await audit(
+            self._repo.session,
+            organization_id=organization_id,
+            action="org.disabled",
+            entity_type="organization",
+            entity_id=organization_id,
+            before={"status": org.status},
+            after={"status": "disabled", "reason": reason},
+            user_id=actor_user_id,
         )
+        await self._repo.commit()
         result = await self._repo.get_organization_by_id(organization_id)
         if result is None:  # pragma: no cover -- defensivo, se acaba de actualizar
             raise NotFoundException()
@@ -234,16 +275,18 @@ class OrganizationService:
         if not updated:  # pragma: no cover -- defensivo, race entre el check y el UPDATE
             raise NotFoundException()
 
-        # TODO(#10): persistir en `audit_logs` -- la tabla todavia no existe.
-        logger.info(
-            "organization enabled",
-            extra={
-                "organization_id": str(organization_id),
-                "actor_user_id": str(actor_user_id),
-                "reason": reason,
-                "service": "superadmin",
-            },
+        # RN-05 (issue #10): mismo criterio que `disable()`.
+        await audit(
+            self._repo.session,
+            organization_id=organization_id,
+            action="org.enabled",
+            entity_type="organization",
+            entity_id=organization_id,
+            before={"status": org.status},
+            after={"status": "active", "reason": reason},
+            user_id=actor_user_id,
         )
+        await self._repo.commit()
         result = await self._repo.get_organization_by_id(organization_id)
         if result is None:  # pragma: no cover -- defensivo, se acaba de actualizar
             raise NotFoundException()

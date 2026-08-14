@@ -107,6 +107,26 @@ class SuperAdminRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @property
+    def session(self) -> AsyncSession:
+        """Expuesto para que `service.py` pueda pasar la MISMA sesion a
+        `AuditService.audit()` (issue #10), confirmada junto con la
+        escritura de negocio por `commit()`."""
+        return self._session
+
+    async def commit(self) -> None:
+        """Confirma la transaccion actual.
+
+        Issue #10: se centraliza aca (mismo patron que
+        `modules/auth/repository.py.commit` y
+        `modules/administracion/repository.py.commit`) en vez de comitear
+        dentro de cada metodo de escritura (patron anterior de este
+        archivo) -- el `service.py` necesita insertar el evento de
+        `audit_logs` ANTES del commit para que quede en la misma
+        transaccion que la operacion de negocio.
+        """
+        await self._session.commit()
+
     # ─── organizations ──────────────────────────────────────────────
 
     async def slug_exists(self, slug: str) -> bool:
@@ -163,8 +183,9 @@ class SuperAdminRepository:
                 },
             )
 
-        await self._session.commit()
-
+        # Issue #10: el commit lo hace `service.py.create()` DESPUES de
+        # auditar `org.created` en esta misma transaccion (ver `commit()`
+        # de esta clase).
         return OrganizationRow(
             id=row["id"],
             slug=row["slug"],
@@ -246,8 +267,9 @@ class SuperAdminRepository:
             stmt, {"organization_id": str(organization_id), "status": status}
         )
         updated = result.first() is not None
-        if updated:
-            await self._session.commit()
+        # Issue #10: el commit lo hace `service.py.disable()/enable()`
+        # DESPUES de auditar `org.disabled`/`org.enabled` en esta misma
+        # transaccion.
         return updated
 
     # ─── roles ──────────────────────────────────────────────────────
@@ -325,7 +347,8 @@ class SuperAdminRepository:
             },
         )
         row = result.mappings().one()
-        await self._session.commit()
+        # Issue #10: el commit lo hace `service.py` DESPUES de auditar
+        # `invitation.sent` en esta misma transaccion.
         return InvitationRow(**row)
 
 

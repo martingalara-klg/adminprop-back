@@ -32,12 +32,16 @@ _TENANT_SCOPED_TABLES = ("roles", "organization_members", "organization_invitati
 
 
 async def test_ca_5_01_alembic_upgrade_head_deja_la_base_en_la_revision_actual():
-    """CA-5-01: `alembic upgrade head` deja la base en la revision de esta migracion."""
+    """CA-5-01: `alembic upgrade head` deja la base en la revision de esta migracion.
+
+    Issue #10 agrego `20260814_190741_create_audit_logs.py` encima de
+    Capa 0 -- el head se actualiza a esa revision.
+    """
     engine = get_engine()
     async with engine.connect() as conn:
         result = await conn.execute(sa.text("SELECT version_num FROM alembic_version"))
         version = result.scalar_one()
-    assert version == "20260812_212704"
+    assert version == "20260814_190741"
 
 
 async def test_ca_5_01_las_cinco_tablas_de_capa0_existen():
@@ -287,11 +291,18 @@ async def _tables_present() -> set[str]:
 
 
 async def test_ca_5_01_migracion_revierte_y_reaplica_limpio():
-    """CA-5-01: `alembic downgrade -1` elimina las 5 tablas de la Capa 0 sin
+    """CA-5-01: revertir la migracion de Capa 0 elimina sus 5 tablas sin
     error, y `alembic upgrade head` las vuelve a crear sin error — la
     migracion es reversible de punta a punta.
+
+    Issue #10 agrego `20260814_190741_create_audit_logs.py` como nuevo
+    head encima de Capa 0 -- `downgrade -1` ahora revierte esa migracion
+    (no Capa 0). Se apunta al down_revision EXPLICITO de la migracion de
+    Capa 0 (`20260812_114322`, ver `20260812_212704_create_capa0_fundacion.py`)
+    para que este test siga probando especificamente la reversibilidad de
+    Capa 0, sin importar cuantas migraciones se agreguen encima en el futuro.
     """
-    downgrade = await _run_alembic("downgrade", "-1")
+    downgrade = await _run_alembic("downgrade", "20260812_114322")
     assert downgrade.returncode == 0
 
     assert await _tables_present() == set()

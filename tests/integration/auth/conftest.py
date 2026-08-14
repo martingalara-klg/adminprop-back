@@ -79,13 +79,34 @@ async def client(rsa_keypair) -> AsyncGenerator[AsyncClient]:
 
 
 @pytest.fixture()
-def super_admin_headers(rsa_keypair) -> dict[str, str]:
+async def super_admin_headers(rsa_keypair) -> dict[str, str]:
     """JWT `is_super_admin=true` (RN-01) -- issue #8 lo usa para cerrar el
     ciclo end-to-end de CA-00-04 (activar via invitacion -> disable ->
     enable) via /superadmin/* real, mismo patron que
-    tests/integration/superadmin/conftest.py."""
+    tests/integration/superadmin/conftest.py.
+
+    Issue #10: se siembra una fila real en `users` (is_super_admin=TRUE)
+    porque `OrganizationService.disable/enable` ahora auditan con
+    `user_id=actor_user_id`, y `audit_logs.user_id` tiene
+    `REFERENCES users(id)`.
+    """
+    user_id = uuid.uuid4()
+    session_factory = get_session_factory()
+    async with session_factory() as session, session.begin():
+        await session.execute(
+            sa.text(
+                "INSERT INTO users (id, email, password_hash, full_name, is_super_admin) "
+                "VALUES (:id, :email, :password_hash, :full_name, TRUE)"
+            ),
+            {
+                "id": str(user_id),
+                "email": f"superadmin-{user_id.hex[:12]}@example.com",
+                "password_hash": "not-used-in-tests",
+                "full_name": "Super Admin Test",
+            },
+        )
     token = create_access_token(
-        user_id=uuid.uuid4(),
+        user_id=user_id,
         organization_id=None,
         role=None,
         permissions=[],

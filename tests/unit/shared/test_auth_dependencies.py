@@ -88,7 +88,19 @@ class TestRequiresSuperAdmin:
 
         assert result is payload
 
-    async def test_raises_superadmin_required_for_non_super_admin_payload(self):
+    async def test_raises_superadmin_required_for_non_super_admin_payload(self, monkeypatch):
+        """Issue #10: `requires_super_admin` ahora audita `access.denied`
+        (RN-A04) -- se mockea `record_access_denied` para mantener este
+        test unitario puro (org_id fabricado, no sembrado en Postgres;
+        la cobertura real del INSERT vive en
+        tests/integration/shared/test_access_denied_audit.py)."""
+        from adminprop.shared.auth import dependencies as dependencies_module
+
+        async def _noop_record_access_denied(**kwargs: object) -> None:
+            return None
+
+        monkeypatch.setattr(dependencies_module, "record_access_denied", _noop_record_access_denied)
+
         request = _make_request(auth_header="Bearer irrelevant")
         payload = jwt_module.JWTPayload(
             sub=uuid4(),
@@ -101,8 +113,15 @@ class TestRequiresSuperAdmin:
         with pytest.raises(SuperAdminRequiredException):
             await requires_super_admin(request, payload)
 
-    async def test_denied_attempt_is_logged_with_user_id_and_path(self, caplog):
+    async def test_denied_attempt_is_logged_with_user_id_and_path(self, caplog, monkeypatch):
         import logging
+
+        from adminprop.shared.auth import dependencies as dependencies_module
+
+        async def _noop_record_access_denied(**kwargs: object) -> None:
+            return None
+
+        monkeypatch.setattr(dependencies_module, "record_access_denied", _noop_record_access_denied)
 
         request = _make_request(auth_header="Bearer irrelevant")
         payload = jwt_module.JWTPayload(
