@@ -10,9 +10,18 @@ real en este issue (YAGNI).
 
 from __future__ import annotations
 
+import re
+
 import bcrypt
 
 BCRYPT_ROUNDS = 12
+
+# sdd_04 §2.2: ">= 10 caracteres, >= 1 mayuscula, >= 1 numero" (issue #8:
+# accept-invitation y reset-password son los dos flujos que crean un
+# password, ver docstring del modulo arriba).
+_PASSWORD_MIN_LENGTH = 10
+_UPPERCASE_RE = re.compile(r"[A-Z]")
+_DIGIT_RE = re.compile(r"[0-9]")
 
 # Hash dummy fijo (no corresponde a ningun password real) usado para
 # normalizar el tiempo de respuesta cuando el email no existe -- evita que
@@ -40,3 +49,20 @@ def verify_password(plain_password: str, password_hash: str | None) -> bool:
     except ValueError:
         return False
     return result and password_hash is not None
+
+
+def validate_password_policy(password: str) -> None:
+    """sdd_04 §2.2: ">= 10 caracteres, >= 1 mayuscula, >= 1 numero".
+
+    Compartida por `AcceptInvitationRequest` y `ResetPasswordRequest`
+    (issue #8, modules/auth/schemas.py) via `@field_validator` -- levanta
+    `ValueError`, que Pydantic mapea a `RequestValidationError` ->
+    `VALIDATION_ERROR` (400) via el handler global
+    (shared/errors/handlers.py), sin necesidad de un `error.code` nuevo.
+    """
+    if len(password) < _PASSWORD_MIN_LENGTH:
+        raise ValueError(f"La contrasena debe tener al menos {_PASSWORD_MIN_LENGTH} caracteres.")
+    if not _UPPERCASE_RE.search(password):
+        raise ValueError("La contrasena debe tener al menos una mayuscula.")
+    if not _DIGIT_RE.search(password):
+        raise ValueError("La contrasena debe tener al menos un numero.")

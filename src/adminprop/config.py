@@ -78,6 +78,20 @@ class Settings(BaseSettings):
     # RF-03: expiracion de la invitacion de owner, 72 horas.
     invitation_ttl_hours: int = 72
 
+    # ─── issue #8 — Activacion de cuenta + forgot/reset password ──────────
+    # sdd_03 §1 no fija un TTL explicito para el token de reset (a
+    # diferencia de la invitacion, 72h); se adopta 1h -- ventana corta
+    # acorde a un secreto de un solo uso enviado por email bajo demanda
+    # (decision documentada en el PR del issue #8).
+    password_reset_token_ttl_seconds: int = 60 * 60
+    # Ventana de retencion fisica en Redis, mayor a la ventana logica de
+    # arriba: permite que GET /auth/reset-password/:token distinga "el
+    # token nunca existio / ya fue consumido" (404) de "existio pero
+    # vencio" (410, RESET_TOKEN_EXPIRED) incluso despues de pasada la hora
+    # de validez -- si Redis borrara la key exactamente al vencer, ambos
+    # casos lucirian identicos.
+    password_reset_token_grace_seconds: int = 24 * 60 * 60
+
 
 @lru_cache
 def get_settings() -> Settings:
