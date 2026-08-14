@@ -72,7 +72,7 @@ class TestCA0704AdminForbidden:
 
         assert response.status_code == 403
 
-    def test_ca_07_04_admin_retains_audit_read_permission(self):
+    async def test_ca_07_04_admin_retains_audit_read_permission(self):
         """CA-07-04: "puede leer el log de auditoria" -- el endpoint real
         de `GET /audit-logs` es del issue #32 (RF-05, fuera de alcance de
         este issue) y todavia no existe. Este test verifica la base que

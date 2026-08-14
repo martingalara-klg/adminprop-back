@@ -9,12 +9,18 @@ tests/unit/modules/superadmin/test_repository_helpers.py.
 import uuid
 from datetime import UTC, datetime
 
+import pytest
+
 from adminprop.modules.administracion.repository import (
+    RoleRow,
     _decode_cursor,
     _encode_cursor,
     _parse_json_list,
     _parse_settings,
 )
+from adminprop.modules.administracion.service import RoleService
+from adminprop.modules.superadmin.provisioning import OWNER_PERMISSIONS
+from adminprop.shared.errors.codes import SystemRoleImmutableException
 
 
 class TestParseJsonList:
@@ -51,3 +57,35 @@ class TestCursorRoundTrip:
 
         assert decoded_created_at == created_at
         assert decoded_id == row_id
+
+
+class TestCA0703SystemRoleImmutable:
+    """CA-07-03 (spec_module_07_administracion.md): "Intentar editar un
+    rol de sistema devuelve 422 SYSTEM_ROLE_IMMUTABLE". `sdd_03` §3 no
+    define un endpoint de escritura de roles en MVP (`GET /roles` es
+    solo lectura); este test cubre la invariante RN-03 a nivel de
+    servicio, invocable por cualquier endpoint de escritura futuro."""
+
+    def test_ca_07_03_system_role_immutable(self):
+        role = RoleRow(
+            id=uuid.uuid4(),
+            name="owner",
+            permissions=list(OWNER_PERMISSIONS),
+            is_system_role=True,
+        )
+
+        with pytest.raises(SystemRoleImmutableException):
+            RoleService.ensure_role_editable(role)
+
+    def test_ensure_role_editable_allows_non_system_roles(self):
+        """Defensivo: si en el futuro existieran roles custom
+        (`is_system_role=False`, post-MVP segun RF-03), el metodo no
+        levanta excepcion."""
+        role = RoleRow(
+            id=uuid.uuid4(),
+            name="custom",
+            permissions=["contract:read"],
+            is_system_role=False,
+        )
+
+        RoleService.ensure_role_editable(role)
