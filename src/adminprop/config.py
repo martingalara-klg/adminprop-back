@@ -69,6 +69,15 @@ class Settings(BaseSettings):
     refresh_rate_limit_max: int = 60
     refresh_rate_limit_window_seconds: int = 60 * 60
 
+    # ─── issue #7 — Superadmin: organizaciones + invitacion de owner ───────
+    # spec_module_00_superadmin.md "Flujo de Activacion de Cuenta": el link
+    # de invitacion apunta al frontend (`/accept-invitation?token=...`), no
+    # a este backend. Sin infra cloud todavia (CLAUDE.md §10), el default
+    # local apunta al puerto de Vite (`adminprop-front`, RUNBOOK-LOCAL-001).
+    frontend_base_url: str = "http://localhost:5173"
+    # RF-03: expiracion de la invitacion de owner, 72 horas.
+    invitation_ttl_hours: int = 72
+
 
 @lru_cache
 def get_settings() -> Settings:

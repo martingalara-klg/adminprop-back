@@ -78,3 +78,30 @@ class InternalError(AdminPropException):
     status_code = 500
     error_code = "INTERNAL_ERROR"
     message = "Ocurrio un error inesperado. El equipo fue notificado."
+
+
+class SuperAdminRequiredException(AdminPropException):
+    """sdd_03 §2 -- 403 SUPERADMIN_REQUIRED.
+
+    CA-00-05 (spec_module_00_superadmin.md): un usuario owner/admin/
+    maintenance que intenta acceder a `/superadmin/*` recibe este error;
+    el intento queda auditado (TODO(#10): audit_logs todavia no existe).
+    """
+
+    status_code = 403
+    error_code = "SUPERADMIN_REQUIRED"
+    message = "Esta accion requiere permisos de Super Admin."
+
+
+class InvitationPendingExistsException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 409 INVITATION_PENDING_EXISTS.
+
+    RF-03 (spec_module_00_superadmin.md): solo puede existir una invitacion
+    de owner `pending` por organizacion. `POST .../invite-owner` la levanta
+    si ya hay una pendiente -- el caller debe usar
+    `POST .../resend-invitation` (que revoca la anterior automaticamente).
+    """
+
+    status_code = 409
+    error_code = "INVITATION_PENDING_EXISTS"
+    message = "Ya existe una invitacion de owner pendiente para esta organizacion."
