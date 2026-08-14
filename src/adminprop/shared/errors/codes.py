@@ -93,6 +93,66 @@ class SuperAdminRequiredException(AdminPropException):
     message = "Esta accion requiere permisos de Super Admin."
 
 
+class InvitationNotFoundException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 404 INVITATION_NOT_FOUND.
+
+    Issue #8 (spec_module_00_superadmin.md "Flujo de Activacion de
+    Cuenta" paso 2): token de invitacion desconocido, o cuyo estado
+    (`revoked`) no debe distinguirse de "no existe" para no revelar
+    informacion del ciclo de vida de la invitacion.
+    """
+
+    status_code = 404
+    error_code = "INVITATION_NOT_FOUND"
+    message = "La invitacion no existe o ya no es valida."
+
+
+class InvitationExpiredException(AdminPropException):
+    """sdd_03 -- 410 INVITATION_EXPIRED (issue #8, GET/POST invitation)."""
+
+    status_code = 410
+    error_code = "INVITATION_EXPIRED"
+    message = "La invitacion expiro. Pedile a un administrador que te reenvie una nueva."
+
+
+class InvitationAlreadyAcceptedException(AdminPropException):
+    """sdd_03 -- 409 INVITATION_ALREADY_ACCEPTED (issue #8)."""
+
+    status_code = 409
+    error_code = "INVITATION_ALREADY_ACCEPTED"
+    message = "Esta invitacion ya fue utilizada."
+
+
+class UserAlreadyMemberException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 409 USER_ALREADY_MEMBER.
+
+    Issue #8: `accept-invitation` con un email que ya es user global Y ya
+    tiene membresia (activa o inactiva) en la organizacion de la
+    invitacion -- decision de implementacion del issue (ver PR): se
+    modela como conflicto explicito en vez de reactivar la membresia en
+    silencio.
+    """
+
+    status_code = 409
+    error_code = "USER_ALREADY_MEMBER"
+    message = "Este usuario ya es miembro de la organizacion."
+
+
+class ResetTokenExpiredException(AdminPropException):
+    """Issue #8 -- 410, agregado a sdd_03 §"Codigos de Error Globales" en
+    este mismo PR (regla de oro: el SDD se actualiza antes que el codigo).
+
+    Equivalente de INVITATION_EXPIRED pero para
+    GET/POST /auth/reset-password/:token: el token de reset existio (a
+    diferencia de NOT_FOUND, generico y ya en catalogo, para "nunca
+    existio / ya fue consumido") pero su ventana de 1h ya paso.
+    """
+
+    status_code = 410
+    error_code = "RESET_TOKEN_EXPIRED"
+    message = "El link para restablecer tu contrasena vencio. Pedi uno nuevo."
+
+
 class InvitationPendingExistsException(AdminPropException):
     """sdd_03 §"Codigos de Error Globales" -- 409 INVITATION_PENDING_EXISTS.
 

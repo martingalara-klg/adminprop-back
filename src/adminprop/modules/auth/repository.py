@@ -18,13 +18,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from adminprop.db.session import get_db_session
+from adminprop.db.session import get_db_session, get_superadmin_db_session
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,24 @@ class MembershipRecord:
     organization_name: str
     role_name: str
     permissions: list[str]
+
+
+@dataclass(frozen=True)
+class InvitationDetailRecord:
+    """Issue #8: shape completo de una invitacion + su org/rol para
+    `GET /auth/invitation/:token` y `POST /auth/accept-invitation`
+    (spec_module_00_superadmin.md "Flujo de Activacion de Cuenta")."""
+
+    id: UUID
+    organization_id: UUID
+    organization_name: str
+    organization_status: str
+    email: str
+    role_id: UUID
+    role_name: str
+    role_permissions: list[str]
+    status: str
+    expires_at: datetime
 
 
 def _parse_permissions(raw: object) -> list[str]:
@@ -140,8 +159,149 @@ class AuthRepository:
             for row in rows
         ]
 
+    # ─── issue #8 — activacion de cuenta + reset password ───────────────
+    # Los metodos de esta seccion se invocan siempre a traves de
+    # `get_auth_activation_repository` (sesion BYPASSRLS, ver mas abajo):
+    # el organization_id de una invitacion es desconocido hasta resolver
+    # el token (cross-org por naturaleza), igual criterio que
+    # `get_active_memberships` arriba y que
+    # `modules/superadmin/repository.py` (docs/skills/tenant-isolation.md
+    # "Super Admin: rol DB privilegiado"). Cada query igual filtra
+    # `organization_id`/`id` explicitamente (defense in depth).
+
+    async def get_invitation_by_token_hash(self, token_hash: str) -> InvitationDetailRecord | None:
+        """spec_module_00_superadmin.md "Flujo de Activacion de Cuenta" paso 2/3."""
+        stmt = text(
+            """
+            SELECT oi.id, oi.organization_id, o.name AS organization_name,
+                   o.status AS organization_status, oi.email, oi.role_id,
+                   r.name AS role_name, r.permissions AS role_permissions,
+                   oi.status, oi.expires_at
+            FROM organization_invitations oi
+            JOIN organizations o ON o.id = oi.organization_id
+            JOIN roles r ON r.id = oi.role_id
+            WHERE oi.token = :token_hash
+            """
+        )
+        result = await self._session.execute(stmt, {"token_hash": token_hash})
+        row = result.mappings().first()
+        if row is None:
+            return None
+        return InvitationDetailRecord(
+            id=row["id"],
+            organization_id=row["organization_id"],
+            organization_name=row["organization_name"],
+            organization_status=row["organization_status"],
+            email=row["email"],
+            role_id=row["role_id"],
+            role_name=row["role_name"],
+            role_permissions=_parse_permissions(row["role_permissions"]),
+            status=row["status"],
+            expires_at=row["expires_at"],
+        )
+
+    async def get_membership_status(self, organization_id: UUID, user_id: UUID) -> str | None:
+        """`None` si el user global no tiene ninguna fila de membresia en
+        `organization_id` (activa o inactiva) -- usado para decidir
+        `USER_ALREADY_MEMBER` en accept-invitation."""
+        stmt = text(
+            "SELECT status FROM organization_members "
+            "WHERE organization_id = :organization_id AND user_id = :user_id"
+        )
+        result = await self._session.execute(
+            stmt, {"organization_id": str(organization_id), "user_id": str(user_id)}
+        )
+        row = result.first()
+        return row[0] if row is not None else None
+
+    async def create_user(self, *, email: str, password_hash: str, full_name: str) -> UserRecord:
+        stmt = text(
+            """
+            INSERT INTO users (email, password_hash, full_name)
+            VALUES (:email, :password_hash, :full_name)
+            RETURNING id, email, password_hash, full_name, is_super_admin
+            """
+        )
+        result = await self._session.execute(
+            stmt, {"email": email, "password_hash": password_hash, "full_name": full_name}
+        )
+        row = result.mappings().one()
+        return UserRecord(
+            id=row["id"],
+            email=row["email"],
+            password_hash=row["password_hash"],
+            full_name=row["full_name"],
+            is_super_admin=bool(row["is_super_admin"]),
+        )
+
+    async def create_membership(
+        self, *, organization_id: UUID, user_id: UUID, role_id: UUID
+    ) -> None:
+        stmt = text(
+            """
+            INSERT INTO organization_members (organization_id, user_id, role_id, status)
+            VALUES (:organization_id, :user_id, :role_id, 'active')
+            """
+        )
+        await self._session.execute(
+            stmt,
+            {
+                "organization_id": str(organization_id),
+                "user_id": str(user_id),
+                "role_id": str(role_id),
+            },
+        )
+
+    async def mark_invitation_accepted(self, invitation_id: UUID) -> None:
+        stmt = text(
+            "UPDATE organization_invitations SET status = 'accepted', updated_at = now() "
+            "WHERE id = :id"
+        )
+        await self._session.execute(stmt, {"id": str(invitation_id)})
+
+    async def activate_organization(self, organization_id: UUID) -> None:
+        """CA-00-03: "la organizacion pasa a active" al completar la
+        activacion -- se aplica siempre (idempotente si ya estaba active),
+        defense in depth con filtro explicito por id aunque la sesion ya
+        sea BYPASSRLS."""
+        stmt = text(
+            "UPDATE organizations SET status = 'active', updated_at = now() "
+            "WHERE id = :organization_id"
+        )
+        await self._session.execute(stmt, {"organization_id": str(organization_id)})
+
+    async def update_password_hash(self, user_id: UUID, password_hash: str) -> None:
+        """reset-password (issue #8): `users` no tiene RLS (issue #5), no
+        requiere sesion BYPASSRLS -- se invoca via `get_auth_repository`
+        (sesion `adminprop_app` normal)."""
+        stmt = text(
+            "UPDATE users SET password_hash = :password_hash, updated_at = now() "
+            "WHERE id = :user_id"
+        )
+        await self._session.execute(stmt, {"user_id": str(user_id), "password_hash": password_hash})
+
+    async def commit(self) -> None:
+        """Confirma la transaccion actual. Expuesto explicitamente (en vez
+        de comitear dentro de cada metodo de escritura, patron de
+        `modules/superadmin/repository.py`) porque accept-invitation
+        combina varias escrituras (create_user + create_membership +
+        mark_invitation_accepted + activate_organization) que deben
+        confirmarse **todas juntas** en una unica transaccion (spec_module_00_superadmin.md
+        "Flujo de Activacion de Cuenta" paso 4)."""
+        await self._session.commit()
+
 
 def get_auth_repository(
     session: AsyncSession = Depends(get_db_session),
 ) -> AuthRepository:
+    return AuthRepository(session)
+
+
+def get_auth_activation_repository(
+    session: AsyncSession = Depends(get_superadmin_db_session),
+) -> AuthRepository:
+    """Issue #8: variante BYPASSRLS para accept-invitation/GET invitation --
+    el organization_id de la invitacion todavia no se conoce al momento de
+    resolver el token (docs/skills/tenant-isolation.md "Super Admin: rol DB
+    privilegiado", mismo mecanismo que `get_active_memberships`)."""
     return AuthRepository(session)

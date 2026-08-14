@@ -7,9 +7,12 @@ el cliente Redis (usado por lockout/refresh_store/rate_limit) y un par de
 claves RS256 efimero generado por test (nunca se commitea).
 """
 
+import hashlib
 import json
+import secrets
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import sqlalchemy as sa
@@ -21,6 +24,7 @@ from adminprop.config import get_settings
 from adminprop.db.session import get_engine, get_session_factory
 from adminprop.main import create_app
 from adminprop.shared.auth import jwt as jwt_module
+from adminprop.shared.auth.jwt import create_access_token
 from adminprop.shared.auth.passwords import hash_password
 from adminprop.shared.cache.redis import get_redis_client
 
@@ -72,6 +76,23 @@ async def client(rsa_keypair) -> AsyncGenerator[AsyncClient]:
     transport = ASGITransport(app=create_app())
     async with AsyncClient(transport=transport, base_url="https://testserver") as async_client:
         yield async_client
+
+
+@pytest.fixture()
+def super_admin_headers(rsa_keypair) -> dict[str, str]:
+    """JWT `is_super_admin=true` (RN-01) -- issue #8 lo usa para cerrar el
+    ciclo end-to-end de CA-00-04 (activar via invitacion -> disable ->
+    enable) via /superadmin/* real, mismo patron que
+    tests/integration/superadmin/conftest.py."""
+    token = create_access_token(
+        user_id=uuid.uuid4(),
+        organization_id=None,
+        role=None,
+        permissions=[],
+        is_super_admin=True,
+        jti=str(uuid.uuid4()),
+    )
+    return {"Authorization": f"Bearer {token}"}
 
 
 def _unique_email() -> str:
@@ -182,6 +203,42 @@ def seed():
                         "status": status,
                     },
                 )
+
+        async def create_invitation(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            role_id: uuid.UUID,
+            email: str | None = None,
+            status: str = "pending",
+            expires_in_hours: float = 72,
+        ) -> str:
+            """Issue #8: siembra una invitacion directamente en DB (mismo
+            hash sha256 que `modules/superadmin/service.py._hash_token` /
+            `modules/auth/service.py._hash_invitation_token`) y retorna el
+            token RAW para usarlo en accept-invitation/GET invitation."""
+            email = email or _unique_email()
+            raw_token = secrets.token_urlsafe(32)
+            token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+            expires_at = datetime.now(UTC) + timedelta(hours=expires_in_hours)
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO organization_invitations "
+                        "(organization_id, email, role_id, token, status, expires_at) "
+                        "VALUES (:org_id, :email, :role_id, :token, :status, :expires_at)"
+                    ),
+                    {
+                        "org_id": str(organization_id),
+                        "email": email,
+                        "role_id": str(role_id),
+                        "token": token_hash,
+                        "status": status,
+                        "expires_at": expires_at,
+                    },
+                )
+            return raw_token
 
         async def create_active_member_with_org(
             self,

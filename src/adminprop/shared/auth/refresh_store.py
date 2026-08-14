@@ -35,6 +35,11 @@ from adminprop.shared.errors.codes import UnauthorizedException
 
 _TOKEN_PREFIX = "auth:refresh:token:"
 _FAMILY_PREFIX = "auth:refresh:family:"
+# Issue #8 (reset-password): indice inverso user_id -> {family_id, ...}
+# para poder revocar "todas las sesiones" de un usuario en una sola
+# operacion -- invariante de seguridad de sdd_04 §2.2 "refresh tokens
+# revocables" que el issue #8 explota al cambiar el password.
+_USER_FAMILIES_PREFIX = "auth:refresh:user_families:"
 
 
 def _hash_token(raw_token: str) -> str:
@@ -47,6 +52,10 @@ def _token_key(token_hash: str) -> str:
 
 def _family_key(family_id: str) -> str:
     return f"{_FAMILY_PREFIX}{family_id}"
+
+
+def _user_families_key(user_id: UUID) -> str:
+    return f"{_USER_FAMILIES_PREFIX}{user_id}"
 
 
 @dataclass(frozen=True)
@@ -77,9 +86,16 @@ class RefreshTokenStore:
     ) -> RefreshTokenIssued:
         """Crea una familia nueva (login) con un unico token activo."""
         family_id = str(uuid4())
-        return await self._issue_token(
+        issued = await self._issue_token(
             user_id=user_id, organization_id=organization_id, family_id=family_id
         )
+        # Issue #8: registrar la familia en el indice del usuario para
+        # poder revocar todas sus sesiones de una vez (reset-password).
+        # Mismo TTL que el token para que el set no sobreviva indefinidamente
+        # a familias ya vencidas y purgadas de Redis.
+        await self._redis.sadd(_user_families_key(user_id), family_id)
+        await self._redis.expire(_user_families_key(user_id), self._ttl_seconds)
+        return issued
 
     async def _issue_token(
         self, *, user_id: UUID, organization_id: UUID | None, family_id: str
@@ -155,3 +171,16 @@ class RefreshTokenStore:
             return
         data = json.loads(raw_record)
         await self.revoke_family(data["family_id"])
+
+    async def revoke_all_families_for_user(self, user_id: UUID) -> None:
+        """Issue #8 (reset-password): cierra todas las sesiones existentes
+        del usuario -- revoca cada familia de refresh token conocida via el
+        indice `_user_families_key`. Buena practica de seguridad tras un
+        cambio de password (no es un CA formal del issue, pero es
+        exactamente el escenario para el que sdd_04 §2.2 declara "refresh
+        tokens server-side en Redis (revocables)")."""
+        key = _user_families_key(user_id)
+        family_ids = await self._redis.smembers(key)
+        for family_id in family_ids:
+            await self.revoke_family(family_id)
+        await self._redis.delete(key)
