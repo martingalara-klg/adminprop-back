@@ -165,3 +165,45 @@ class InvitationPendingExistsException(AdminPropException):
     status_code = 409
     error_code = "INVITATION_PENDING_EXISTS"
     message = "Ya existe una invitacion de owner pendiente para esta organizacion."
+
+
+class LastOwnerRequiredException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 422 LAST_OWNER_REQUIRED.
+
+    Issue #9 (spec_module_07_administracion.md RN-02/RN-A03): la
+    organizacion siempre debe tener al menos un owner activo -- se
+    levanta al intentar desactivar o cambiarle el rol al ultimo owner
+    activo.
+    """
+
+    status_code = 422
+    error_code = "LAST_OWNER_REQUIRED"
+    message = "La organizacion debe tener al menos un owner activo."
+
+
+class SystemRoleImmutableException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 422 SYSTEM_ROLE_IMMUTABLE.
+
+    Issue #9 (spec_module_07_administracion.md RF-03/RN-03): los roles de
+    sistema (`owner`, `admin`, `maintenance`) son inmutables en el MVP --
+    no hay endpoint de escritura de roles todavia (`GET /roles` es solo
+    lectura), pero la invariante se documenta aca para que cualquier
+    endpoint futuro la reutilice.
+    """
+
+    status_code = 422
+    error_code = "SYSTEM_ROLE_IMMUTABLE"
+    message = "Los roles de sistema no se pueden editar."
+
+
+class RoleNotFoundException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 404 ROLE_NOT_FOUND.
+
+    Issue #9: defensivo -- el nombre de rol (`admin`/`maintenance`) no
+    existe para la organizacion del JWT (no deberia pasar nunca, los 3
+    roles de sistema se siembran en la creacion de la organizacion).
+    """
+
+    status_code = 404
+    error_code = "ROLE_NOT_FOUND"
+    message = "El rol solicitado no existe."

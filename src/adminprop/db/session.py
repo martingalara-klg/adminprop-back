@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from uuid import UUID
 
+from fastapi import Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -28,6 +29,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from adminprop.config import get_settings
+from adminprop.shared.tenant import get_current_tenant
 
 # Setting de sesion Postgres que las politicas RLS leen via
 # current_setting('app.current_tenant_id', true) (missing_ok=true).
@@ -147,5 +149,22 @@ async def tenant_scoped_session(
     """
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await set_tenant_context(session, organization_id)
+        yield session
+
+
+async def get_tenant_db_session(
+    organization_id: UUID = Depends(get_current_tenant),
+) -> AsyncGenerator[AsyncSession]:
+    """Dependency FastAPI para modulos tenant-scoped sin middleware global
+    todavia (issue #9, primer modulo que necesita RLS activo con un
+    tenant real resuelto desde el JWT).
+
+    Setea `app.current_tenant_id` ANTES de la primera query del endpoint
+    -- corre bajo el rol de sesion normal (`adminprop_app`, sujeto a RLS
+    FORCE), a diferencia de `get_superadmin_db_session` (BYPASSRLS).
+    """
+    session_factory = get_session_factory()
+    async with session_factory() as session:
         await set_tenant_context(session, organization_id)
         yield session
