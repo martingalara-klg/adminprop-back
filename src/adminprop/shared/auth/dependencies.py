@@ -15,6 +15,7 @@ import logging
 
 from fastapi import Depends, Request
 
+from adminprop.shared.audit.service import record_access_denied
 from adminprop.shared.auth.cookies import ACCESS_TOKEN_COOKIE
 from adminprop.shared.auth.jwt import JWTPayload, decode_access_token
 from adminprop.shared.errors.codes import SuperAdminRequiredException, UnauthorizedException
@@ -50,11 +51,11 @@ async def requires_super_admin(
     owner/admin/maintenance que intenta acceder a /superadmin/* recibe
     403 SUPERADMIN_REQUIRED y el intento queda auditado").
 
-    TODO(#10): persistir el intento denegado en `audit_logs` (la tabla no
-    existe todavia -- issue #10). Por ahora se deja constancia estructurada
-    en el logger de la app (request_id ya viaja via ContextVar, sdd_04
-    §4.1) para no perder trazabilidad mientras el modulo de auditoria no
-    esta implementado.
+    RN-A04 (issue #10): el intento denegado se persiste en `audit_logs`
+    via `record_access_denied` -- se mantiene tambien el `logger.warning`
+    estructurado (request_id ya viaja via ContextVar, sdd_04 §4.1) para
+    observabilidad en tiempo real, independiente del audit trail
+    persistido.
     """
     if not payload.is_super_admin:
         logger.warning(
@@ -64,6 +65,15 @@ async def requires_super_admin(
                 "path": request.url.path,
                 "service": "superadmin",
             },
+        )
+        # RN-A04: `payload.org_id` es None solo si un token ya de Super
+        # Admin llegara aca -- imposible por construccion (is_super_admin
+        # es False en esta rama) -- pero `record_access_denied` igual
+        # tolera None sin persistir (ver su docstring).
+        await record_access_denied(
+            organization_id=payload.org_id,
+            user_id=payload.sub,
+            details={"path": request.url.path},
         )
         raise SuperAdminRequiredException()
     return payload

@@ -99,12 +99,13 @@ async def list_organizations(
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=OrganizationResponse)
 async def create_organization(
     dto: OrganizationCreate,
+    payload: JWTPayload = Depends(requires_super_admin),
     service: OrganizationService = Depends(get_organization_service),
 ) -> OrganizationResponse:
     """RF-02 + CA-00-01: crea la organizacion en `pending_owner`, slug
     autogenerado unico, 3 roles de sistema + settings default sembrados
     en la misma transaccion."""
-    org = await service.create(dto.name, dto.timezone)
+    org = await service.create(dto.name, dto.timezone, payload.sub)
     return OrganizationResponse(data=_to_detail(org))
 
 
@@ -130,10 +131,13 @@ async def get_organization(
 async def invite_owner(
     organization_id: UUID,
     dto: InviteOwnerRequest,
+    payload: JWTPayload = Depends(requires_super_admin),
     service: OrganizationService = Depends(get_organization_service),
 ) -> InvitationResponse:
     """RF-03 + CA-00-02: invita al owner inicial; expira a las 72h."""
-    invitation = await service.invite_owner(organization_id, dto.email, _request_id())
+    invitation = await service.invite_owner(
+        organization_id, dto.email, _request_id(), payload.sub
+    )
     return InvitationResponse(data=InvitationSummary.model_validate(invitation))
 
 
@@ -144,10 +148,11 @@ async def invite_owner(
 )
 async def resend_invitation(
     organization_id: UUID,
+    payload: JWTPayload = Depends(requires_super_admin),
     service: OrganizationService = Depends(get_organization_service),
 ) -> InvitationResponse:
     """RF-04 + CA-00-02: regenera token/expiracion; la anterior queda `revoked`."""
-    invitation = await service.resend_invitation(organization_id, _request_id())
+    invitation = await service.resend_invitation(organization_id, _request_id(), payload.sub)
     return InvitationResponse(data=InvitationSummary.model_validate(invitation))
 
 

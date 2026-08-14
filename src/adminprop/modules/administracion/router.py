@@ -41,6 +41,7 @@ from adminprop.modules.administracion.service import (
     get_role_service,
     get_user_service,
 )
+from adminprop.shared.auth.jwt import JWTPayload
 from adminprop.shared.logging.json_logger import request_id_var
 from adminprop.shared.rbac import requires_permission
 from adminprop.shared.tenant import get_current_tenant
@@ -205,12 +206,12 @@ async def list_users(
 @users_router.patch(
     "/{user_id}",
     response_model=UserResponse,
-    dependencies=[Depends(requires_permission("user:manage"))],
 )
 async def change_user_role(
     user_id: UUID,
     dto: ChangeUserRoleRequest,
     organization_id: UUID = Depends(get_current_tenant),
+    payload: JWTPayload = Depends(requires_permission("user:manage")),
     service: UserService = Depends(get_user_service),
 ) -> UserResponse:
     """RF-02 + CA-07-02: cambia el rol de un miembro. `422
@@ -218,7 +219,10 @@ async def change_user_role(
     no esta permitido (`ChangeUserRoleRequest.role` ya lo rechaza con
     422 VALIDATION_ERROR via Pydantic `Literal`)."""
     member = await service.change_role(
-        organization_id=organization_id, user_id=user_id, new_role_name=dto.role
+        organization_id=organization_id,
+        user_id=user_id,
+        new_role_name=dto.role,
+        actor_user_id=payload.sub,
     )
     return UserResponse(data=_to_user_summary(member))
 
@@ -226,16 +230,18 @@ async def change_user_role(
 @users_router.delete(
     "/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(requires_permission("user:manage"))],
 )
 async def deactivate_user(
     user_id: UUID,
     organization_id: UUID = Depends(get_current_tenant),
+    payload: JWTPayload = Depends(requires_permission("user:manage")),
     service: UserService = Depends(get_user_service),
 ) -> None:
     """RF-02 + CA-07-02: desactiva (soft) un miembro y revoca sus sesiones.
     `422 LAST_OWNER_REQUIRED` si es el unico owner activo."""
-    await service.deactivate(organization_id=organization_id, user_id=user_id)
+    await service.deactivate(
+        organization_id=organization_id, user_id=user_id, actor_user_id=payload.sub
+    )
 
 
 # ─── RF-03: roles ─────────────────────────────────────────────────────────
@@ -277,11 +283,11 @@ async def get_organization_settings(
 @organization_settings_router.put(
     "",
     response_model=OrganizationSettingsResponse,
-    dependencies=[Depends(requires_permission("organization:configure"))],
 )
 async def update_organization_settings(
     dto: OrganizationSettingsUpdate,
     organization_id: UUID = Depends(get_current_tenant),
+    payload: JWTPayload = Depends(requires_permission("organization:configure")),
     service: OrganizationSettingsService = Depends(get_organization_settings_service),
 ) -> OrganizationSettingsResponse:
     """RF-04 + CA-07-05: actualiza `grace_day`, `contract_expiry_notice_days`
@@ -294,5 +300,6 @@ async def update_organization_settings(
         billing_name=dto.billing_name,
         billing_cuit=dto.billing_cuit,
         billing_contact=dto.billing_contact,
+        actor_user_id=payload.sub,
     )
     return OrganizationSettingsResponse(data=_to_settings_data(settings))

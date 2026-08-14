@@ -90,8 +90,8 @@ class OrganizationStatusChangeRequest(BaseModel):
 
     RN-05 (spec_module_00_superadmin.md): "las operaciones del Super Admin
     se auditan siempre ... con actor y motivo" -- `reason` es obligatorio
-    para que quede constancia del motivo (TODO(#10): persistencia real en
-    audit_logs, hoy va al logger estructurado -- ver router.py).
+    para que quede constancia del motivo (issue #10: persistido en
+    `audit_logs` via `AuditService`, ver `modules/superadmin/service.py`).
     """
 
     model_config = ConfigDict(extra="forbid")

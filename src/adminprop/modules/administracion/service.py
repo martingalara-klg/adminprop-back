@@ -24,6 +24,7 @@ from adminprop.modules.administracion.repository import (
     RoleRow,
     get_administracion_repository,
 )
+from adminprop.shared.audit.service import audit
 from adminprop.shared.auth.refresh_store import RefreshTokenStore
 from adminprop.shared.cache.redis import get_redis_client
 from adminprop.shared.errors.codes import (
@@ -97,10 +98,10 @@ class UserService:
         await self._repo.commit()
         self._send_invitation_email(to=email, raw_token=issued.raw_token, request_id=request_id)
 
-        # TODO(#10): persistir en `audit_logs` -- la tabla todavia no
-        # existe (issue #10). Se deja constancia estructurada en el
-        # logger de la app mientras tanto (mismo criterio que
-        # modules/superadmin/service.py).
+        # Nota (issue #10): "invitar un usuario" no esta en la lista minima
+        # de eventos auditados de sdd_02 §2.17 ("cambios de rol/usuario,
+        # intentos de acceso no autorizado, ...") -- se deja como logging
+        # estructurado (no `audit_logs`) hasta que un CA/RN real lo pida.
         logger.info(
             "user invited",
             extra={
@@ -192,7 +193,12 @@ class UserService:
         )
 
     async def change_role(
-        self, *, organization_id: UUID, user_id: UUID, new_role_name: str
+        self,
+        *,
+        organization_id: UUID,
+        user_id: UUID,
+        new_role_name: str,
+        actor_user_id: UUID,
     ) -> MemberRow:
         """RF-02: `PATCH /users/:id`.
 
@@ -218,23 +224,29 @@ class UserService:
         await self._repo.update_member_role(
             organization_id=organization_id, user_id=user_id, role_id=role_id
         )
+
+        # RN-D04 / sdd_02 §2.17 ("cambios de rol/usuario" -- evento minimo
+        # auditado): registrado en la MISMA transaccion que el UPDATE de
+        # arriba -- si algo rollbackea despues, el audit tambien.
+        await audit(
+            self._repo.session,
+            organization_id=organization_id,
+            action="user.role_changed",
+            entity_type="organization_member",
+            entity_id=user_id,
+            before={"role": member.role_name},
+            after={"role": new_role_name},
+            user_id=actor_user_id,
+        )
         await self._repo.commit()
 
-        # TODO(#10): persistir en `audit_logs` (issue #10).
-        logger.info(
-            "member role changed",
-            extra={
-                "organization_id": str(organization_id),
-                "user_id": str(user_id),
-                "new_role": new_role_name,
-                "service": "administracion",
-            },
-        )
         updated = await self._repo.get_member(organization_id, user_id)
         assert updated is not None  # pragma: no cover -- se acaba de actualizar
         return updated
 
-    async def deactivate(self, *, organization_id: UUID, user_id: UUID) -> None:
+    async def deactivate(
+        self, *, organization_id: UUID, user_id: UUID, actor_user_id: UUID
+    ) -> None:
         """RF-02: `DELETE /users/:id` -- soft (`status='inactive'`).
 
         RN-02/RN-A03: mismo lock que `change_role` si el miembro es
@@ -254,18 +266,23 @@ class UserService:
                 raise LastOwnerRequiredException()
 
         await self._repo.deactivate_member(organization_id=organization_id, user_id=user_id)
+
+        # RN-D04 / sdd_02 §2.17 ("cambios de rol/usuario"): audit en la
+        # MISMA transaccion que el soft-delete de arriba, confirmada por
+        # el mismo `commit()` -- se mueve el commit despues del audit
+        # (antes commiteaba primero, ver PR #10).
+        await audit(
+            self._repo.session,
+            organization_id=organization_id,
+            action="user.deactivated",
+            entity_type="organization_member",
+            entity_id=user_id,
+            before={"status": member.status},
+            after={"status": "inactive"},
+            user_id=actor_user_id,
+        )
         await self._repo.commit()
         await self._refresh_store.revoke_all_families_for_user(user_id)
-
-        # TODO(#10): persistir en `audit_logs` (issue #10).
-        logger.info(
-            "member deactivated",
-            extra={
-                "organization_id": str(organization_id),
-                "user_id": str(user_id),
-                "service": "administracion",
-            },
-        )
 
 
 def get_user_service(
@@ -325,6 +342,7 @@ class OrganizationSettingsService:
         billing_name: str | None,
         billing_cuit: str | None,
         billing_contact: str | None,
+        actor_user_id: UUID,
     ) -> dict:
         """RF-04: mergea los campos nuevos dentro del JSON `settings`
         existente (no pisa otras claves que puedan existir a futuro).
@@ -332,15 +350,14 @@ class OrganizationSettingsService:
         RN-05/CA-07-05: `grace_day` rige desde el momento del cambio, sin
         recalcular intereses ya imputados -- este servicio solo persiste
         el nuevo valor (el modulo de cobranzas, issue #22, es el que
-        consume `grace_day` al calcular mora futura). Si `grace_day`
-        cambio respecto al valor anterior, se deja constancia en el
-        logger (TODO(#10): persistir en `audit_logs`).
+        consume `grace_day` al calcular mora futura). El cambio (si lo
+        hay) queda auditado en `audit_logs` (issue #10, action
+        `settings.changed`).
         """
         current = await self._repo.get_organization_settings(organization_id)
         if current is None:  # pragma: no cover -- defensivo, la org del JWT siempre existe
             raise NotFoundException()
 
-        previous_grace_day = current.get("grace_day")
         merged = {
             **current,
             "grace_day": grace_day,
@@ -354,21 +371,23 @@ class OrganizationSettingsService:
         updated = await self._repo.update_organization_settings(organization_id, merged)
         if updated is None:  # pragma: no cover -- defensivo, la org del JWT siempre existe
             raise NotFoundException()
-        await self._repo.commit()
 
-        if previous_grace_day != grace_day:
-            # RN-05 / CA-07-05: "grace_day rige desde el momento del
-            # cambio, sin recalcular intereses ya imputados" -- se
-            # audita el cambio (TODO(#10): audit_logs todavia no existe).
-            logger.info(
-                "organization grace_day changed",
-                extra={
-                    "organization_id": str(organization_id),
-                    "previous_grace_day": previous_grace_day,
-                    "new_grace_day": grace_day,
-                    "service": "administracion",
-                },
+        if current != merged:
+            # RN-D04 / sdd_02 §2.17 ("cambios de rol/usuario" y, por
+            # extension, de configuracion sensible como `grace_day`):
+            # audit en la MISMA transaccion que el UPDATE de arriba, sin
+            # ruido si el PUT no cambio nada.
+            await audit(
+                self._repo.session,
+                organization_id=organization_id,
+                action="settings.changed",
+                entity_type="organization",
+                entity_id=organization_id,
+                before=current,
+                after=merged,
+                user_id=actor_user_id,
             )
+        await self._repo.commit()
         return updated
 
 

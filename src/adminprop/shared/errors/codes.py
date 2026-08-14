@@ -85,7 +85,8 @@ class SuperAdminRequiredException(AdminPropException):
 
     CA-00-05 (spec_module_00_superadmin.md): un usuario owner/admin/
     maintenance que intenta acceder a `/superadmin/*` recibe este error;
-    el intento queda auditado (TODO(#10): audit_logs todavia no existe).
+    el intento queda auditado en `audit_logs` (RN-A04, issue #10, ver
+    `shared/auth/dependencies.py.requires_super_admin`).
     """
 
     status_code = 403
