@@ -1,6 +1,11 @@
 from fastapi import FastAPI
 
 from adminprop.config import get_settings
+from adminprop.modules.administracion.router import (
+    organization_settings_router,
+    roles_router,
+    users_router,
+)
 from adminprop.modules.auth.router import router as auth_router
 from adminprop.modules.health.router import router as health_router
 from adminprop.modules.superadmin.router import router as superadmin_router
@@ -18,6 +23,9 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(superadmin_router)
+    app.include_router(users_router)
+    app.include_router(roles_router)
+    app.include_router(organization_settings_router)
     return app
 
 
