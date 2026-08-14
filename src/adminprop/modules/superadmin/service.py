@@ -153,9 +153,7 @@ class OrganizationService:
         self, *, organization_id: UUID, email: str, role_id: UUID
     ) -> IssuedInvitation:
         raw_token = secrets.token_urlsafe(32)
-        expires_at = datetime.now(UTC) + timedelta(
-            hours=self._settings.invitation_ttl_hours
-        )
+        expires_at = datetime.now(UTC) + timedelta(hours=self._settings.invitation_ttl_hours)
         row = await self._repo.create_invitation(
             organization_id=organization_id,
             email=email,

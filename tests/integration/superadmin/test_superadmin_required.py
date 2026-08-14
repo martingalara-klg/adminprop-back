@@ -68,9 +68,7 @@ class TestCA0005SuperAdminRequired:
         assert response.status_code == 401
         assert response.json()["error"]["code"] == "UNAUTHORIZED"
 
-    async def test_ca_00_05_denied_attempt_is_logged_for_audit(
-        self, client, owner_headers, caplog
-    ):
+    async def test_ca_00_05_denied_attempt_is_logged_for_audit(self, client, owner_headers, caplog):
         """TODO(#10): sin tabla `audit_logs` todavia, el intento denegado
         queda constancia en el logger estructurado (`shared/auth/dependencies.py`)."""
         with caplog.at_level(logging.WARNING, logger="adminprop.shared.auth.dependencies"):

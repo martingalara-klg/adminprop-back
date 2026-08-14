@@ -116,9 +116,7 @@ class TestCA0002InviteOwner:
         assert response.status_code == 400
         assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
-    async def test_invalid_email_format_returns_validation_error(
-        self, client, super_admin_headers
-    ):
+    async def test_invalid_email_format_returns_validation_error(self, client, super_admin_headers):
         org_id = await _create_org(client, super_admin_headers, name="Org Email Invalido")
 
         response = await client.post(

@@ -26,9 +26,7 @@ class TestRF01DashboardFilters:
     """RF-01: filtros por status y busqueda por nombre/slug."""
 
     async def test_filters_by_status(self, client, super_admin_headers):
-        pending = await _create_org(
-            client, super_admin_headers, _unique_name("Org Pending Filter")
-        )
+        pending = await _create_org(client, super_admin_headers, _unique_name("Org Pending Filter"))
         disabled_org = await _create_org(
             client, super_admin_headers, _unique_name("Org Disabled Filter")
         )
