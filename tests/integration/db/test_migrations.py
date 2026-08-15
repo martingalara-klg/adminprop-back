@@ -21,18 +21,19 @@ pytestmark = pytest.mark.asyncio
 async def test_ca_3_01_alembic_upgrade_head_deja_la_base_en_la_revision_actual():
     """CA #3-01: `alembic upgrade head` corre correctamente en el compose.
 
-    La revision "head" avanza con cada migracion nueva (issue #10 agrego
-    `20260814_190741` encadenada via `down_revision` a `20260812_212704`,
-    que a su vez fue agregada por issue #5) — el valor esperado se
-    actualiza junto con la ultima migracion del repo; ver
-    `tests/integration/db/test_capa0_fundacion.py` para la cobertura
-    especifica de esa migracion.
+    La revision "head" avanza con cada migracion nueva (issue #11 agrego
+    `20260814_201500` encadenada via `down_revision` a `20260814_190741`
+    (issue #10), que a su vez fue agregada encima de `20260812_212704`,
+    issue #5) — el valor esperado se actualiza junto con la ultima
+    migracion del repo; ver `tests/integration/db/test_capa0_fundacion.py`
+    y `tests/integration/db/test_notifications_migration.py` para la
+    cobertura especifica de cada migracion.
     """
     engine = get_engine()
     async with engine.connect() as conn:
         result = await conn.execute(sa.text("SELECT version_num FROM alembic_version"))
         version = result.scalar_one()
-    assert version == "20260814_190741"
+    assert version == "20260814_201500"
 
 
 async def test_ca_3_01_extensiones_pgcrypto_y_btree_gist_quedan_habilitadas():

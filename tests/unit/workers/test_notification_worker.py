@@ -23,10 +23,12 @@ from adminprop.workers import notification_worker
 from adminprop.workers.notification_worker import (
     MAX_RETRIES,
     RETRY_DELAYS_SECONDS,
+    _build_email_content,
     detect_due_adjustments,
     detect_expiring_contracts,
     generate_rent_periods,
     retry_countdown_seconds,
+    send_notification_email,
     send_transactional_email,
 )
 
@@ -147,3 +149,116 @@ def test_ca_4_04_detect_due_adjustments_stub_runs_without_error():
 def test_ca_4_04_detect_expiring_contracts_stub_runs_without_error():
     """CA-4-04: el stub de Beat corre sin excepcion (issue #19 agrega la logica)."""
     assert detect_expiring_contracts.apply().get() is None
+
+
+# ─── Issue #11 — send_notification_email (outbox) ──────────────────────────
+#
+# Mismo motivo que la nota de arriba: `_send_notification_email_async` hace
+# `asyncio.run(...)` via el wrapper sincronico -- estos tests mockean
+# `notification_worker._send_notification_email_async` directamente (no
+# tocan Postgres) para probar SOLO la politica de reintentos de la tarea,
+# igual que los tests de `send_transactional_email` mockean `send_email`.
+# La cobertura del cuerpo async real (lock, envio, mark_email_sent) vive en
+# tests/integration/workers/test_notification_worker_outbox.py.
+
+
+def test_ca_nt_03_send_notification_email_succeeds_on_first_try(monkeypatch):
+    mock_async = AsyncMock(return_value=None)
+    monkeypatch.setattr(notification_worker, "_send_notification_email_async", mock_async)
+
+    result = send_notification_email.apply(
+        args=[
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222",
+            "req-1",
+        ]
+    ).get()
+
+    assert result is None
+    assert mock_async.call_count == 1
+
+
+def test_ca_nt_03_send_notification_email_retries_then_succeeds(monkeypatch):
+    """CA-NT-03: reintenta con el mismo backoff 30/90/270s que CA-4-02."""
+    mock_async = AsyncMock(
+        side_effect=[RetryableNotificationError("502"), RetryableNotificationError("503"), None]
+    )
+    monkeypatch.setattr(notification_worker, "_send_notification_email_async", mock_async)
+
+    result = send_notification_email.apply(
+        args=[
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222",
+            "req-2",
+        ]
+    ).get()
+
+    assert result is None
+    assert mock_async.call_count == 3
+
+
+def test_ca_nt_03_send_notification_email_dead_letters_after_max_retries(monkeypatch, caplog):
+    """CA-NT-03: agotados los reintentos, la tarea NO propaga la excepcion
+    (dead-letter) -- `email_sent_at` queda NULL (nunca se llamo
+    `mark_email_sent`, porque el mock reemplaza toda la corrutina) y el
+    fallo queda logueado."""
+    mock_async = AsyncMock(side_effect=RetryableNotificationError("still down"))
+    monkeypatch.setattr(notification_worker, "_send_notification_email_async", mock_async)
+
+    with caplog.at_level("ERROR"):
+        result = send_notification_email.apply(
+            args=[
+                "11111111-1111-1111-1111-111111111111",
+                "22222222-2222-2222-2222-222222222222",
+                "req-3",
+            ]
+        ).get()
+
+    assert result is None
+    assert mock_async.call_count == MAX_RETRIES + 1
+    dead_letter_records = [r for r in caplog.records if "dead-letter" in r.getMessage()]
+    assert len(dead_letter_records) == 1
+    # request_id pasado explicito a `extra=` en el log call (verificado
+    # via los kwargs del record -- `RequestIdFilter`, agregado solo en el
+    # handler configurado por `setup_logging()`, no corre sobre
+    # `caplog`, asi que aca se ve el valor tal como lo paso el codigo).
+    assert dead_letter_records[0].notification_id == "11111111-1111-1111-1111-111111111111"
+
+
+def test_ca_nt_03_send_notification_email_non_retryable_gives_up_immediately(monkeypatch):
+    mock_async = AsyncMock(side_effect=NonRetryableNotificationError("invalid email"))
+    monkeypatch.setattr(notification_worker, "_send_notification_email_async", mock_async)
+
+    result = send_notification_email.apply(
+        args=[
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222",
+            "req-4",
+        ]
+    ).get()
+
+    assert result is None
+    assert mock_async.call_count == 1
+
+
+def test_build_email_content_work_order_created_includes_link_when_payload_has_id():
+    subject, html, text = _build_email_content("work_order_created", {"work_order_id": "abc-123"})
+    assert subject == "Nuevo pedido de mantenimiento"
+    assert "abc-123" in html
+    assert "abc-123" in text
+
+
+def test_build_email_content_falls_back_to_no_link_when_payload_key_missing():
+    """Los emisores reales (issues #18/#19/#26) todavia no existen -- un
+    payload sin la clave esperada por el template no debe romper el
+    envio, solo omitir el link."""
+    subject, html, text = _build_email_content("work_order_created", {})
+    assert subject == "Nuevo pedido de mantenimiento"
+    assert "href" not in html
+    assert "Ver en AdminProp" not in text
+
+
+def test_build_email_content_unknown_event_type_uses_generic_copy():
+    subject, html, _text = _build_email_content("not_a_real_event", {})
+    assert subject == "Notificación de AdminProp"
+    assert "Ver en AdminProp" not in html
