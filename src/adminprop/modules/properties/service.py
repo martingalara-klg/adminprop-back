@@ -108,7 +108,8 @@ class PropertyService:
             raise NotFoundException()
 
         if "landlord_id" in fields_set and landlord_id is not None:
-            if not await self._repo.landlord_exists(landlord_id, organization_id):
+            landlord_still_valid = await self._repo.landlord_exists(landlord_id, organization_id)
+            if not landlord_still_valid:
                 raise NotFoundException(
                     message="El propietario indicado no existe.", field="landlord_id"
                 )
@@ -127,7 +128,7 @@ class PropertyService:
 
         previous_landlord_id = current.landlord_id
         updated = await self._repo.update(property_id, organization_id, fields=update_fields)
-        if updated is None:
+        if updated is None:  # pragma: no cover -- defensivo, ya se valido existencia arriba
             raise NotFoundException()
 
         if (

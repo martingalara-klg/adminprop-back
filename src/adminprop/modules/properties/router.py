@@ -67,9 +67,7 @@ def _to_property_detail(prop, service_accounts: list) -> PropertyDetail:
         notes=prop.notes,
         created_at=prop.created_at,
         updated_at=prop.updated_at,
-        service_accounts=[
-            PropertyServiceAccountDetail.model_validate(a) for a in service_accounts
-        ],
+        service_accounts=[PropertyServiceAccountDetail.model_validate(a) for a in service_accounts],
     )
 
 
@@ -142,9 +140,7 @@ async def get_property(
     property_id: UUID,
     organization_id: UUID = Depends(get_current_tenant),
     service: PropertyService = Depends(get_property_service),
-    accounts_service: PropertyServiceAccountService = Depends(
-        get_property_service_account_service
-    ),
+    accounts_service: PropertyServiceAccountService = Depends(get_property_service_account_service),
 ) -> PropertyDetailResponse:
     """RF-03 + CA-01-02: ficha consolidada -- datos + cuentas de servicio
     juntas. `active_contract`/historial/conceptos: ver docstring de

@@ -105,9 +105,7 @@ class PropertyRepository:
     async def get_by_id(self, property_id: UUID, organization_id: UUID) -> Property | None:
         return await self._get_row(property_id, organization_id)
 
-    async def list_by_landlord(
-        self, landlord_id: UUID, organization_id: UUID
-    ) -> list[Property]:
+    async def list_by_landlord(self, landlord_id: UUID, organization_id: UUID) -> list[Property]:
         """spec_module_02_personas.md §RF-02 "Ficha del Propietario: Datos
         + listado de sus propiedades (con estado y contrato vigente)" --
         consumido por `modules/people/router.py.get_landlord` (integracion
@@ -165,7 +163,7 @@ class PropertyRepository:
         self, property_id: UUID, organization_id: UUID, *, fields: dict[str, object]
     ) -> Property | None:
         row = await self._get_row(property_id, organization_id)
-        if row is None:
+        if row is None:  # pragma: no cover -- defensivo, `service.update` ya valido existencia
             return None
         for key, value in fields.items():
             setattr(row, key, value)
