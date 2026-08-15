@@ -147,13 +147,25 @@ async def test_ca_3_03_tenant_scoped_session_setea_el_contexto_antes_de_entregar
     assert params == {"setting": TENANT_CONTEXT_SETTING, "tenant_id": str(organization_id)}
 
 
-def test_ca_3_03_base_es_una_declarative_base_vacia_para_futuros_modelos():
-    """CA #3-03: `db/migrations/env.py` usa `Base.metadata` como target_metadata;
-    sin modelos ORM todavia (issue #5), su metadata debe estar vacia.
+def test_ca_3_03_base_es_una_declarative_base_para_futuros_modelos():
+    """CA #3-03: `db/migrations/env.py` usa `Base.metadata` como target_metadata.
+
+    Actualizado en el issue #13 (`modules/people/models.py`): `Landlord`/
+    `Renter` son los primeros modelos ORM reales del repo, tal como
+    `db/base.py` lo anticipaba ("Base declarativa para futuros modelos
+    ORM de adminprop") -- la aserción original ("metadata vacia") asumía
+    que ningún modulo declaraba modelos todavia (issue #5); ya no es el
+    caso. El proyecto sigue sin usar `--autogenerate` (SQL crudo con
+    `op.execute`, `docs/skills/database-migration.md`), por eso solo se
+    verifica que las tablas de `people` estén registradas, no que
+    coincidan con el DDL real.
     """
     from sqlalchemy.orm import DeclarativeBase
 
     from adminprop.db.base import Base
+    from adminprop.modules.people import (
+        models as people_models,  # noqa: F401 -- registra las tablas en Base.metadata
+    )
 
     assert issubclass(Base, DeclarativeBase)
-    assert list(Base.metadata.tables) == []
+    assert {"landlords", "renters"} <= set(Base.metadata.tables)
