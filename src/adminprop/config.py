@@ -92,6 +92,13 @@ class Settings(BaseSettings):
     # casos lucirian identicos.
     password_reset_token_grace_seconds: int = 24 * 60 * 60
 
+    # ─── issue #12 — Cifrado columnar pgcrypto (landlords.bank_info) ──────
+    # sdd_04 §2.4: AES-256 columnar via pgcrypto (shared/encryption/pgcrypto.py).
+    # Default de desarrollo local no sensible (mismo criterio que
+    # app_role_password/resend_api_key de arriba); migra a un gestor de
+    # secretos cuando exista infra cloud (CLAUDE.md §3/§8).
+    encryption_key: str = "local_dev_encryption_key_change_me"
+
 
 @lru_cache
 def get_settings() -> Settings:
