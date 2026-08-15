@@ -41,7 +41,7 @@ class TestCA0207MaintenanceForbiddenOnLandlords:
     llegar al service/repository, con 403 FORBIDDEN (nunca 404, porque
     ni siquiera se resuelve el recurso)."""
 
-    async def test_maintenance_cannot_create_landlord(self, client, seed):
+    async def test_ca_02_07_maintenance_cannot_create_landlord(self, client, seed):
         _org, _owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
 
         response = await client.post(
@@ -53,7 +53,7 @@ class TestCA0207MaintenanceForbiddenOnLandlords:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
 
-    async def test_maintenance_cannot_list_landlords(self, client, seed):
+    async def test_ca_02_07_maintenance_cannot_list_landlords(self, client, seed):
         _org, _owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
 
         response = await client.get("/v1/landlords", headers=maintenance["headers"])
@@ -61,7 +61,7 @@ class TestCA0207MaintenanceForbiddenOnLandlords:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
 
-    async def test_maintenance_cannot_get_landlord(self, client, seed):
+    async def test_ca_02_07_maintenance_cannot_get_landlord(self, client, seed):
         _org, owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
         created = await client.post(
             "/v1/landlords",
@@ -75,7 +75,7 @@ class TestCA0207MaintenanceForbiddenOnLandlords:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
 
-    async def test_maintenance_cannot_patch_landlord(self, client, seed):
+    async def test_ca_02_07_maintenance_cannot_patch_landlord(self, client, seed):
         _org, owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
         created = await client.post(
             "/v1/landlords",
@@ -93,7 +93,7 @@ class TestCA0207MaintenanceForbiddenOnLandlords:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
 
-    async def test_maintenance_cannot_delete_landlord(self, client, seed):
+    async def test_ca_02_07_maintenance_cannot_delete_landlord(self, client, seed):
         _org, owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
         created = await client.post(
             "/v1/landlords",
@@ -111,7 +111,7 @@ class TestCA0207MaintenanceForbiddenOnLandlords:
 
 
 class TestCA0207MaintenanceForbiddenOnRenters:
-    async def test_maintenance_cannot_create_renter(self, client, seed):
+    async def test_ca_02_07_maintenance_cannot_create_renter(self, client, seed):
         _org, _owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
 
         response = await client.post(
@@ -121,7 +121,7 @@ class TestCA0207MaintenanceForbiddenOnRenters:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
 
-    async def test_maintenance_cannot_list_renters(self, client, seed):
+    async def test_ca_02_07_maintenance_cannot_list_renters(self, client, seed):
         _org, _owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
 
         response = await client.get("/v1/renters", headers=maintenance["headers"])
@@ -129,7 +129,7 @@ class TestCA0207MaintenanceForbiddenOnRenters:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
 
-    async def test_maintenance_cannot_get_renter(self, client, seed):
+    async def test_ca_02_07_maintenance_cannot_get_renter(self, client, seed):
         _org, owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
         created = await client.post(
             "/v1/renters", json={"name": "Inquilino"}, headers=owner["headers"]
@@ -141,7 +141,7 @@ class TestCA0207MaintenanceForbiddenOnRenters:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
 
-    async def test_maintenance_cannot_patch_renter(self, client, seed):
+    async def test_ca_02_07_maintenance_cannot_patch_renter(self, client, seed):
         _org, owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
         created = await client.post(
             "/v1/renters", json={"name": "Inquilino"}, headers=owner["headers"]
@@ -157,7 +157,7 @@ class TestCA0207MaintenanceForbiddenOnRenters:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
 
-    async def test_maintenance_cannot_delete_renter(self, client, seed):
+    async def test_ca_02_07_maintenance_cannot_delete_renter(self, client, seed):
         _org, owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
         created = await client.post(
             "/v1/renters", json={"name": "Inquilino"}, headers=owner["headers"]
@@ -169,7 +169,9 @@ class TestCA0207MaintenanceForbiddenOnRenters:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
 
-    async def test_maintenance_cannot_enumerate_unknown_landlord_either(self, client, seed):
+    async def test_ca_02_07_maintenance_cannot_enumerate_unknown_landlord_either(
+        self, client, seed
+    ):
         """Complementario: incluso un id inexistente/random es 403 antes
         de llegar al 404 -- el permiso se chequea primero."""
         _org, _owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)

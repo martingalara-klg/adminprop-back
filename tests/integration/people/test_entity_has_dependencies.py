@@ -32,7 +32,7 @@ class TestCA0206DeleteWithoutDependenciesSoftDeletes:
     un EXISTS real cuando el modulo dependiente exista).
     """
 
-    async def test_delete_landlord_without_properties_returns_204(self, client, seed):
+    async def test_ca_02_06_delete_landlord_without_properties_returns_204(self, client, seed):
         _org, owner = await _seed_org_with_owner(seed)
         created = await client.post(
             "/v1/landlords",
@@ -45,7 +45,7 @@ class TestCA0206DeleteWithoutDependenciesSoftDeletes:
 
         assert response.status_code == 204
 
-    async def test_delete_renter_without_contracts_returns_204(self, client, seed):
+    async def test_ca_02_06_delete_renter_without_contracts_returns_204(self, client, seed):
         _org, owner = await _seed_org_with_owner(seed)
         created = await client.post(
             "/v1/renters", json={"name": "Sin contrato"}, headers=owner["headers"]
