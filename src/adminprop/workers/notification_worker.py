@@ -199,7 +199,11 @@ def _build_email_content(event_type: str, payload: dict) -> tuple[str, str, str]
     """
     copy = _EVENT_COPY.get(
         event_type,
-        {"subject": "Notificación de AdminProp", "body": "Tenés una notificación nueva.", "link_path": ""},
+        {
+            "subject": "Notificación de AdminProp",
+            "body": "Tenés una notificación nueva.",
+            "link_path": "",
+        },
     )
 
     link = ""
@@ -261,9 +265,7 @@ def send_notification_email(
     )
     try:
         asyncio.run(
-            _send_notification_email_async(
-                UUID(notification_id), UUID(organization_id), request_id
-            )
+            _send_notification_email_async(UUID(notification_id), UUID(organization_id), request_id)
         )
     except RetryableNotificationError as exc:
         logger.warning(
