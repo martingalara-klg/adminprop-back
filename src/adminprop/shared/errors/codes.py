@@ -208,3 +208,19 @@ class RoleNotFoundException(AdminPropException):
     status_code = 404
     error_code = "ROLE_NOT_FOUND"
     message = "El rol solicitado no existe."
+
+
+class EntityHasDependenciesException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 409 ENTITY_HAS_DEPENDENCIES.
+
+    Issue #13 (spec_module_02_personas.md RF-01/RF-03, CA-02-06): baja de
+    un `landlord` con propiedades activas o de un `renter` con contrato
+    vigente. Codigo transversal (ya listado en el catalogo de sdd_03 desde
+    la version inicial); esta es la primera subclase Python concreta --
+    mismo criterio documentado en el encabezado de este archivo ("se
+    agrega en el issue que primero lo necesite").
+    """
+
+    status_code = 409
+    error_code = "ENTITY_HAS_DEPENDENCIES"
+    message = "El recurso tiene dependencias activas y no puede eliminarse."
