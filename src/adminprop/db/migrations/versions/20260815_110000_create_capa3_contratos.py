@@ -157,8 +157,7 @@ def upgrade() -> None:
         "CREATE INDEX idx_contracts_organization_status ON contracts (organization_id, status)"
     )
     op.execute(
-        "CREATE INDEX idx_contracts_property_id ON contracts (property_id) "
-        "WHERE deleted_at IS NULL"
+        "CREATE INDEX idx_contracts_property_id ON contracts (property_id) WHERE deleted_at IS NULL"
     )
     op.execute(
         "CREATE INDEX idx_contracts_org_active_end_date ON contracts (organization_id, end_date) "
