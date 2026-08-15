@@ -144,9 +144,31 @@ class LandlordSummary(BaseModel):
     created_at: datetime
 
 
+class LandlordPropertySummary(BaseModel):
+    """spec_module_02_personas.md §RF-02 "Ficha del Propietario: datos +
+    listado de sus propiedades (con estado y contrato vigente)" -- issue
+    #15 (modulo `properties`) es quien resuelve `id`/`address`/`status`;
+    `active_contract` queda en `None` (placeholder declarado, mismo
+    criterio que `modules/properties/schemas.py.PropertyDetail`) hasta que
+    exista el modulo `contracts` (issue #17)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    address: str
+    property_type: str
+    status: str
+    active_contract: dict | None = None
+
+
 class LandlordDetail(BaseModel):
     """GET /v1/landlords/:id y respuesta de POST/PATCH -- CA-02-04:
-    `bank_info` solo aparece aca (detalle), ya descifrado por el service."""
+    `bank_info` solo aparece aca (detalle), ya descifrado por el service.
+
+    `properties`: RF-02 -- integracion con el modulo `properties` (issue
+    #15), agregada en ese mismo issue. Ausente en `LandlordSummary`
+    (listado) a proposito -- el listado no necesita el join extra.
+    """
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -160,6 +182,7 @@ class LandlordDetail(BaseModel):
     notes: str | None
     created_at: datetime
     updated_at: datetime
+    properties: list[LandlordPropertySummary] = Field(default_factory=list)
 
 
 class LandlordResponse(BaseModel):

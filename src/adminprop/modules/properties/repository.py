@@ -105,6 +105,26 @@ class PropertyRepository:
     async def get_by_id(self, property_id: UUID, organization_id: UUID) -> Property | None:
         return await self._get_row(property_id, organization_id)
 
+    async def list_by_landlord(
+        self, landlord_id: UUID, organization_id: UUID
+    ) -> list[Property]:
+        """spec_module_02_personas.md §RF-02 "Ficha del Propietario: Datos
+        + listado de sus propiedades (con estado y contrato vigente)" --
+        consumido por `modules/people/router.py.get_landlord` (integracion
+        declarada, issue #15). Filtro EXPLICITO de `organization_id` +
+        `landlord_id` (RN-D01) ademas del `deleted_at IS NULL`."""
+        stmt = (
+            select(Property)
+            .where(
+                Property.landlord_id == landlord_id,
+                Property.organization_id == organization_id,
+                Property.deleted_at.is_(None),
+            )
+            .order_by(Property.created_at.desc())
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def list(
         self,
         *,

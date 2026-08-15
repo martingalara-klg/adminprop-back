@@ -23,6 +23,7 @@ from adminprop.modules.people.schemas import (
     LandlordCreate,
     LandlordDetail,
     LandlordListResponse,
+    LandlordPropertySummary,
     LandlordResponse,
     LandlordSummary,
     LandlordUpdate,
@@ -38,6 +39,10 @@ from adminprop.modules.people.service import (
     get_landlord_service,
     get_renter_service,
 )
+from adminprop.modules.properties.repository import (
+    PropertyRepository,
+    get_property_repository,
+)
 from adminprop.shared.auth.jwt import JWTPayload
 from adminprop.shared.errors.codes import NotFoundException
 from adminprop.shared.rbac import requires_permission
@@ -47,7 +52,9 @@ landlords_router = APIRouter(prefix="/v1/landlords", tags=["people"])
 renters_router = APIRouter(prefix="/v1/renters", tags=["people"])
 
 
-def _to_landlord_detail(landlord: LandlordFields) -> LandlordDetail:
+def _to_landlord_detail(
+    landlord: LandlordFields, properties: list[LandlordPropertySummary] | None = None
+) -> LandlordDetail:
     return LandlordDetail(
         id=landlord.id,
         name=landlord.name,
@@ -59,6 +66,7 @@ def _to_landlord_detail(landlord: LandlordFields) -> LandlordDetail:
         notes=landlord.notes,
         created_at=landlord.created_at,
         updated_at=landlord.updated_at,
+        properties=properties or [],
     )
 
 
@@ -134,14 +142,27 @@ async def get_landlord(
     landlord_id: UUID,
     organization_id: UUID = Depends(get_current_tenant),
     service: LandlordService = Depends(get_landlord_service),
+    properties_repo: PropertyRepository = Depends(get_property_repository),
 ) -> LandlordResponse:
     """RF-02 + CA-02-04: ficha del propietario -- `bank_info` descifrado
-    solo aca (owner/admin, via `landlord:read`)."""
+    solo aca (owner/admin, via `landlord:read`).
+
+    RF-02 (issue #15): "Datos + listado de sus propiedades (con estado y
+    contrato vigente)" -- `properties_repo.list_by_landlord` es la
+    integracion declarada con el modulo `properties`; `active_contract`
+    de cada propiedad queda en `None` hasta que exista el modulo
+    `contracts` (issue #17, ver `LandlordPropertySummary`)."""
     landlord = await service.get(landlord_id, organization_id)
     if landlord is None:
         # RN-D01: 404, no 403 -- no distingue "no existe" de "otra org".
         raise NotFoundException()
-    return LandlordResponse(data=_to_landlord_detail(landlord))
+    properties = await properties_repo.list_by_landlord(landlord_id, organization_id)
+    return LandlordResponse(
+        data=_to_landlord_detail(
+            landlord,
+            [LandlordPropertySummary.model_validate(p) for p in properties],
+        )
+    )
 
 
 @landlords_router.patch(
