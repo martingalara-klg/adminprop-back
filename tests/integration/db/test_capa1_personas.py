@@ -59,8 +59,7 @@ async def test_ca_12_01_landlords_columnas_identicas_al_spec_salvo_bank_info_byt
     async with engine.connect() as conn:
         result = await conn.execute(
             sa.text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name = 'landlords'"
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'landlords'"
             )
         )
         columns = {row[0] for row in result}
@@ -96,8 +95,7 @@ async def test_ca_12_01_renters_columnas_identicas_al_spec():
     async with engine.connect() as conn:
         result = await conn.execute(
             sa.text(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_name = 'renters'"
+                "SELECT column_name FROM information_schema.columns WHERE table_name = 'renters'"
             )
         )
         columns = {row[0] for row in result}
@@ -111,8 +109,7 @@ async def test_ca_12_02_tabla_tiene_rls_habilitado_y_forzado(table: str):
     async with engine.connect() as conn:
         result = await conn.execute(
             sa.text(
-                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class "
-                "WHERE relname = :table"
+                "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = :table"
             ),
             {"table": table},
         )
@@ -149,6 +146,4 @@ async def test_ca_12_indices_organization_id_existen(table: str):
             {"table": table},
         )
         defs = [row[0] for row in result]
-    assert any(
-        "organization_id" in d and "deleted_at IS NULL" in d for d in defs
-    )
+    assert any("organization_id" in d and "deleted_at IS NULL" in d for d in defs)

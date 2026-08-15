@@ -145,9 +145,7 @@ async def test_ca_12_02_adminprop_superadmin_bypassa_rls_y_ve_ambos_tenants(
     async with session_factory() as session, session.begin():
         await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
-            sa.text(
-                f"SELECT organization_id FROM {table} WHERE organization_id IN (:a, :b)"
-            ),
+            sa.text(f"SELECT organization_id FROM {table} WHERE organization_id IN (:a, :b)"),
             {"a": str(ORG_A), "b": str(ORG_B)},
         )
         seen = {row[0] for row in result}
