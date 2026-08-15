@@ -470,7 +470,9 @@ class TestCA1601ContractsNoOverlap:
 
 
 class TestCA1602UsdContractsCannotAdjust:
-    async def test_rejects_usd_contract_with_adjustment_frequency_months_set(self, rows):
+    """CA-16-02: existe un CHECK que impide ajuste en contratos USD."""
+
+    async def test_ca_16_02_rejects_usd_contract_with_adjustment_frequency_months_set(self, rows):
         with pytest.raises(IntegrityError):
             await _insert_contract(
                 rows,
@@ -479,7 +481,7 @@ class TestCA1602UsdContractsCannotAdjust:
                 adjustment_index=None,
             )
 
-    async def test_rejects_usd_contract_with_adjustment_index_set(self, rows):
+    async def test_ca_16_02_rejects_usd_contract_with_adjustment_index_set(self, rows):
         with pytest.raises(IntegrityError):
             await _insert_contract(
                 rows,
@@ -488,7 +490,7 @@ class TestCA1602UsdContractsCannotAdjust:
                 adjustment_index="icl",
             )
 
-    async def test_allows_usd_contract_without_any_adjustment_field(self, rows):
+    async def test_ca_16_02_allows_usd_contract_without_any_adjustment_field(self, rows):
         contract_id = await _insert_contract(
             rows,
             currency="USD",
@@ -497,7 +499,7 @@ class TestCA1602UsdContractsCannotAdjust:
         )
         assert contract_id is not None
 
-    async def test_allows_ars_contract_with_both_adjustment_fields_set(self, rows):
+    async def test_ca_16_02_allows_ars_contract_with_both_adjustment_fields_set(self, rows):
         contract_id = await _insert_contract(
             rows,
             currency="ARS",
@@ -506,7 +508,7 @@ class TestCA1602UsdContractsCannotAdjust:
         )
         assert contract_id is not None
 
-    async def test_rejects_invalid_adjustment_index_value(self, rows):
+    async def test_ca_16_02_rejects_invalid_adjustment_index_value(self, rows):
         with pytest.raises(IntegrityError):
             await _insert_contract(rows, currency="ARS", adjustment_index="not_a_valid_index")
 
@@ -515,7 +517,10 @@ class TestCA1602UsdContractsCannotAdjust:
 
 
 class TestCA1603OnlyOnePendingAdjustmentPerContract:
-    async def test_rejects_second_pending_adjustment_for_same_contract(self, rows):
+    """CA-16-03: hay un indice parcial que garantiza un solo ajuste
+    `pending` por contrato."""
+
+    async def test_ca_16_03_rejects_second_pending_adjustment_for_same_contract(self, rows):
         contract_id = await _insert_contract(rows)
         await _insert_adjustment(rows, contract_id=contract_id, status="pending")
         with pytest.raises(IntegrityError):
@@ -523,7 +528,7 @@ class TestCA1603OnlyOnePendingAdjustmentPerContract:
                 rows, contract_id=contract_id, due_period=date(2026, 5, 1), status="pending"
             )
 
-    async def test_allows_pending_adjustments_for_different_contracts(self, rows):
+    async def test_ca_16_03_allows_pending_adjustments_for_different_contracts(self, rows):
         contract_a = await _insert_contract(
             rows,
             property_id=rows.property_id,
@@ -542,7 +547,9 @@ class TestCA1603OnlyOnePendingAdjustmentPerContract:
         second_id = await _insert_adjustment(rows, contract_id=contract_b, status="pending")
         assert second_id is not None
 
-    async def test_allows_a_new_pending_adjustment_after_the_previous_one_was_applied(self, rows):
+    async def test_ca_16_03_allows_a_new_pending_adjustment_after_the_previous_one_was_applied(
+        self, rows
+    ):
         contract_id = await _insert_contract(rows)
         first = await _insert_adjustment(rows, contract_id=contract_id, status="pending")
 
@@ -558,7 +565,7 @@ class TestCA1603OnlyOnePendingAdjustmentPerContract:
         )
         assert second_id is not None
 
-    async def test_allows_multiple_applied_adjustments_for_the_same_contract(self, rows):
+    async def test_ca_16_03_allows_multiple_applied_adjustments_for_the_same_contract(self, rows):
         contract_id = await _insert_contract(rows)
         first = await _insert_adjustment(rows, contract_id=contract_id, status="applied")
         second = await _insert_adjustment(
