@@ -195,7 +195,7 @@ class LandlordRepository:
         """RF-01: baja logica (`deleted_at`). Devuelve `False` si no
         existe/ya esta borrado/es de otra organizacion (404, RN-D01)."""
         row = await self._get_row(landlord_id, organization_id)
-        if row is None:
+        if row is None:  # pragma: no cover -- defensivo, `service.delete` ya valido existencia
             return False
         row.deleted_at = datetime.now(UTC)
         await self._session.flush()
@@ -306,7 +306,7 @@ class RenterRepository:
 
     async def soft_delete(self, renter_id: UUID, organization_id: UUID) -> bool:
         row = await self._get_row(renter_id, organization_id)
-        if row is None:
+        if row is None:  # pragma: no cover -- defensivo, `service.delete` ya valido existencia
             return False
         row.deleted_at = datetime.now(UTC)
         await self._session.flush()

@@ -20,7 +20,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Index, LargeBinary, Numeric, Text, text
+from sqlalchemy import DateTime, Index, LargeBinary, Numeric, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -39,11 +39,16 @@ class Landlord(Base):
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    organization_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("organizations.id", ondelete="CASCADE"),
-        nullable=False,
-    )
+    # Sin `ForeignKey(...)` a nivel de objeto SQLAlchemy a proposito: la
+    # migracion #12 ya crea el `REFERENCES organizations(id) ON DELETE
+    # CASCADE` a nivel de DDL (fuente de verdad). `organizations` no
+    # tiene un modelo ORM declarativo propio en este repo (queda en SQL
+    # crudo, ver `modules/administracion/repository.py`), y declarar aca
+    # un `ForeignKey("organizations.id")` sin esa tabla registrada en
+    # `Base.metadata` rompe la resolucion de FK del mapper
+    # (`NoReferencedTableError`) al primer INSERT -- verificado corriendo
+    # la suite real contra Postgres.
+    organization_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     tax_id: Mapped[str | None] = mapped_column(Text)
     phone: Mapped[str | None] = mapped_column(Text)
@@ -54,9 +59,18 @@ class Landlord(Base):
     metadata_json: Mapped[dict] = mapped_column(
         "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
-    created_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
-    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
-    deleted_at: Mapped[datetime | None] = mapped_column(default=None)
+    # `DateTime(timezone=True)`: la columna DB es TIMESTAMPTZ (migracion
+    # #12) -- sin `timezone=True` aca, asyncpg recibe un aware datetime
+    # de Python (`datetime.now(UTC)`, usado por `soft_delete`) contra un
+    # tipo SQL sin tz y falla con DataError ("can't subtract offset-naive
+    # and offset-aware datetimes"); verificado corriendo la suite real.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     __table_args__ = (Index("ix_landlords_organization_id_orm", "organization_id"),)
 
@@ -70,11 +84,7 @@ class Renter(Base):
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
     )
-    organization_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("organizations.id", ondelete="CASCADE"),
-        nullable=False,
-    )
+    organization_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     tax_id: Mapped[str | None] = mapped_column(Text)
     phone: Mapped[str | None] = mapped_column(Text)
@@ -83,8 +93,17 @@ class Renter(Base):
     metadata_json: Mapped[dict] = mapped_column(
         "metadata", JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
-    created_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
-    updated_at: Mapped[datetime] = mapped_column(server_default=text("now()"))
-    deleted_at: Mapped[datetime | None] = mapped_column(default=None)
+    # `DateTime(timezone=True)`: la columna DB es TIMESTAMPTZ (migracion
+    # #12) -- sin `timezone=True` aca, asyncpg recibe un aware datetime
+    # de Python (`datetime.now(UTC)`, usado por `soft_delete`) contra un
+    # tipo SQL sin tz y falla con DataError ("can't subtract offset-naive
+    # and offset-aware datetimes"); verificado corriendo la suite real.
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     __table_args__ = (Index("ix_renters_organization_id_orm", "organization_id"),)
