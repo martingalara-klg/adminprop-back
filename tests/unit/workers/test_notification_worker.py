@@ -167,7 +167,11 @@ def test_ca_nt_03_send_notification_email_succeeds_on_first_try(monkeypatch):
     monkeypatch.setattr(notification_worker, "_send_notification_email_async", mock_async)
 
     result = send_notification_email.apply(
-        args=["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222", "req-1"]
+        args=[
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222",
+            "req-1",
+        ]
     ).get()
 
     assert result is None
@@ -182,7 +186,11 @@ def test_ca_nt_03_send_notification_email_retries_then_succeeds(monkeypatch):
     monkeypatch.setattr(notification_worker, "_send_notification_email_async", mock_async)
 
     result = send_notification_email.apply(
-        args=["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222", "req-2"]
+        args=[
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222",
+            "req-2",
+        ]
     ).get()
 
     assert result is None
@@ -222,7 +230,11 @@ def test_ca_nt_03_send_notification_email_non_retryable_gives_up_immediately(mon
     monkeypatch.setattr(notification_worker, "_send_notification_email_async", mock_async)
 
     result = send_notification_email.apply(
-        args=["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222", "req-4"]
+        args=[
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222",
+            "req-4",
+        ]
     ).get()
 
     assert result is None
@@ -230,9 +242,7 @@ def test_ca_nt_03_send_notification_email_non_retryable_gives_up_immediately(mon
 
 
 def test_build_email_content_work_order_created_includes_link_when_payload_has_id():
-    subject, html, text = _build_email_content(
-        "work_order_created", {"work_order_id": "abc-123"}
-    )
+    subject, html, text = _build_email_content("work_order_created", {"work_order_id": "abc-123"})
     assert subject == "Nuevo pedido de mantenimiento"
     assert "abc-123" in html
     assert "abc-123" in text
@@ -249,6 +259,6 @@ def test_build_email_content_falls_back_to_no_link_when_payload_key_missing():
 
 
 def test_build_email_content_unknown_event_type_uses_generic_copy():
-    subject, html, text = _build_email_content("not_a_real_event", {})
+    subject, html, _text = _build_email_content("not_a_real_event", {})
     assert subject == "Notificación de AdminProp"
     assert "Ver en AdminProp" not in html

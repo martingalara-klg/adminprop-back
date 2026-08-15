@@ -91,9 +91,9 @@ async def test_ca_nt_indice_parcial_del_spec_existe():
             sa.text("SELECT indexdef FROM pg_indexes WHERE tablename = 'notifications'")
         )
         defs = [row[0] for row in result]
-    assert any(
-        "user_id" in d and "read_at IS NULL" in d for d in defs
-    ), f"esperaba un indice parcial (user_id) WHERE read_at IS NULL, defs={defs}"
+    assert any("user_id" in d and "read_at IS NULL" in d for d in defs), (
+        f"esperaba un indice parcial (user_id) WHERE read_at IS NULL, defs={defs}"
+    )
 
 
 async def test_ca_nt_event_type_check_tiene_los_5_valores_del_mvp():
