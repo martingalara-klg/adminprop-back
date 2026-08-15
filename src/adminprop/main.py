@@ -9,6 +9,10 @@ from adminprop.modules.administracion.router import (
 from adminprop.modules.auth.router import router as auth_router
 from adminprop.modules.health.router import router as health_router
 from adminprop.modules.people.router import landlords_router, renters_router
+from adminprop.modules.properties.router import (
+    properties_router,
+    service_accounts_router,
+)
 from adminprop.modules.superadmin.router import router as superadmin_router
 from adminprop.shared.errors.handlers import register_exception_handlers
 from adminprop.shared.logging import RequestContextMiddleware, setup_logging
@@ -29,6 +33,8 @@ def create_app() -> FastAPI:
     app.include_router(organization_settings_router)
     app.include_router(landlords_router)
     app.include_router(renters_router)
+    app.include_router(properties_router)
+    app.include_router(service_accounts_router)
     return app
 
 
