@@ -185,17 +185,21 @@ class PropertyRepository:
         """CA-01-03: `409 ENTITY_HAS_DEPENDENCIES` si la propiedad tiene un
         contrato `active`.
 
-        Implementacion deliberadamente extensible -- mismo criterio que
-        `LandlordRepository.has_active_dependencies` (`modules/people/repository.py`):
-        el modulo `contracts` (issue #17, "Bloquea a" de este issue)
-        todavia no existe, asi que hoy NO puede haber un contrato activo
-        -- este metodo siempre retorna `False`. Cuando `contracts` exista,
-        reemplazar el cuerpo por un `SELECT EXISTS(... FROM contracts
-        WHERE property_id = :id AND organization_id = :org_id AND status =
-        'active')` -- la firma ya queda lista para ese reemplazo sin tocar
-        el caller (`service.delete`).
+        Issue #17: el modulo `contracts` ya existe -- delega en
+        `ContractRepository.has_active_contract_for_property` (misma
+        `session`, misma transaccion) en vez de duplicar el SQL. Import
+        diferido (dentro del metodo, no a nivel de modulo): `contracts.repository`
+        importa `properties.models.Property` para validar `property_id`
+        en `ContractService.create`, y `properties.service` (que si se
+        importa a nivel de modulo desde este archivo via el
+        `service.py` del propio modulo) queda en el mismo paquete que
+        este repository -- diferir el import evita depender del orden de
+        carga entre ambos modulos al arrancar `adminprop.main`.
         """
-        return False
+        from adminprop.modules.contracts.repository import ContractRepository
+
+        contracts_repo = ContractRepository(self._session)
+        return await contracts_repo.has_active_contract_for_property(property_id, organization_id)
 
     async def _get_row(self, property_id: UUID, organization_id: UUID) -> Property | None:
         stmt = select(Property).where(
