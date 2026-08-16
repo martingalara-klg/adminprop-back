@@ -7,6 +7,7 @@ from adminprop.modules.administracion.router import (
     users_router,
 )
 from adminprop.modules.auth.router import router as auth_router
+from adminprop.modules.contracts.router import router as contracts_router
 from adminprop.modules.health.router import router as health_router
 from adminprop.modules.people.router import landlords_router, renters_router
 from adminprop.modules.properties.router import (
@@ -35,6 +36,7 @@ def create_app() -> FastAPI:
     app.include_router(renters_router)
     app.include_router(properties_router)
     app.include_router(service_accounts_router)
+    app.include_router(contracts_router)
     return app
 
 
