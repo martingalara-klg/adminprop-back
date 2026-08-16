@@ -1,10 +1,10 @@
-"""Fixtures compartidas de tests/integration/properties (issue #15).
+"""Fixtures compartidas de tests/integration/contracts (issue #17).
 
 Mismo patron de engine/session-factory fresco por test que
-tests/integration/people/conftest.py (evita "Future attached to a
+tests/integration/properties/conftest.py (evita "Future attached to a
 different loop" entre tests async de pytest-asyncio). El `Seeder` se
 duplica deliberadamente -- mismo criterio que el repo ya aplica entre
-`auth`, `superadmin`, `administracion` y `people`.
+`auth`, `superadmin`, `administracion`, `people` y `properties`.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 import sqlalchemy as sa
@@ -164,7 +164,7 @@ def seed(rsa_keypair):
             permissions: list[str] | None = None,
         ) -> uuid.UUID:
             role_id = uuid.uuid4()
-            permissions = permissions if permissions is not None else ["property:manage"]
+            permissions = permissions if permissions is not None else ["contract:manage"]
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
                 await session.execute(
@@ -210,7 +210,7 @@ def seed(rsa_keypair):
         ) -> dict:
             """Siembra una organizacion `active` con sus 3 roles de sistema
             reales (`ROLE_DEFINITIONS`) -- `maintenance` no tiene ningun
-            permiso `property:*` (CA-01-06)."""
+            permiso `contract:*` (RN-A01)."""
             org_id = await self.create_organization(status=status, name=name)
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
@@ -258,7 +258,7 @@ def seed(rsa_keypair):
                 "headers": headers,
             }
 
-        # ─── helpers propios de propiedades (issue #15) ───────────────────
+        # ─── helpers propios de contratos (issue #17) ─────────────────────
 
         async def create_landlord_row(
             self,
@@ -266,28 +266,20 @@ def seed(rsa_keypair):
             organization_id: uuid.UUID,
             name: str = "Propietario de prueba",
             commission_pct: str = "10.00",
-            deleted: bool = False,
         ) -> uuid.UUID:
-            """Siembra un `landlord` directamente en DB -- necesario porque
-            toda propiedad requiere un `landlord_id` valido del mismo
-            tenant (RN "Toda propiedad pertenece a exactamente un
-            propietario")."""
             landlord_id = uuid.uuid4()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
-                deleted_at = datetime.now(UTC) if deleted else None
                 await session.execute(
                     sa.text(
-                        "INSERT INTO landlords "
-                        "(id, organization_id, name, commission_pct, deleted_at) "
-                        "VALUES (:id, :org_id, :name, :commission_pct, :deleted_at)"
+                        "INSERT INTO landlords (id, organization_id, name, commission_pct) "
+                        "VALUES (:id, :org_id, :name, :commission_pct)"
                     ),
                     {
                         "id": str(landlord_id),
                         "org_id": str(organization_id),
                         "name": name,
                         "commission_pct": commission_pct,
-                        "deleted_at": deleted_at,
                     },
                 )
             return landlord_id
@@ -295,9 +287,6 @@ def seed(rsa_keypair):
         async def create_renter_row(
             self, *, organization_id: uuid.UUID, name: str = "Inquilino de prueba"
         ) -> uuid.UUID:
-            """Issue #17: usado por los tests de `has_active_dependencies`
-            que necesitan un contrato real (property + renter) para
-            ejercitar CA-01-03 end-to-end."""
             renter_id = uuid.uuid4()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
@@ -316,36 +305,82 @@ def seed(rsa_keypair):
             organization_id: uuid.UUID,
             landlord_id: uuid.UUID,
             address: str = "Av. Test 123",
-            property_type: str = "departamento",
             status: str = "available",
-            deleted: bool = False,
         ) -> uuid.UUID:
-            """Siembra una `property` directamente en DB -- usado por los
-            tests de aislamiento cross-tenant, que necesitan un recurso en
-            la organizacion B sin usar `client`."""
             property_id = uuid.uuid4()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
-                deleted_at = datetime.now(UTC) if deleted else None
                 await session.execute(
                     sa.text(
                         "INSERT INTO properties "
-                        "(id, organization_id, landlord_id, address, property_type, status, "
-                        "deleted_at) "
-                        "VALUES (:id, :org_id, :landlord_id, :address, :property_type, :status, "
-                        ":deleted_at)"
+                        "(id, organization_id, landlord_id, address, property_type, status) "
+                        "VALUES (:id, :org_id, :landlord_id, :address, 'departamento', :status)"
                     ),
                     {
                         "id": str(property_id),
                         "org_id": str(organization_id),
                         "landlord_id": str(landlord_id),
                         "address": address,
-                        "property_type": property_type,
+                        "status": status,
+                    },
+                )
+            return property_id
+
+        async def get_property_status(self, property_id: uuid.UUID) -> str:
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                result = await session.execute(
+                    sa.text("SELECT status FROM properties WHERE id = :id"),
+                    {"id": str(property_id)},
+                )
+                return result.scalar_one()
+
+        async def create_contract_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            property_id: uuid.UUID,
+            renter_id: uuid.UUID,
+            currency: str = "ARS",
+            initial_amount: str = "100000.00",
+            start_date: str = "2026-01-01",
+            end_date: str = "2027-01-01",
+            daily_late_fee_pct: str = "0.1",
+            status: str = "draft",
+            deleted: bool = False,
+        ) -> uuid.UUID:
+            """Siembra un `contract` directamente en DB -- usado por los
+            tests de aislamiento cross-tenant, que necesitan un recurso en
+            la organizacion B sin pasar por el API."""
+            contract_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                deleted_at = datetime.now(UTC) if deleted else None
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO contracts "
+                        "(id, organization_id, property_id, renter_id, currency, "
+                        "initial_amount, current_amount, start_date, end_date, "
+                        "daily_late_fee_pct, status, deleted_at) "
+                        "VALUES (:id, :org_id, :property_id, :renter_id, :currency, "
+                        ":initial_amount, :initial_amount, :start_date, :end_date, "
+                        ":daily_late_fee_pct, :status, :deleted_at)"
+                    ),
+                    {
+                        "id": str(contract_id),
+                        "org_id": str(organization_id),
+                        "property_id": str(property_id),
+                        "renter_id": str(renter_id),
+                        "currency": currency,
+                        "initial_amount": initial_amount,
+                        "start_date": date.fromisoformat(start_date),
+                        "end_date": date.fromisoformat(end_date),
+                        "daily_late_fee_pct": daily_late_fee_pct,
                         "status": status,
                         "deleted_at": deleted_at,
                     },
                 )
-            return property_id
+            return contract_id
 
         async def audit_rows(self, organization_id: uuid.UUID, action: str) -> list[dict]:
             session_factory = get_session_factory()
