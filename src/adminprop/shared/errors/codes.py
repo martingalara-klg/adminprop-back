@@ -210,6 +210,61 @@ class RoleNotFoundException(AdminPropException):
     message = "El rol solicitado no existe."
 
 
+class ContractOverlapException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 409 CONTRACT_OVERLAP.
+
+    Issue #17 (spec_module_03_contratos.md RF-02/RF-03, RN-01/RN-C01): una
+    propiedad no puede tener dos contratos `active` con vigencias
+    superpuestas. Se levanta tanto al crear como al activar
+    (`details.conflicting_contract_id` identifica el contrato en
+    conflicto) -- validacion app-level ANTES del EXCLUDE de DB (que es la
+    red de seguridad, no la UX, ver `modules/contracts/repository.py`).
+    """
+
+    status_code = 409
+    error_code = "CONTRACT_OVERLAP"
+    message = "La propiedad ya tiene un contrato vigente en ese rango de fechas."
+
+
+class ContractNotActiveException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 422 CONTRACT_NOT_ACTIVE.
+
+    Issue #17: `POST /contracts/:id/terminate` sobre un contrato que no
+    esta `active` (ya `terminated`/`expired`, o todavia `draft`).
+    """
+
+    status_code = 422
+    error_code = "CONTRACT_NOT_ACTIVE"
+    message = "El contrato no esta activo."
+
+
+class InvalidStatusTransitionException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 422 INVALID_STATUS_TRANSITION.
+
+    Issue #17: `POST /contracts/:id/activate` sobre un contrato que no
+    esta `draft` (RF-03: `draft -> active` es la unica transicion valida
+    para este endpoint).
+    """
+
+    status_code = 422
+    error_code = "INVALID_STATUS_TRANSITION"
+    message = "La transicion de estado solicitada no es valida."
+
+
+class BusinessRuleViolationException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 422 BUSINESS_RULE_VIOLATION.
+
+    Issue #17 (RN-C04/RN-04, CA-03-06): `PATCH /contracts/:id` nunca
+    acepta cambios de `current_amount` -- el monto vigente solo cambia via
+    un ajuste registrado (`ContractAdjustment`, fuera de alcance de este
+    issue, ver #18).
+    """
+
+    status_code = 422
+    error_code = "BUSINESS_RULE_VIOLATION"
+    message = "La operacion viola una regla de negocio."
+
+
 class EntityHasDependenciesException(AdminPropException):
     """sdd_03 §"Codigos de Error Globales" -- 409 ENTITY_HAS_DEPENDENCIES.
 
