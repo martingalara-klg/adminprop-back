@@ -3,7 +3,8 @@
 
 SDD: core/sdd_03_api_contracts.md §9 "Cobranzas".
 Implements: CA-04-03, CA-04-04, CA-04-05, CA-04-06 (issue #22);
-CA-04-07 (anulacion), CA-04-09 (deuda global) (issue #23).
+CA-04-07 (anulacion), CA-04-09 (deuda global) (issue #23);
+CA-04-10 (recibo PDF, RF-07) (issue #24).
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import re
 from datetime import UTC, date, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 
 from adminprop.modules.payments.schemas import (
     DebtEntryData,
@@ -191,6 +192,37 @@ async def void_payment(
         actor_user_id=payload.sub,
     )
     return PaymentVoidResponse(data=PaymentDetail.model_validate(voided))
+
+
+# ─── /v1/payments/:id/receipt -- RF-07 (issue #24) ─────────────────────
+
+
+@payments_root_router.get(
+    "/{payment_id}/receipt",
+    dependencies=[Depends(requires_permission("rent-period:read"))],
+)
+async def get_payment_receipt(
+    payment_id: UUID,
+    organization_id: UUID = Depends(get_current_tenant),
+    service: PaymentService = Depends(get_payment_service),
+) -> Response:
+    """sdd_03 §9 + RF-07/CA-04-10: genera bajo demanda y descarga el
+    recibo PDF del cobro (una pagina, WeasyPrint, SINCRONICO) -- capital,
+    interes, TC (si aplico) y encabezado de la administradora. Sobre un
+    cobro anulado -> `422 BUSINESS_RULE_VIOLATION` (RN-P08).
+
+    Permiso `rent-period:read` (no existe un `payment:read` atomico en el
+    catalogo de sdd_03 -- ver "Decisiones de implementacion" del PR): el
+    catalogo de permisos es fijo (CLAUDE.md §8 "Nunca hacer sin
+    preguntar: Agregar dependencias/permisos no mencionados en los
+    SDDs"), y `rent-period:read` es el permiso de lectura que ya cubre
+    este mismo dominio (panel de cobranzas, preview de interes)."""
+    pdf_bytes = await service.generate_receipt_pdf(payment_id, organization_id)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="recibo-{payment_id}.pdf"'},
+    )
 
 
 # ─── /v1/debt -- RF-06 (issue #23) ──────────────────────────────────────
