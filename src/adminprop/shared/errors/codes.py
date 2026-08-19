@@ -310,6 +310,45 @@ class AdjustmentPctRequiredException(AdminPropException):
     message = "El porcentaje de ajuste es obligatorio."
 
 
+class ExchangeRateRequiredException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 400 EXCHANGE_RATE_REQUIRED.
+
+    Issue #22 (spec_module_04_cobranzas.md RF-03, RN-P06): un cobro cuya
+    `payment_currency` difiere de la moneda del contrato exige
+    `exchange_rate` -- validacion app-level (el CHECK de la migracion #20
+    solo exige `exchange_rate > 0` cuando no es NULL, no la obligatoriedad
+    condicional, que requiere leer `contracts.currency`).
+    """
+
+    status_code = 400
+    error_code = "EXCHANGE_RATE_REQUIRED"
+    message = "Se requiere el tipo de cambio porque la moneda del pago difiere de la del contrato."
+
+
+class PaymentExceedsContractBalanceException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 422 PAYMENT_EXCEEDS_CONTRACT_BALANCE.
+
+    Issue #22 (RF-03, RN-P05): el capital imputado (`amount`) de un cobro
+    no puede superar el saldo impago del periodo (`amount_due - paid_total`).
+    """
+
+    status_code = 422
+    error_code = "PAYMENT_EXCEEDS_CONTRACT_BALANCE"
+    message = "El monto del cobro excede el saldo pendiente del periodo."
+
+
+class RentPeriodAlreadyPaidException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 422 RENT_PERIOD_ALREADY_PAID.
+
+    Issue #22 (RF-03): `POST /rent-periods/:id/payments` sobre un periodo
+    cuyo `status` ya es `paid` -- no admite mas imputaciones.
+    """
+
+    status_code = 422
+    error_code = "RENT_PERIOD_ALREADY_PAID"
+    message = "El periodo ya fue pagado en su totalidad."
+
+
 class EntityHasDependenciesException(AdminPropException):
     """sdd_03 §"Codigos de Error Globales" -- 409 ENTITY_HAS_DEPENDENCIES.
 
