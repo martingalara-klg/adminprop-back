@@ -231,6 +231,7 @@ Sin RLS (es la raíz); el acceso se controla por membresía. Solo `adminprop_sup
 | notes | TEXT | | |
 | metadata | JSONB | DEFAULT `'{}'` | |
 | created_at / updated_at / deleted_at | TIMESTAMPTZ | | |
+| expiring_notified_at | TIMESTAMPTZ | NULL | Marca de idempotencia del aviso de vencimiento (RF-05/CA-03-07, issue #19) |
 | | | CHECK: currency='USD' ⇒ adjustment_frequency_months IS NULL AND adjustment_index IS NULL | RN-C02 |
 
 **Invariante RN-C01 (no solapamiento):** constraint de exclusión —

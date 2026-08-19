@@ -19,9 +19,11 @@ jitter) que `send_transactional_email`, pero no delega en esa tarea
 porque necesita actualizar la fila de `notifications` despues del envio.
 
 Las 3 tareas de Celery Beat (`generate_rent_periods`, `detect_due_adjustments`,
-`detect_expiring_contracts`) son stubs en este issue (CA-4-04): solo loguean
-inicio/fin para validar que Beat las dispara end-to-end. La logica de
-negocio real llega con los issues #21, #18 y #19 respectivamente.
+`detect_expiring_contracts`) partieron como stubs (CA-4-04) que solo
+logueaban inicio/fin para validar que Beat las dispara end-to-end.
+`detect_due_adjustments` (issue #18) y `detect_expiring_contracts` (issue
+#19) ya tienen su logica de negocio real; `generate_rent_periods` sigue
+siendo stub hasta el issue #21.
 """
 
 import asyncio
@@ -39,6 +41,8 @@ from adminprop.db.session import get_session_factory, set_tenant_context, tenant
 from adminprop.modules.contracts.adjustment_repository import ContractAdjustmentRepository
 from adminprop.modules.contracts.adjustment_service import ContractAdjustmentService
 from adminprop.modules.contracts.repository import ContractRepository
+from adminprop.modules.contracts.service import ContractService
+from adminprop.modules.properties.repository import PropertyRepository
 from adminprop.shared.email.sender import send_email
 from adminprop.shared.errors.retryable import (
     NonRetryableNotificationError,
@@ -359,9 +363,10 @@ async def _send_notification_email_async(
         await repo.mark_email_sent(notification_id)
 
 
-# ─── Celery Beat — stubs (CA-4-04) ──────────────────────────────────────────
-# Logica real: issue #21 (generate_rent_periods, RN-P01), issue #18
-# (detect_due_adjustments, RN-C03), issue #19 (detect_expiring_contracts).
+# ─── Celery Beat (CA-4-04) ──────────────────────────────────────────────────
+# `detect_due_adjustments` (RN-C03, issue #18) y `detect_expiring_contracts`
+# (issue #19) ya tienen logica real. `generate_rent_periods` sigue siendo
+# stub -- logica real: issue #21 (RN-P01).
 
 
 @celery_app.task(bind=True, name="adminprop.workers.notification_worker.generate_rent_periods")
@@ -445,12 +450,51 @@ async def _detect_due_adjustments_async(request_id: str) -> None:
 
 @celery_app.task(bind=True, name="adminprop.workers.notification_worker.detect_expiring_contracts")
 def detect_expiring_contracts(self: Task) -> None:
-    """Stub (issue #4): Beat dispara esta tarea diariamente, 01:30 UTC.
+    """Beat dispara esta tarea diariamente, 01:30 UTC.
 
-    Logica real (notificar contratos por vencer) llega con el issue #19 —
-    sdd_04 §1.3.
+    SDD: spec_module_03_contratos.md §RF-03 (active -> expired automatico)
+    + §RF-05 (aviso de vencimiento). Implements: CA-03-07 (RN-C05, RN-07,
+    RN-D01). Itera TODAS las organizaciones `active` (el Beat corre sin
+    tenant) y, por cada una, setea el contexto y detecta -- mismo patron
+    que `_detect_due_adjustments_async` (issue #18) documenta en
+    `async-worker.md` para cualquier tarea sin `organization_id` de origen
+    HTTP.
     """
+    request_id = str(uuid.uuid4())
     logger.info(
-        "detect_expiring_contracts stub — logica real llega con el issue #19",
-        extra={"attempt": self.request.retries + 1, "service": "notification_worker"},
+        "detect_expiring_contracts start",
+        extra={
+            "request_id": request_id,
+            "attempt": self.request.retries + 1,
+            "service": "notification_worker",
+        },
     )
+    asyncio.run(_detect_expiring_contracts_async(request_id))
+    logger.info(
+        "detect_expiring_contracts done",
+        extra={"request_id": request_id, "service": "notification_worker"},
+    )
+
+
+async def _detect_expiring_contracts_async(request_id: str) -> None:
+    today = datetime.now(UTC).date()
+    organization_ids = await _list_active_organization_ids()
+
+    for organization_id in organization_ids:
+        notification_ids: list[UUID] = []
+        async with tenant_scoped_session(organization_id) as session:
+            contract_repo = ContractRepository(session)
+            property_repo = PropertyRepository(session)
+            service = ContractService(contract_repo, property_repo)
+            notification_ids = await service.detect_expiring_and_expired(
+                organization_id=organization_id, today=today
+            )
+            # `tenant_scoped_session` comitea al salir del bloque sin
+            # excepcion (mismo patron que `_detect_due_adjustments_async`).
+
+        # RF-01 (spec_notificaciones.md): el email se encola DESPUES del
+        # commit de la operacion de negocio -- patron outbox.
+        if notification_ids:
+            enqueue_pending_emails(
+                notification_ids, organization_id=organization_id, request_id=request_id
+            )

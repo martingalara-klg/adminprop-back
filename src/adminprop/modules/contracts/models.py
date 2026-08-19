@@ -69,6 +69,12 @@ class Contract(Base):
         DateTime(timezone=True), server_default=text("now()")
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # RF-05/CA-03-07 (issue #19, migracion 20260819_123059): marca de
+    # idempotencia del aviso de vencimiento -- NULL hasta que
+    # `detect_expiring_contracts` notifica una vez.
+    expiring_notified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
 
     __table_args__ = (
         Index("ix_contracts_organization_id_orm", "organization_id"),

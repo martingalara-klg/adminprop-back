@@ -17,13 +17,19 @@ from datetime import UTC, date, datetime, timedelta
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adminprop.db.session import get_tenant_db_session
 from adminprop.modules.contracts.models import Contract
 from adminprop.modules.people.models import Renter
 from adminprop.modules.properties.models import Property
+
+# spec_data_model.md §"Estrategia de Seed Data" (modules/superadmin/provisioning.py.
+# DEFAULT_ORGANIZATION_SETTINGS): piso de seguridad si `organizations.settings`
+# no trae la clave todavia (defensivo -- toda organizacion nueva la trae desde
+# el provisioning del issue #7).
+_DEFAULT_CONTRACT_EXPIRY_NOTICE_DAYS = 60
 
 
 def _encode_cursor(created_at: datetime, row_id: UUID) -> str:
@@ -226,6 +232,73 @@ class ContractRepository:
         )
         result = await self._session.execute(stmt)
         return result.first() is not None
+
+    # ─── RF-03/RF-05 (issue #19): job diario `detect_expiring_contracts` ──
+
+    async def get_expiry_notice_days(self, organization_id: UUID) -> int:
+        """RF-05: lee `contract_expiry_notice_days` de `organizations.settings`
+        (JSONB, issue #9) -- default 60 si la clave no esta presente
+        (defensivo, ver comentario del modulo)."""
+        stmt = text(
+            "SELECT settings ->> 'contract_expiry_notice_days' FROM organizations "
+            "WHERE id = :organization_id AND deleted_at IS NULL"
+        )
+        result = await self._session.execute(stmt, {"organization_id": str(organization_id)})
+        raw_value = result.scalar_one_or_none()
+        if raw_value is None:
+            return _DEFAULT_CONTRACT_EXPIRY_NOTICE_DAYS
+        return int(raw_value)
+
+    async def list_active_past_end_date(
+        self, organization_id: UUID, *, today: date
+    ) -> list[Contract]:
+        """RF-03: contratos `active` cuyo `end_date` ya paso -- candidatos
+        a la transicion automatica `active -> expired` (RN-C05/RN-07)."""
+        stmt = select(Contract).where(
+            Contract.organization_id == organization_id,
+            Contract.status == "active",
+            Contract.end_date < today,
+            Contract.deleted_at.is_(None),
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_active_due_for_expiry_notice(
+        self, organization_id: UUID, *, today: date, notice_days: int
+    ) -> list[Contract]:
+        """RF-05/CA-03-07: contratos `active` que vencen dentro de
+        `notice_days` (inclusive) y todavia no fueron notificados
+        (`expiring_notified_at IS NULL` -- idempotencia, ver migracion
+        20260819_123059). Contratos ya vencidos (candidatos a `expired`)
+        no entran aca: el service corre esta consulta DESPUES de aplicar
+        `list_active_past_end_date`, asi que a esta altura `end_date >=
+        today` ya implica que siguen `active`."""
+        threshold = today + timedelta(days=notice_days)
+        stmt = select(Contract).where(
+            Contract.organization_id == organization_id,
+            Contract.status == "active",
+            Contract.end_date >= today,
+            Contract.end_date <= threshold,
+            Contract.expiring_notified_at.is_(None),
+            Contract.deleted_at.is_(None),
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def mark_expiring_notified(
+        self, contract_id: UUID, organization_id: UUID, *, notified_at: datetime
+    ) -> None:
+        """CA-03-07: marca el aviso como enviado -- una sola vez por
+        contrato (la ventana de umbral no reinicia la marca; si el umbral
+        de la organizacion cambia y el contrato vuelve a caer dentro del
+        rango, no se reenvia -- "una sola notificacion por contrato y
+        umbral" se interpreta con el umbral vigente al momento del primer
+        aviso, ver decision en el PR)."""
+        row = await self._get_row(contract_id, organization_id)
+        if row is None:  # pragma: no cover -- defensivo, el service ya listo el candidato
+            return
+        row.expiring_notified_at = notified_at
+        await self._session.flush()
 
     async def _get_row(self, contract_id: UUID, organization_id: UUID) -> Contract | None:
         stmt = select(Contract).where(
