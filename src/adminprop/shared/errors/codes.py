@@ -349,6 +349,20 @@ class RentPeriodAlreadyPaidException(AdminPropException):
     message = "El periodo ya fue pagado en su totalidad."
 
 
+class PaymentAlreadyVoidedException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 409 PAYMENT_ALREADY_VOIDED.
+
+    Issue #23 (spec_module_04_cobranzas.md RF-05, RN-D04): `POST
+    /payments/:id/void` sobre un cobro cuyo `voided_at` ya esta seteado --
+    la anulacion es idempotente en el sentido de "no se puede anular dos
+    veces", no en el sentido de "no falla" (CA-04-07).
+    """
+
+    status_code = 409
+    error_code = "PAYMENT_ALREADY_VOIDED"
+    message = "El cobro ya fue anulado."
+
+
 class EntityHasDependenciesException(AdminPropException):
     """sdd_03 §"Codigos de Error Globales" -- 409 ENTITY_HAS_DEPENDENCIES.
 
