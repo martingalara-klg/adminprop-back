@@ -44,6 +44,9 @@ _CONTRACTS_COLUMNS = {
     "created_at",
     "updated_at",
     "deleted_at",
+    # issue #19 (migracion 20260819_123059): marca de idempotencia del
+    # aviso de vencimiento, RF-05/CA-03-07.
+    "expiring_notified_at",
 }
 
 _CONTRACT_ADJUSTMENTS_COLUMNS = {
