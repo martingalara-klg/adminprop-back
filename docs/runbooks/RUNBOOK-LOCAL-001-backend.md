@@ -241,6 +241,7 @@ En el MVP no hay infraestructura cloud (ver nota al inicio del documento): no ex
 | `Address already in use` en puerto 8000/5432 | Otro proceso usando el puerto | `lsof -i :8000` y matar el proceso, o cambiar puerto en `docker-compose.yml` |
 | `RESEND_API_KEY not set` al correr tests que envían email | Tests intentan llamar Resend real | Los tests deben usar mocks/fixtures deterministas; verificar `tests/conftest.py` |
 | `JWT_PRIVATE_KEY_PATH` not found | Faltó paso 2.3 | Generar las claves: `openssl genrsa ...` |
+| `OSError`/`ffi.error` al generar un PDF (recibo o libre deuda, issue #24) | Imagen `api` vieja, sin las libs de sistema de WeasyPrint (`docker/Dockerfile.api`) | `docker compose -f docker/docker-compose.yml build api` (rebuild obligatorio tras el issue #24, que agregó `weasyprint`/`pydyf` a `pyproject.toml` y las libs `libpango`/`libcairo`/`libgdk-pixbuf` al Dockerfile) |
 
 ---
 
