@@ -316,9 +316,7 @@ class ContractService:
         outbox, igual que `detect_due_adjustments`).
         """
         # Paso 1 -- RF-03: transicion automatica active -> expired.
-        expired_contracts = await self._repo.list_active_past_end_date(
-            organization_id, today=today
-        )
+        expired_contracts = await self._repo.list_active_past_end_date(organization_id, today=today)
         for contract in expired_contracts:
             await self._repo.update(contract.id, organization_id, fields={"status": "expired"})
             # CA-01-04/CA-03-08 (mismo efecto que terminate): la propiedad

@@ -42,7 +42,8 @@ async def _seed_organization(
     user_id = uuid.uuid4()
     role_id = uuid.uuid4()
     settings = (
-        {} if contract_expiry_notice_days is None
+        {}
+        if contract_expiry_notice_days is None
         else {"contract_expiry_notice_days": contract_expiry_notice_days}
     )
     session_factory = get_session_factory()
