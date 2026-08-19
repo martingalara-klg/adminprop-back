@@ -1,14 +1,13 @@
-"""Endpoints /v1/landlords/* y /v1/renters/* (issue #13, extendido #23).
+"""Endpoints /v1/landlords/* y /v1/renters/* (issue #13, extendido
+#23/#24).
 
 SDD: core/sdd_03_api_contracts.md §5 "Propietarios" + §6 "Inquilinos".
 Implements: CA-02-01, 02, 03, 04, 06, 07 (issue #13); CA-02-05 (estado
-de deuda, issue #23).
+de deuda, issue #23); CA-04-11/CA-04-12 (libre deuda, RF-08, issue #24).
 
 Fuera de alcance de este issue (ver "Decisiones de implementacion" del PR):
 - `GET /landlords/:id/settlements` (historial de liquidaciones) -- depende
   del modulo de Liquidaciones, todavia inexistente.
-- `POST /renters/:id/debt-certificate` -- depende de Cobranzas y de PDF
-  sincronico (RF-08); fuera de alcance del issue #23 (ver issue #24).
 """
 
 from __future__ import annotations
@@ -16,13 +15,13 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adminprop.db.session import get_tenant_db_session
 from adminprop.modules.payments.schemas import DebtEntryData, RenterDebtResponse
 from adminprop.modules.people.models import Renter
-from adminprop.modules.people.repository import LandlordFields
+from adminprop.modules.people.repository import LandlordFields, RenterRepository
 from adminprop.modules.people.schemas import (
     LandlordCreate,
     LandlordDetail,
@@ -326,6 +325,72 @@ async def get_renter_debt(
         renter_id, organization_id, today=datetime.now(tz=UTC).date()
     )
     return RenterDebtResponse(data=[DebtEntryData.model_validate(e) for e in entries])
+
+
+@renters_router.post(
+    "/{renter_id}/debt-certificate",
+    dependencies=[Depends(requires_permission("renter:read"))],
+)
+async def issue_debt_certificate(
+    renter_id: UUID,
+    organization_id: UUID = Depends(get_current_tenant),
+    payload: JWTPayload = Depends(requires_permission("renter:read")),
+    renter_service: RenterService = Depends(get_renter_service),
+    session: AsyncSession = Depends(get_tenant_db_session),
+) -> Response:
+    """sdd_03 §9 + RF-08: emite el certificado de libre deuda en PDF
+    (SINCRONICO) -- CA-04-11 (sin deuda, auditado como
+    `debt_certificate.issued`), CA-04-12 (con deuda -> `422
+    RENTER_HAS_DEBT` con el detalle en `details`, RN-P08).
+
+    Permiso `renter:read` (mismo criterio que `GET /renters/:id/debt`,
+    issue #23: emitir el certificado es una operacion de lectura/reporte
+    sobre el inquilino, no modifica sus datos).
+
+    `DebtCertificateService`/`ContractRepository`/`PropertyRepository`
+    se importan DIFERIDO -- mismo ciclo de import documentado en
+    `get_renter_debt` de este archivo."""
+    renter = await renter_service.get(renter_id, organization_id)
+    if renter is None:
+        # RN-D01: 404, no 403 -- no distingue "no existe" de "otra org".
+        raise NotFoundException()
+
+    from adminprop.modules.administracion.repository import AdministracionRepository
+    from adminprop.modules.contracts.repository import ContractFilters, ContractRepository
+    from adminprop.modules.payments.repository import RentPeriodRepository
+    from adminprop.modules.payments.service import DebtService
+    from adminprop.modules.people.debt_certificate_service import DebtCertificateService
+
+    contract_repo = ContractRepository(session)
+    property_repo = PropertyRepository(session)
+    contracts, _ = await contract_repo.list(
+        organization_id=organization_id,
+        cursor=None,
+        limit=100,
+        filters=ContractFilters(renter_id=renter_id, status="active"),
+    )
+    contract_rows = []
+    for contract in contracts:
+        property_row = await property_repo.get_by_id(contract.property_id, organization_id)
+        address = property_row.address if property_row is not None else str(contract.property_id)
+        contract_rows.append((address, contract.current_amount, contract.currency))
+
+    debt_service = DebtService(RentPeriodRepository(session), AdministracionRepository(session))
+    certificate_service = DebtCertificateService(
+        renter_repo=RenterRepository(session),
+        admin_repo=AdministracionRepository(session),
+        debt_service=debt_service,
+        contract_rows=contract_rows,
+        actor_user_id=payload.sub,
+    )
+    pdf_bytes = await certificate_service.issue(
+        renter_id, organization_id, today=datetime.now(tz=UTC).date()
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="libre-deuda-{renter_id}.pdf"'},
+    )
 
 
 @renters_router.patch(

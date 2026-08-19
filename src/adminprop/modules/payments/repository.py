@@ -57,6 +57,29 @@ from adminprop.modules.payments.models import Payment, RentPeriod
 
 
 @dataclass(frozen=True)
+class PaymentReceiptContext:
+    """RF-07 (issue #24): fila cruda del join `payments -> rent_periods ->
+    contracts -> properties/renters` -- todos los datos de texto que
+    `PaymentService.generate_receipt_pdf` necesita para el recibo, sin
+    recalcular nada (el interes ya quedo congelado en `payments` al
+    momento del cobro, RN-P04)."""
+
+    id: UUID
+    payment_date: date
+    method: str
+    payment_currency: str
+    amount: Decimal
+    exchange_rate: Decimal | None
+    destination: str
+    charged_interest: Decimal
+    voided_at: datetime | None
+    period: date
+    contract_currency: str
+    renter_name: str
+    property_address: str
+
+
+@dataclass(frozen=True)
 class RentPeriodCandidate:
     """Fila cruda del JOIN `rent_periods -> contracts -> properties` --
     todavia sin `days_late`/`suggested_interest`/`balance` (esos son
@@ -341,6 +364,44 @@ class PaymentRepository:
 
     async def commit(self) -> None:
         await self._session.commit()
+
+    # ─── RF-07 (issue #24): recibo de cobro ─────────────────────────────
+
+    async def get_receipt_context(
+        self, payment_id: UUID, organization_id: UUID
+    ) -> PaymentReceiptContext | None:
+        """RF-07: datos crudos para el recibo PDF -- SQL crudo (mismo
+        motivo que `RentPeriodRepository._CANDIDATE_SQL`, evitar el ciclo
+        de import `properties`<->`people` documentado en el docstring del
+        modulo). Filtro EXPLICITO de `organization_id` en las CUATRO
+        tablas del join (RN-D01, tenant-isolation.md)."""
+        sql = """
+            SELECT
+                pay.id AS id,
+                pay.payment_date AS payment_date,
+                pay.method AS method,
+                pay.payment_currency AS payment_currency,
+                pay.amount AS amount,
+                pay.exchange_rate AS exchange_rate,
+                pay.destination AS destination,
+                pay.charged_interest AS charged_interest,
+                pay.voided_at AS voided_at,
+                rp.period AS period,
+                c.currency AS contract_currency,
+                r.name AS renter_name,
+                p.address AS property_address
+            FROM payments pay
+            JOIN rent_periods rp ON rp.id = pay.rent_period_id AND rp.organization_id = :org_id
+            JOIN contracts c ON c.id = rp.contract_id AND c.organization_id = :org_id
+            JOIN properties p ON p.id = c.property_id AND p.organization_id = :org_id
+            JOIN renters r ON r.id = c.renter_id AND r.organization_id = :org_id
+            WHERE pay.id = :payment_id AND pay.organization_id = :org_id
+        """
+        result = await self._session.execute(
+            text(sql), {"org_id": str(organization_id), "payment_id": str(payment_id)}
+        )
+        row = result.mappings().first()
+        return PaymentReceiptContext(**dict(row)) if row is not None else None
 
 
 def get_rent_period_repository(

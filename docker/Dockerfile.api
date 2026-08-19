@@ -6,12 +6,20 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Nota: las dependencias de sistema para WeasyPrint (PDF de liquidaciones)
-# no se agregan todavía — openpyxl/WeasyPrint no son dependencias del
-# proyecto en esta fase (pyproject.toml sólo declara fastapi/uvicorn/
-# pydantic-settings/python-json-logger). Se agregarán en el issue que
-# introduzca esa dependencia real, para no acoplar el compose de #2 a
-# paquetes que el código todavía no usa.
+# issue #24 — dependencias de sistema de WeasyPrint (RF-07/RF-08: recibo
+# de cobro + certificado de libre deuda, PDF sincronico). Lista minima
+# para WeasyPrint 62.x en Debian slim (doc oficial "Install" — Debian/
+# Ubuntu): Pango + cairo (via libpangocairo) para el layout de texto,
+# gdk-pixbuf para imagenes, libffi-dev para cffi (dependencia de
+# cairocffi) y shared-mime-info para la deteccion de tipos de recursos.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf-2.0-0 \
+        libffi-dev \
+        shared-mime-info \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md alembic.ini ./
 COPY src ./src

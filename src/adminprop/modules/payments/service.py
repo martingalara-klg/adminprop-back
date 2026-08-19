@@ -49,6 +49,7 @@ from adminprop.modules.contracts.rent_period_hook import (
     contract_has_pending_adjustment_for_period,
 )
 from adminprop.modules.contracts.repository import ContractRepository, get_contract_repository
+from adminprop.modules.payments.attachment_hook import maybe_store_receipt_attachment
 from adminprop.modules.payments.models import Payment, RentPeriod
 from adminprop.modules.payments.repository import (
     PaymentRepository,
@@ -60,12 +61,14 @@ from adminprop.modules.payments.repository import (
 from adminprop.modules.payments.settlement_hook import maybe_mark_settlements_for_regeneration
 from adminprop.shared.audit.service import audit
 from adminprop.shared.errors.codes import (
+    BusinessRuleViolationException,
     ExchangeRateRequiredException,
     NotFoundException,
     PaymentAlreadyVoidedException,
     PaymentExceedsContractBalanceException,
     RentPeriodAlreadyPaidException,
 )
+from adminprop.shared.pdf import document_html, render_pdf_from_html
 
 # spec_module_07_administracion.md / provisioning.py.DEFAULT_ORGANIZATION_SETTINGS:
 # piso de seguridad si `organizations.settings` no trae `grace_day` todavia
@@ -391,6 +394,56 @@ class PaymentService:
 
         await self._payment_repo.commit()
         return voided_payment
+
+    async def generate_receipt_pdf(self, payment_id: UUID, organization_id: UUID) -> bytes:
+        """RF-07/CA-04-10: `GET /payments/:id/receipt` -- genera bajo
+        demanda el recibo PDF (una pagina, WeasyPrint, SINCRONICO) con
+        encabezado de la administradora (RF-04 Modulo 7), inquilino,
+        propiedad, periodo, capital cobrado, interes cobrado, TC si
+        aplico, medio de pago y fecha. Un cobro anulado no emite recibo
+        (`422 BUSINESS_RULE_VIOLATION`, RN-P08)."""
+        context = await self._payment_repo.get_receipt_context(payment_id, organization_id)
+        if context is None:
+            raise NotFoundException()
+        if context.voided_at is not None:
+            # RF-07: "sobre un cobro anulado no se emite recibo".
+            raise BusinessRuleViolationException(
+                message="No se puede emitir el recibo de un cobro anulado."
+            )
+
+        settings = await self._admin_repo.get_organization_settings(organization_id)
+        billing_header = (settings or {}).get("billing_header") or {}
+
+        rows: list[tuple[str, str]] = [
+            ("Inquilino", context.renter_name),
+            ("Propiedad", context.property_address),
+            ("Periodo", context.period.strftime("%Y-%m")),
+            ("Fecha de pago", context.payment_date.strftime("%d/%m/%Y")),
+            ("Medio de pago", "Efectivo" if context.method == "cash" else "Transferencia"),
+            ("Capital cobrado", f"{context.amount:.2f} {context.contract_currency}"),
+            ("Interes cobrado", f"{context.charged_interest:.2f} {context.contract_currency}"),
+        ]
+        if context.payment_currency != context.contract_currency:
+            rows.append(("Moneda del pago", context.payment_currency))
+        if context.exchange_rate is not None:
+            rows.append(("Tipo de cambio", f"{context.exchange_rate:.4f}"))
+
+        html = document_html(
+            title="Recibo de cobro",
+            billing_header=billing_header,
+            body_rows=rows,
+        )
+        pdf_bytes = render_pdf_from_html(html)
+
+        # RF-07: "el PDF generado queda como Adjunto del cobro" -- no-op
+        # hasta que exista `attachments` (Capa 5, ver docstring del hook).
+        await maybe_store_receipt_attachment(
+            self._payment_repo.session,
+            organization_id=organization_id,
+            payment_id=payment_id,
+            pdf_bytes=pdf_bytes,
+        )
+        return pdf_bytes
 
 
 def get_payment_service(

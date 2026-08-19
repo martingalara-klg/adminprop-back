@@ -27,6 +27,19 @@ dependencies = [
     "pyjwt[crypto]>=2.8",
     "bcrypt>=4.1",
     "redis>=5.0",
+    # issue #24 — RF-07 (recibo PDF de cobro) + RF-08 (certificado de
+    # libre deuda): generacion SINCRONICA de PDF de una pagina
+    # (CLAUDE.md §3 "Documentos: ... WeasyPrint (PDF)"). Requiere
+    # dependencias de sistema (pango/cairo/gdk-pixbuf) declaradas en
+    # docker/Dockerfile.api.
+    "weasyprint>=62,<63",
+    # WeasyPrint 62.x declara `pydyf>=0.10.0` pero es incompatible con
+    # pydyf>=0.11 (`AttributeError: 'super' object has no attribute
+    # 'transform'` en `weasyprint/pdf/stream.py` -- API de pydyf cambio
+    # entre 0.10 y 0.11, confirmado corriendo `HTML(string=...).write_pdf()`
+    # real dentro del contenedor). Se fija `<0.11` hasta migrar a una
+    # version de WeasyPrint que declare el pin correcto.
+    "pydyf<0.11",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +49,9 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.4",
     "pyyaml>=6.0",
+    # issue #24 — verificacion de contenido de los PDFs generados
+    # (extraccion de texto), sin comparacion byte a byte.
+    "pypdf>=4.0",
 ]
 
 [tool.hatch.build.targets.wheel]
