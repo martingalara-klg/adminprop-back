@@ -159,9 +159,21 @@ def test_ca_03_04_detect_due_adjustments_runs_async_body_once(monkeypatch):
     assert mock_async.call_count == 1
 
 
-def test_ca_4_04_detect_expiring_contracts_stub_runs_without_error():
-    """CA-4-04: el stub de Beat corre sin excepcion (issue #19 agrega la logica)."""
-    assert detect_expiring_contracts.apply().get() is None
+def test_ca_03_07_detect_expiring_contracts_runs_async_body_once(monkeypatch):
+    """CA-03-07 (issue #19): la tarea Celery delega en
+    `_detect_expiring_contracts_async` via `asyncio.run(...)` -- mismo
+    criterio que `test_ca_03_04_detect_due_adjustments_runs_async_body_once`
+    (el body real toca Postgres, no corresponde a un test unitario). La
+    cobertura del cuerpo async real (deteccion multi-org, transicion
+    active->expired, notificacion) vive en
+    tests/integration/workers/test_detect_expiring_contracts.py."""
+    mock_async = AsyncMock(return_value=None)
+    monkeypatch.setattr(notification_worker, "_detect_expiring_contracts_async", mock_async)
+
+    result = detect_expiring_contracts.apply().get()
+
+    assert result is None
+    assert mock_async.call_count == 1
 
 
 # ─── Issue #11 — send_notification_email (outbox) ──────────────────────────
