@@ -42,6 +42,7 @@ from adminprop.shared.errors.codes import (
     InvalidStatusTransitionException,
     NotFoundException,
 )
+from adminprop.shared.notifications import service as notifications_service
 
 
 class ContractService:
@@ -285,6 +286,84 @@ class ContractService:
 
         await self._repo.commit()
         return updated
+
+    # ─── RF-03/RF-05 (issue #19): job diario `detect_expiring_contracts` ──
+
+    async def detect_expiring_and_expired(
+        self, *, organization_id: UUID, today: date
+    ) -> list[UUID]:
+        """Cuerpo de negocio del job diario `detect_expiring_contracts`
+        (`sdd_04` §1.3), llamado por el worker Beat por cada organizacion
+        `active` -- mismo patron que
+        `adjustment_service.py.detect_due_adjustments`.
+
+        Dos pasos independientes, en este orden:
+
+        1. RF-03 (`active -> expired` automatico, RN-C05/RN-07): todo
+           contrato `active` cuyo `end_date` ya paso pasa a `expired` y su
+           propiedad vuelve a `available` -- mismo efecto que `terminate`
+           (issue #17), auditado con `user_id=None` (accion del sistema,
+           `shared/audit/service.py`). Las deudas existentes siguen
+           cobrables (RN-07): este metodo no toca `rent_periods`.
+        2. RF-05/CA-03-07: de los contratos que siguen `active` (los recien
+           expirados en el paso 1 ya no califican), notifica una sola vez
+           los que vencen dentro de `contract_expiry_notice_days` de la
+           organizacion (idempotencia: `expiring_notified_at IS NULL`,
+           filtrado por el repository).
+
+        Devuelve los IDs de notificacion `contract_expiring` creadas -- el
+        worker las usa DESPUES de su commit para encolar el email (patron
+        outbox, igual que `detect_due_adjustments`).
+        """
+        # Paso 1 -- RF-03: transicion automatica active -> expired.
+        expired_contracts = await self._repo.list_active_past_end_date(
+            organization_id, today=today
+        )
+        for contract in expired_contracts:
+            await self._repo.update(contract.id, organization_id, fields={"status": "expired"})
+            # CA-01-04/CA-03-08 (mismo efecto que terminate): la propiedad
+            # vuelve a `available`.
+            await self._property_repo.update(
+                contract.property_id, organization_id, fields={"status": "available"}
+            )
+            await audit(
+                self._repo.session,
+                organization_id=organization_id,
+                action="contract.expired",
+                entity_type="contract",
+                entity_id=contract.id,
+                before={"status": "active"},
+                after={"status": "expired"},
+                user_id=None,  # RN-D: accion automatica del sistema, sin actor humano
+            )
+
+        # Paso 2 -- RF-05/CA-03-07: aviso de vencimiento, una sola vez.
+        notice_days = await self._repo.get_expiry_notice_days(organization_id)
+        due_contracts = await self._repo.list_active_due_for_expiry_notice(
+            organization_id, today=today, notice_days=notice_days
+        )
+        notification_ids: list[UUID] = []
+        notified_at = datetime.now(UTC)
+        for contract in due_contracts:
+            # RF-01 (spec_notificaciones.md): notificacion in-app en la
+            # MISMA transaccion (CA-NT-02); el email se encola DESPUES del
+            # commit (patron outbox, ver el worker).
+            ids = await notifications_service.emit(
+                self._repo.session,
+                organization_id=organization_id,
+                event_type="contract_expiring",
+                payload={"contract_id": str(contract.id)},
+            )
+            notification_ids.extend(ids)
+            # CA-03-07: marca ANTES del commit, en la misma transaccion --
+            # si algo de este loop rollbackea, la marca tambien (no queda
+            # un aviso enviado sin su notificacion in-app persistida).
+            await self._repo.mark_expiring_notified(
+                contract.id, organization_id, notified_at=notified_at
+            )
+
+        await self._repo.commit()
+        return notification_ids
 
 
 def get_contract_service(
