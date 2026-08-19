@@ -91,3 +91,98 @@ class InterestPreviewData(BaseModel):
 
 class InterestPreviewResponse(BaseModel):
     data: InterestPreviewData
+
+
+# ─── RF-05 (anulacion) -- issue #23 ────────────────────────────────────
+
+
+class PaymentVoidRequest(BaseModel):
+    """Body de POST /v1/payments/:id/void. RF-05: "motivo obligatorio"."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(..., min_length=1)
+
+
+class PaymentDetail(PaymentSummary):
+    """Igual a `PaymentSummary` + los campos de anulacion (RN-D04) --
+    "el cobro queda visible con marca de anulado" (CA-04-07)."""
+
+    voided_at: datetime | None
+    voided_by: UUID | None
+
+
+class PaymentVoidResponse(BaseModel):
+    data: PaymentDetail
+
+
+# ─── RF-02 (panel del mes) -- issue #23 ────────────────────────────────
+
+
+# spec_data_model.md §Capa 4 "rent_periods.status".
+RentPeriodStatusLiteral = Literal["pending", "partial", "paid"]
+
+
+class RentPeriodSummary(BaseModel):
+    """Item de GET /v1/rent-periods y de GET /v1/rent-periods/:id -- RF-02:
+    "cada fila muestra: propiedad, inquilino, monto, saldo, dias de mora e
+    interes sugerido al dia de hoy"."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    contract_id: UUID
+    property_id: UUID
+    landlord_id: UUID
+    renter_id: UUID
+    period: date
+    amount_due: Decimal
+    currency: str
+    status: RentPeriodStatusLiteral
+    paid_total: Decimal
+    balance: Decimal
+    in_arrears: bool
+    days_late: int
+    suggested_interest: Decimal
+
+
+class RentPeriodResponse(BaseModel):
+    data: RentPeriodSummary
+
+
+class RentPeriodListResponse(BaseModel):
+    data: list[RentPeriodSummary]
+    meta: dict
+
+
+# ─── RF-06/CA-02-05 (estado de deuda) -- issue #23 ─────────────────────
+
+
+class DebtEntryData(BaseModel):
+    """RF-06: "por inquilino y propiedad, periodos adeudados, saldo, dias
+    de mora e interes sugerido acumulado" -- una fila por contrato con
+    deuda (agregada sobre sus `rent_periods` `pending`/`partial`)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    contract_id: UUID
+    property_id: UUID
+    landlord_id: UUID
+    renter_id: UUID
+    periods_overdue: int
+    balance: Decimal
+    days_late: int
+    suggested_interest: Decimal
+
+
+class DebtListResponse(BaseModel):
+    data: list[DebtEntryData]
+    meta: dict
+
+
+class RenterDebtResponse(BaseModel):
+    """CA-02-05: `GET /renters/:id/debt` -- sin `meta`: la ficha del
+    inquilino no pagina (un inquilino tiene un numero acotado de
+    contratos)."""
+
+    data: list[DebtEntryData]

@@ -1,22 +1,26 @@
-"""Endpoints /v1/landlords/* y /v1/renters/* (issue #13).
+"""Endpoints /v1/landlords/* y /v1/renters/* (issue #13, extendido #23).
 
 SDD: core/sdd_03_api_contracts.md §5 "Propietarios" + §6 "Inquilinos".
-Implements: CA-02-01, 02, 03, 04, 06, 07.
+Implements: CA-02-01, 02, 03, 04, 06, 07 (issue #13); CA-02-05 (estado
+de deuda, issue #23).
 
 Fuera de alcance de este issue (ver "Decisiones de implementacion" del PR):
 - `GET /landlords/:id/settlements` (historial de liquidaciones) -- depende
   del modulo de Liquidaciones, todavia inexistente.
-- `GET /renters/:id/debt` (CA-02-05, estado de deuda) -- es del issue #23
-  (depende de Cobranzas, `rent_periods`).
-- `POST /renters/:id/debt-certificate` -- idem, depende de Cobranzas.
+- `POST /renters/:id/debt-certificate` -- depende de Cobranzas y de PDF
+  sincronico (RF-08); fuera de alcance del issue #23 (ver issue #24).
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from adminprop.db.session import get_tenant_db_session
+from adminprop.modules.payments.schemas import DebtEntryData, RenterDebtResponse
 from adminprop.modules.people.models import Renter
 from adminprop.modules.people.repository import LandlordFields
 from adminprop.modules.people.schemas import (
@@ -272,12 +276,56 @@ async def get_renter(
     organization_id: UUID = Depends(get_current_tenant),
     service: RenterService = Depends(get_renter_service),
 ) -> RenterResponse:
-    """RF-04 (parcial -- solo datos + ficha; el estado de deuda,
-    CA-02-05, queda diferido al issue #23)."""
+    """RF-04: ficha del inquilino (datos). El estado de deuda vive en
+    `GET /renters/:id/debt` (CA-02-05, issue #23)."""
     renter = await service.get(renter_id, organization_id)
     if renter is None:
         raise NotFoundException()
     return RenterResponse(data=_to_renter_detail(renter))
+
+
+@renters_router.get(
+    "/{renter_id}/debt",
+    response_model=RenterDebtResponse,
+    dependencies=[Depends(requires_permission("renter:read"))],
+)
+async def get_renter_debt(
+    renter_id: UUID,
+    organization_id: UUID = Depends(get_current_tenant),
+    renter_service: RenterService = Depends(get_renter_service),
+    session: AsyncSession = Depends(get_tenant_db_session),
+) -> RenterDebtResponse:
+    """sdd_03 §6 + CA-02-05: "la ficha del inquilino muestra sus contratos
+    y su estado de deuda con: periodos adeudados, saldo, dias de mora e
+    interes sugerido acumulado". Delega el calculo en `DebtService`
+    (modulo `payments`, issue #23) -- este endpoint solo valida que el
+    inquilino exista en el tenant (RN-D01) antes de delegar.
+
+    `DebtService`/`RentPeriodRepository`/`AdministracionRepository` se
+    importan DIFERIDO (no a nivel de modulo, mismo criterio documentado
+    en `shared/audit/service.py.record_access_denied`): `payments.service`
+    importa (transitivamente, via `contracts.rent_period_hook`) modelos
+    de `properties`, y `properties/__init__.py` importa `people/__init__.py`
+    (para `Landlord`) -- que a su vez importa ESTE router. Un import a
+    nivel de modulo de `payments.service` aca cierra ese ciclo (confirmado
+    con `python -c "import adminprop.main"` fallando con `ImportError:
+    cannot import name '...' from partially initialized module`); el
+    import diferido lo evita porque para cuando el primer request llega,
+    todos los modulos ya terminaron de cargar."""
+    renter = await renter_service.get(renter_id, organization_id)
+    if renter is None:
+        # RN-D01: 404, no 403 -- no distingue "no existe" de "otra org".
+        raise NotFoundException()
+
+    from adminprop.modules.administracion.repository import AdministracionRepository
+    from adminprop.modules.payments.repository import RentPeriodRepository
+    from adminprop.modules.payments.service import DebtService
+
+    debt_service = DebtService(RentPeriodRepository(session), AdministracionRepository(session))
+    entries = await debt_service.renter_debt(
+        renter_id, organization_id, today=datetime.now(tz=UTC).date()
+    )
+    return RenterDebtResponse(data=[DebtEntryData.model_validate(e) for e in entries])
 
 
 @renters_router.patch(
