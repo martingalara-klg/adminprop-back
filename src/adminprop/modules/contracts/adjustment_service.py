@@ -178,10 +178,15 @@ class ContractAdjustmentService:
             raise NotFoundException()
 
         # RN-04/RN-C04: el monto vigente del contrato SOLO cambia via un
-        # ajuste registrado -- este es el unico punto de mutacion.
-        await self._contract_repo.update(
+        # ajuste registrado -- este es el unico punto de mutacion. Se
+        # captura la fila actualizada (antes se descartaba) porque
+        # `maybe_generate_rent_period_for_adjustment` necesita `currency`
+        # para el INSERT del rent_period (issue #21).
+        contract = await self._contract_repo.update(
             adjustment.contract_id, organization_id, fields={"current_amount": new_amount}
         )
+        if contract is None:  # pragma: no cover -- defensivo, el ajuste ya referencia un contrato existente
+            raise NotFoundException()
 
         # Integraciones: "Log de Auditoria: Ajustes aplicados" (sdd_02 §2.8
         # + spec_module_03_contratos.md §"Integraciones").
@@ -204,14 +209,15 @@ class ContractAdjustmentService:
             user_id=actor_user_id,
         )
 
-        # RF-04 paso 4: "una vez aplicado, se genera con el monto nuevo" --
-        # no-op hoy (rent_periods no existe, issue #20/#21), ver
-        # rent_period_hook.py.
+        # RF-04 paso 4/CA-04-02: "una vez aplicado, se genera con el monto
+        # nuevo" -- ver rent_period_hook.py (issue #21).
         await maybe_generate_rent_period_for_adjustment(
+            self._repo.session,
             contract_id=adjustment.contract_id,
             organization_id=organization_id,
             period=adjustment.due_period,
             amount_due=new_amount,
+            currency=contract.currency,
         )
 
         await self._repo.commit()

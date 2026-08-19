@@ -7,9 +7,9 @@ RN-03/RN-C02, RN-04/RN-C04, RN-06, RN-07/RN-C05).
 Fuera de alcance (ver PR "Decisiones de implementacion"):
 - RF-04 (ajustes por indice: deteccion diaria, bandeja, aplicar %) y
   RF-05 (alertas de vencimiento) son los issues #18 y #19.
-- El rent_period del mes en curso al activar (RF-03) se modela con un
-  hook no-op declarado -- ver `rent_period_hook.py` (la tabla
-  `rent_periods` es del issue #20).
+- El rent_period del mes en curso al activar (RF-03) se genera via
+  `rent_period_hook.maybe_generate_current_month_rent_period` (issue #21;
+  la tabla `rent_periods` es del issue #20).
 - RN-03/RN-C02 (USD sin ajuste) se enforza en `schemas.py.ContractCreate`
   a nivel Pydantic (produce el mismo `error.code` VALIDATION_ERROR via el
   handler global) -- este service no necesita revalidarlo.
@@ -221,10 +221,13 @@ class ContractService:
         )
 
         await maybe_generate_current_month_rent_period(
+            self._repo.session,
             contract_id=contract.id,
             organization_id=organization_id,
             start_date=contract.start_date,
             today=datetime.now(UTC).date(),
+            amount_due=contract.current_amount,
+            currency=contract.currency,
         )
 
         await audit(
