@@ -7,11 +7,13 @@ Implements: CA-03-01, CA-03-02, CA-03-03, CA-03-06, CA-03-08, CA-01-04.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, date, datetime
 
 import pytest
 import sqlalchemy as sa
 
 from adminprop.db.session import get_session_factory
+from adminprop.modules.payments.repository import RentPeriodRepository
 
 pytestmark = pytest.mark.asyncio
 
@@ -476,7 +478,7 @@ class TestCA0306AmountNotEditableByPatch:
 class TestCA0308AndCA0104TerminateReturnsPropertyToAvailable:
     """CA-03-08 + CA-01-04: al terminar un contrato, la propiedad vuelve
     a `available` y sus periodos impagos siguen visibles en el estado de
-    deuda (no hay `rent_periods` todavia -- issue #20)."""
+    deuda (`rent_periods` no se toca al terminar, RN-07/RN-C05)."""
 
     async def test_ca_01_04_activate_sets_property_to_rented(self, client, seed):
         _org, owner = await _seed_org_with_owner(seed)
@@ -503,6 +505,45 @@ class TestCA0308AndCA0104TerminateReturnsPropertyToAvailable:
         assert response.status_code == 200
         assert response.json()["data"]["status"] == "active"
         assert await seed.get_property_status(property_id) == "rented"
+
+    async def test_ca_04_01_activate_generates_current_month_rent_period(self, client, seed):
+        """RF-03 + CA-04-01: "al activarse un contrato a mitad de mes, su
+        rent_period del mes en curso se genera en el acto" -- `start_date`
+        en el pasado, activacion "hoy" (fecha real de ejecucion del
+        test)."""
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+        created = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "50000.00",
+                "start_date": "2026-01-01",
+                "end_date": "2027-01-01",
+                "daily_late_fee_pct": "0.1",
+            },
+            headers=owner["headers"],
+        )
+        contract_id = created.json()["data"]["id"]
+
+        response = await client.post(
+            f"/v1/contracts/{contract_id}/activate", headers=owner["headers"]
+        )
+        assert response.status_code == 200
+
+        today = datetime.now(UTC).date()
+        current_month = date(today.year, today.month, 1)
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            rent_period = await RentPeriodRepository(session).get_by_contract_and_period(
+                uuid.UUID(contract_id), owner["organization_id"], current_month
+            )
+        assert rent_period is not None
+        assert str(rent_period.amount_due) == "50000.00"
+        assert rent_period.currency == "ARS"
+        assert rent_period.status == "pending"
 
     async def test_ca_03_08_ca_01_04_terminate_active_contract_returns_property_to_available(
         self, client, seed

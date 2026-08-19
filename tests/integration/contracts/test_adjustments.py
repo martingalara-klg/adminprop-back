@@ -9,8 +9,12 @@ Implements: CA-03-04 (bandeja/deteccion, cubierta a nivel HTTP para la
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 import pytest
+
+from adminprop.db.session import get_session_factory
+from adminprop.modules.payments.repository import RentPeriodRepository
 
 pytestmark = pytest.mark.asyncio
 
@@ -226,6 +230,47 @@ class TestCA0305ApplyAdjustment:
         assert matching[0]["after_state"]["pct_applied"] == "10.00"
         assert matching[0]["after_state"]["new_amount"] == "110000.00"
         assert matching[0]["before_state"]["previous_amount"] == "100000.00"
+
+    async def test_ca_04_02_apply_generates_rent_period_with_new_amount(self, client, seed):
+        """CA-04-02: "un contrato con ajuste pendiente no genera el
+        período del mes hasta aplicar el %; al aplicarlo, el período nace
+        con el monto nuevo" (spec_module_04_cobranzas.md §RF-01, RN-P01)."""
+        _org, owner, _admin, _maintenance = await _seed_org_with_owner_and_admin(seed)
+        contract_id = await _seed_active_ars_contract(
+            seed, owner["organization_id"], current_amount="100000.00"
+        )
+        due_period = "2026-04-01"
+        adjustment_id = await seed.create_adjustment_row(
+            organization_id=owner["organization_id"],
+            contract_id=contract_id,
+            due_period=due_period,
+            status="pending",
+            previous_amount="100000.00",
+        )
+
+        # Antes de aplicar: el rent_period de ese mes no existe (RN-P01).
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            before = await RentPeriodRepository(session).get_by_contract_and_period(
+                contract_id, owner["organization_id"], date.fromisoformat(due_period)
+            )
+        assert before is None
+
+        response = await client.post(
+            f"/v1/adjustments/{adjustment_id}/apply",
+            json={"pct": "10.00"},
+            headers=owner["headers"],
+        )
+        assert response.status_code == 200
+
+        async with session_factory() as session:
+            after = await RentPeriodRepository(session).get_by_contract_and_period(
+                contract_id, owner["organization_id"], date.fromisoformat(due_period)
+            )
+        assert after is not None
+        assert str(after.amount_due) == "110000.00"
+        assert after.currency == "ARS"
+        assert after.status == "pending"
 
     async def test_apply_accepts_negative_pct_within_sanity_cap(self, client, seed):
         """RF-02 §"Validaciones": pct puede ser negativo (deflacion)."""
