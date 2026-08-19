@@ -147,6 +147,34 @@ class TestTenantIsolation:
         assert payment_b["voided_at"] is None
 
     @pytest.mark.asyncio
+    async def test_receipt_of_other_tenant_payment_returns_404(self, client, seed):
+        """RN-D01, issue #24: `GET /payments/:id/receipt` cross-tenant."""
+        org_a = await seed.create_organization_with_system_roles()
+        owner_a = await seed.add_member(
+            organization_id=org_a["organization_id"],
+            role_id=org_a["roles"]["owner"],
+            role_name="owner",
+        )
+        org_b, rent_period_b_id = await _seed_org_with_rent_period(seed)
+        owner_b = await seed.add_member(
+            organization_id=org_b["organization_id"],
+            role_id=org_b["roles"]["owner"],
+            role_name="owner",
+        )
+        payment_b_id = await seed.create_payment_row(
+            organization_id=org_b["organization_id"],
+            rent_period_id=rent_period_b_id,
+            created_by=owner_b["id"],
+        )
+
+        response = await client.get(
+            f"/v1/payments/{payment_b_id}/receipt", headers=owner_a["headers"]
+        )
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "NOT_FOUND"
+
+    @pytest.mark.asyncio
     async def test_debt_never_returns_another_tenants_contracts(self, client, seed):
         org_a = await seed.create_organization_with_system_roles()
         owner_a = await seed.add_member(
