@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 import sqlalchemy as sa
@@ -331,6 +331,116 @@ def seed(rsa_keypair):
                     },
                 )
             return renter_id
+
+        # ─── helpers de cobranzas para CA-02-05 (issue #23) ────────────────
+        # Duplicados de tests/integration/payments/conftest.py -- mismo
+        # criterio documentado arriba: el Seeder se duplica entre modulos.
+
+        async def create_property_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            landlord_id: uuid.UUID,
+            address: str = "Av. Test 123",
+            status: str = "rented",
+        ) -> uuid.UUID:
+            property_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO properties "
+                        "(id, organization_id, landlord_id, address, property_type, status) "
+                        "VALUES (:id, :org_id, :landlord_id, :address, 'departamento', :status)"
+                    ),
+                    {
+                        "id": str(property_id),
+                        "org_id": str(organization_id),
+                        "landlord_id": str(landlord_id),
+                        "address": address,
+                        "status": status,
+                    },
+                )
+            return property_id
+
+        async def create_contract_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            property_id: uuid.UUID,
+            renter_id: uuid.UUID,
+            currency: str = "ARS",
+            initial_amount: str = "100000.00",
+            current_amount: str | None = None,
+            start_date: str = "2026-01-01",
+            end_date: str = "2027-01-01",
+            daily_late_fee_pct: str = "0.1",
+            status: str = "active",
+        ) -> uuid.UUID:
+            contract_id = uuid.uuid4()
+            current_amount = current_amount if current_amount is not None else initial_amount
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO contracts "
+                        "(id, organization_id, property_id, renter_id, currency, "
+                        "initial_amount, current_amount, start_date, end_date, "
+                        "daily_late_fee_pct, status) "
+                        "VALUES (:id, :org_id, :property_id, :renter_id, :currency, "
+                        ":initial_amount, :current_amount, :start_date, :end_date, "
+                        ":daily_late_fee_pct, :status)"
+                    ),
+                    {
+                        "id": str(contract_id),
+                        "org_id": str(organization_id),
+                        "property_id": str(property_id),
+                        "renter_id": str(renter_id),
+                        "currency": currency,
+                        "initial_amount": initial_amount,
+                        "current_amount": current_amount,
+                        "start_date": date.fromisoformat(start_date),
+                        "end_date": date.fromisoformat(end_date),
+                        "daily_late_fee_pct": daily_late_fee_pct,
+                        "status": status,
+                    },
+                )
+            return contract_id
+
+        async def create_rent_period_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            contract_id: uuid.UUID,
+            period: str = "2026-06-01",
+            amount_due: str = "100000.00",
+            currency: str = "ARS",
+            status: str = "pending",
+            paid_total: str = "0.00",
+        ) -> uuid.UUID:
+            rent_period_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO rent_periods "
+                        "(id, organization_id, contract_id, period, amount_due, currency, "
+                        "status, paid_total) "
+                        "VALUES (:id, :org_id, :contract_id, :period, :amount_due, :currency, "
+                        ":status, :paid_total)"
+                    ),
+                    {
+                        "id": str(rent_period_id),
+                        "org_id": str(organization_id),
+                        "contract_id": str(contract_id),
+                        "period": date.fromisoformat(period),
+                        "amount_due": amount_due,
+                        "currency": currency,
+                        "status": status,
+                        "paid_total": paid_total,
+                    },
+                )
+            return rent_period_id
 
         async def raw_bank_info(self, landlord_id: uuid.UUID) -> bytes | None:
             """CA-02-04: lee el BYTEA crudo (sin descifrar) directamente
