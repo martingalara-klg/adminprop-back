@@ -100,9 +100,7 @@ async def _seed_payment(
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
             await session.execute(
-                sa.text(
-                    "UPDATE payments SET voided_at = now(), voided_by = :by WHERE id = :id"
-                ),
+                sa.text("UPDATE payments SET voided_at = now(), voided_by = :by WHERE id = :id"),
                 {"by": str(owner["id"]), "id": str(payment_id)},
             )
     return org, owner, payment_id
@@ -126,9 +124,7 @@ class TestPaymentReceipt:
             contact="contacto@ejemplo.com",
         )
 
-        response = await client.get(
-            f"/v1/payments/{payment_id}/receipt", headers=owner["headers"]
-        )
+        response = await client.get(f"/v1/payments/{payment_id}/receipt", headers=owner["headers"])
 
         assert response.status_code == 200
         assert response.headers["content-type"] == "application/pdf"
@@ -150,9 +146,7 @@ class TestPaymentReceipt:
             seed, payment_currency="USD", exchange_rate="1000.0000"
         )
 
-        response = await client.get(
-            f"/v1/payments/{payment_id}/receipt", headers=owner["headers"]
-        )
+        response = await client.get(f"/v1/payments/{payment_id}/receipt", headers=owner["headers"])
 
         assert response.status_code == 200
         text = _pdf_text(response.content)
@@ -164,9 +158,7 @@ class TestPaymentReceipt:
         BUSINESS_RULE_VIOLATION`)"."""
         _org, owner, payment_id = await _seed_payment(seed, voided=True)
 
-        response = await client.get(
-            f"/v1/payments/{payment_id}/receipt", headers=owner["headers"]
-        )
+        response = await client.get(f"/v1/payments/{payment_id}/receipt", headers=owner["headers"])
 
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "BUSINESS_RULE_VIOLATION"

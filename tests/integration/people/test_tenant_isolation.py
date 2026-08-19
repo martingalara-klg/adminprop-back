@@ -175,9 +175,7 @@ class TestRenterCrossTenantIsolation:
 class TestDebtCertificateCrossTenantIsolation:
     """RN-D01, issue #24: `POST /renters/:id/debt-certificate` cross-tenant."""
 
-    async def test_issue_debt_certificate_of_another_organization_returns_404(
-        self, client, seed
-    ):
+    async def test_issue_debt_certificate_of_another_organization_returns_404(self, client, seed):
         _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
         org_b, _owner_b = await _seed_org_with_owner(seed, name="Org B")
         renter_b_id = await seed.create_renter_row(organization_id=org_b["organization_id"])
