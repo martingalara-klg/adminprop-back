@@ -1,11 +1,8 @@
-"""Endpoints /v1/contracts/* (issue #17).
+"""Endpoints /v1/contracts/* y /v1/adjustments/* (issues #17 y #18).
 
 SDD: core/sdd_03_api_contracts.md §8 "Contratos".
-Implements: CA-03-01, 02, 03, 06, 08, CA-01-04.
-
-Fuera de alcance de este issue (ver "Decisiones de implementacion" del PR):
-- `GET /contracts/:id/adjustments`, `GET /adjustments`, `POST /adjustments/:id/apply`
-  -- dependen del flujo de ajustes (issue #18, RF-04).
+Implements: CA-03-01, 02, 03, 06, 08, CA-01-04 (issue #17);
+            CA-03-04, CA-03-05 (issue #18, RF-04).
 """
 
 from __future__ import annotations
@@ -14,6 +11,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 
+from adminprop.modules.contracts.adjustment_schemas import (
+    AdjustmentApplyRequest,
+    AdjustmentListResponse,
+    AdjustmentResponse,
+)
+from adminprop.modules.contracts.adjustment_service import (
+    ContractAdjustmentService,
+    get_contract_adjustment_service,
+)
 from adminprop.modules.contracts.repository import ContractFilters
 from adminprop.modules.contracts.schemas import (
     ContractCreate,
@@ -29,6 +35,10 @@ from adminprop.shared.rbac import requires_permission
 from adminprop.shared.tenant import get_current_tenant
 
 router = APIRouter(prefix="/v1/contracts", tags=["contracts"])
+# sdd_03 §8: `/v1/adjustments` no cuelga de `/v1/contracts` -- router
+# aparte, mismo modulo (la bandeja de ajustes cruza todos los contratos
+# del tenant, no es un sub-recurso de uno solo).
+adjustments_router = APIRouter(prefix="/v1/adjustments", tags=["contracts"])
 
 
 @router.post(
@@ -170,3 +180,68 @@ async def terminate_contract(
         contract_id, organization_id, reason=dto.reason, actor_user_id=payload.sub
     )
     return ContractResponse(data=updated)
+
+
+@router.get(
+    "/{contract_id}/adjustments",
+    response_model=AdjustmentListResponse,
+    dependencies=[Depends(requires_permission("contract:read"))],
+)
+async def list_contract_adjustments(
+    contract_id: UUID,
+    organization_id: UUID = Depends(get_current_tenant),
+    contract_service: ContractService = Depends(get_contract_service),
+    adjustment_service: ContractAdjustmentService = Depends(get_contract_adjustment_service),
+) -> AdjustmentListResponse:
+    """RF-04 paso 5: historial completo de ajustes de un contrato.
+    RN-D01: 404 si el contrato no existe en el tenant (no revela
+    existencia cross-tenant) antes de listar sus ajustes."""
+    contract = await contract_service.get(contract_id, organization_id)
+    if contract is None:
+        raise NotFoundException()
+    items = await adjustment_service.list_for_contract(contract_id, organization_id)
+    return AdjustmentListResponse(data=items, meta={})
+
+
+@adjustments_router.get(
+    "",
+    response_model=AdjustmentListResponse,
+    dependencies=[Depends(requires_permission("contract:read"))],
+)
+async def list_pending_adjustments(
+    status_filter: str | None = Query(default=None, alias="status"),
+    cursor: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    organization_id: UUID = Depends(get_current_tenant),
+    service: ContractAdjustmentService = Depends(get_contract_adjustment_service),
+) -> AdjustmentListResponse:
+    """RF-04 paso 3, CA-03-04: bandeja de ajustes que tocan --
+    `GET /adjustments?status=pending` (sdd_03 §8). Unico valor soportado
+    hoy es `pending` (la bandeja); otros valores devuelven lista vacia en
+    vez de exponer un filtro no especificado por el SDD."""
+    if status_filter is not None and status_filter != "pending":
+        return AdjustmentListResponse(data=[], meta={"next_cursor": None, "limit": limit})
+    items, next_cursor = await service.list_pending(
+        organization_id=organization_id, cursor=cursor, limit=limit
+    )
+    return AdjustmentListResponse(data=items, meta={"next_cursor": next_cursor, "limit": limit})
+
+
+@adjustments_router.post(
+    "/{adjustment_id}/apply",
+    response_model=AdjustmentResponse,
+)
+async def apply_adjustment(
+    adjustment_id: UUID,
+    dto: AdjustmentApplyRequest,
+    organization_id: UUID = Depends(get_current_tenant),
+    payload: JWTPayload = Depends(requires_permission("adjustment:apply")),
+    service: ContractAdjustmentService = Depends(get_contract_adjustment_service),
+) -> AdjustmentResponse:
+    """RF-04 paso 4, CA-03-05: `pending -> applied`; `new_amount = previous
+    × (1 + pct/100)`, actualiza `current_amount` del contrato y deja
+    historial completo (pct/monto anterior/monto nuevo/autor)."""
+    updated = await service.apply(
+        adjustment_id, organization_id, pct=dto.pct, actor_user_id=payload.sub
+    )
+    return AdjustmentResponse(data=updated)

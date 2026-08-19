@@ -27,18 +27,25 @@ negocio real llega con los issues #21, #18 y #19 respectivamente.
 import asyncio
 import logging
 import random
+import uuid
+from datetime import UTC, datetime
 from uuid import UUID
 
+import sqlalchemy as sa
 from celery import Task
 
 from adminprop.config import get_settings
-from adminprop.db.session import get_session_factory, set_tenant_context
+from adminprop.db.session import get_session_factory, set_tenant_context, tenant_scoped_session
+from adminprop.modules.contracts.adjustment_repository import ContractAdjustmentRepository
+from adminprop.modules.contracts.adjustment_service import ContractAdjustmentService
+from adminprop.modules.contracts.repository import ContractRepository
 from adminprop.shared.email.sender import send_email
 from adminprop.shared.errors.retryable import (
     NonRetryableNotificationError,
     RetryableNotificationError,
 )
 from adminprop.shared.notifications.repository import NotificationRepository
+from adminprop.shared.notifications.service import enqueue_pending_emails
 from adminprop.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -372,15 +379,68 @@ def generate_rent_periods(self: Task) -> None:
 
 @celery_app.task(bind=True, name="adminprop.workers.notification_worker.detect_due_adjustments")
 def detect_due_adjustments(self: Task) -> None:
-    """Stub (issue #4): Beat dispara esta tarea diariamente, 01:00 UTC.
+    """Beat dispara esta tarea diariamente, 01:00 UTC.
 
-    Logica real (crear ajustes `pending` + notificar, RN-C03) llega con el
-    issue #18 — sdd_04 §1.3.
+    SDD: spec_module_03_contratos.md §RF-04 paso 1. Implements: CA-03-04
+    (RN-C03). Itera TODAS las organizaciones `active` (el Beat corre sin
+    tenant) y, por cada una, setea el contexto y detecta -- mismo patron
+    que `async-worker.md` documenta para cualquier tarea que no tenga un
+    `organization_id` de origen HTTP. Idempotente: el indice parcial
+    unico `idx_contract_adjustments_one_pending_per_contract` (migracion
+    #16) mas el chequeo previo de `ContractAdjustmentService.detect_due_adjustments`
+    garantizan que re-correr la tarea el mismo dia no duplica ajustes.
     """
+    request_id = str(uuid.uuid4())
     logger.info(
-        "detect_due_adjustments stub — logica real llega con el issue #18",
-        extra={"attempt": self.request.retries + 1, "service": "notification_worker"},
+        "detect_due_adjustments start",
+        extra={
+            "request_id": request_id,
+            "attempt": self.request.retries + 1,
+            "service": "notification_worker",
+        },
     )
+    asyncio.run(_detect_due_adjustments_async(request_id))
+    logger.info(
+        "detect_due_adjustments done",
+        extra={"request_id": request_id, "service": "notification_worker"},
+    )
+
+
+async def _list_active_organization_ids() -> list[UUID]:
+    """`organizations` es la tabla raiz del tenant, sin RLS (migracion
+    #5) -- `adminprop_app` tiene GRANT SELECT directo, no hace falta
+    `set_tenant_context` para leerla."""
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        result = await session.execute(
+            sa.text("SELECT id FROM organizations WHERE status = 'active' AND deleted_at IS NULL")
+        )
+        return [row.id for row in result]
+
+
+async def _detect_due_adjustments_async(request_id: str) -> None:
+    today = datetime.now(UTC).date()
+    organization_ids = await _list_active_organization_ids()
+
+    for organization_id in organization_ids:
+        notification_ids: list[UUID] = []
+        async with tenant_scoped_session(organization_id) as session:
+            adjustment_repo = ContractAdjustmentRepository(session)
+            contract_repo = ContractRepository(session)
+            service = ContractAdjustmentService(adjustment_repo, contract_repo)
+            notification_ids = await service.detect_due_adjustments(
+                organization_id=organization_id, today=today
+            )
+            # `tenant_scoped_session` comitea al salir del bloque sin
+            # excepcion (mismo patron que `db/session.py`).
+
+        # RF-01 (spec_notificaciones.md): el email se encola DESPUES del
+        # commit de la operacion de negocio -- patron outbox, mismo
+        # criterio que `shared/notifications/service.emit` documenta.
+        if notification_ids:
+            enqueue_pending_emails(
+                notification_ids, organization_id=organization_id, request_id=request_id
+            )
 
 
 @celery_app.task(bind=True, name="adminprop.workers.notification_worker.detect_expiring_contracts")
