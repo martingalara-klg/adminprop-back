@@ -185,7 +185,9 @@ class ContractAdjustmentService:
         contract = await self._contract_repo.update(
             adjustment.contract_id, organization_id, fields={"current_amount": new_amount}
         )
-        if contract is None:  # pragma: no cover -- defensivo, el ajuste ya referencia un contrato existente
+        if (
+            contract is None
+        ):  # pragma: no cover -- defensivo, el ajuste ya referencia un contrato existente
             raise NotFoundException()
 
         # Integraciones: "Log de Auditoria: Ajustes aplicados" (sdd_02 §2.8
