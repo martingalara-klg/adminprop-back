@@ -249,6 +249,22 @@ class ContractRepository:
             return _DEFAULT_CONTRACT_EXPIRY_NOTICE_DAYS
         return int(raw_value)
 
+    # ─── RF-01 (issue #21): job mensual `generate_rent_periods` ────────────
+
+    async def list_active(self, organization_id: UUID) -> list[Contract]:
+        """CA-04-01: todo contrato `active` de la organizacion es candidato
+        al `rent_period` del mes en curso (RN-C05/RN-07: `expired`/
+        `terminated` no generan nuevos periodos, por eso no entran aca).
+        Sin distincion de moneda -- USD tambien genera `rent_period`
+        (RN-C: solo el AJUSTE automatico no aplica a USD, RN-C02)."""
+        stmt = select(Contract).where(
+            Contract.organization_id == organization_id,
+            Contract.status == "active",
+            Contract.deleted_at.is_(None),
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def list_active_past_end_date(
         self, organization_id: UUID, *, today: date
     ) -> list[Contract]:
