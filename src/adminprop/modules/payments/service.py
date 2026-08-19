@@ -1,12 +1,14 @@
 """Logica de negocio de cobranzas: generacion mensual (issue #21) +
-registro de cobros con mora sugerida y perdon (issue #22).
+registro de cobros con mora sugerida y perdon (issue #22) + panel del
+mes, anulacion y estado de deuda (issue #23).
 
-SDD: docs/sdd/features/spec_module_04_cobranzas.md §RF-01/RF-03/RF-04.
+SDD: docs/sdd/features/spec_module_04_cobranzas.md §RF-01..RF-06.
 Implements: CA-04-01 (idempotencia), CA-04-02 (RN-P01 -- ajuste pending
 bloquea la generacion del periodo), CA-04-03 (RN-P06, TC obligatorio),
 CA-04-04 (RN-P05, parciales -- interes sobre el saldo restante), CA-04-05
 (RN-P02/P03/P04, mora sugerida con dia de gracia + imputacion libre),
-CA-04-06 (RN-D03, perdon auditado).
+CA-04-06 (RN-D03, perdon auditado), CA-04-07 (RN-D04, anulacion
+auditada), CA-04-09/CA-02-05 (estado de deuda).
 
 `RentPeriodService.generate_monthly` es el cuerpo de negocio del job
 Beat `generate_rent_periods` (`sdd_04` §1.3), invocado por
@@ -17,13 +19,21 @@ una sesion ya tenant-scoped (`tenant_scoped_session`, con
 `session.begin()` manejando el commit/rollback), y no llama a
 `session.commit()` el mismo -- eso lo maneja el `async with` del caller.
 
-`PaymentService` (issue #22) es distinta: es consumida por el router
-HTTP (no por un worker), asi que SI maneja su propio `commit()` -- mismo
-criterio que `ContractService`/`ContractAdjustmentService`.
-"""
+`PaymentService` (issues #22/#23) y `DebtService` (issue #23) son
+distintas: son consumidas por el router HTTP (no por un worker), asi que
+SI manejan su propio `commit()` -- mismo criterio que
+`ContractService`/`ContractAdjustmentService`.
+
+`compute_days_late`/`compute_suggested_interest` (RN-P02/P03) se declaran
+a nivel de modulo (no como metodos privados de `PaymentService`, como en
+el issue #22) para que `DebtService` (panel del mes RF-02, deuda
+RF-06/CA-02-05) las reutilice tal cual sin duplicar el calculo -- pedido
+explicito del issue #23 ("REUTILIZALO... no lo dupliques")."""
 
 from __future__ import annotations
 
+import base64
+from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from uuid import UUID
@@ -42,14 +52,17 @@ from adminprop.modules.contracts.repository import ContractRepository, get_contr
 from adminprop.modules.payments.models import Payment, RentPeriod
 from adminprop.modules.payments.repository import (
     PaymentRepository,
+    RentPeriodCandidate,
     RentPeriodRepository,
     get_payment_repository,
     get_rent_period_repository,
 )
+from adminprop.modules.payments.settlement_hook import maybe_mark_settlements_for_regeneration
 from adminprop.shared.audit.service import audit
 from adminprop.shared.errors.codes import (
     ExchangeRateRequiredException,
     NotFoundException,
+    PaymentAlreadyVoidedException,
     PaymentExceedsContractBalanceException,
     RentPeriodAlreadyPaidException,
 )
@@ -58,6 +71,34 @@ from adminprop.shared.errors.codes import (
 # piso de seguridad si `organizations.settings` no trae `grace_day` todavia
 # (defensivo -- toda organizacion nueva la trae desde el provisioning).
 _DEFAULT_GRACE_DAY = 10
+
+# RF-02: "en mora" es derivado -- pending/partial con el dia de gracia
+# vencido (spec_data_model.md §Capa 4 "rent_periods.status": "'en mora'
+# es derivado (fecha vs grace_day)").
+_UNPAID_STATUSES: tuple[str, ...] = ("pending", "partial")
+
+
+def compute_days_late(period: date, as_of: date, grace_day: int) -> int:
+    """RN-P02: "en termino hasta el dia de gracia inclusive; la mora corre
+    desde el dia siguiente (dia 11 = 1 dia de mora)" -- `due_date` es el
+    dia de gracia del MES del periodo (`period` normalizado al dia 1 del
+    mes). Reutilizada por `PaymentService` (interes al momento del cobro)
+    y `DebtService` (interes acumulado al dia de hoy, RF-02/RF-06)."""
+    due_date = date(period.year, period.month, grace_day)
+    return max((as_of - due_date).days, 0)
+
+
+def compute_suggested_interest(
+    balance: Decimal, daily_late_fee_pct: Decimal, days_late: int
+) -> Decimal:
+    """RN-P03: "interes sugerido = saldo impago x % de mora diaria del
+    contrato x dias de mora". `daily_late_fee_pct` es un porcentaje (se
+    divide por 100 antes de aplicar, mismo criterio que `pct` de
+    ajustes)."""
+    if days_late <= 0 or balance <= 0:
+        return Decimal("0.00")
+    interest = balance * (daily_late_fee_pct / Decimal(100)) * Decimal(days_late)
+    return interest.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
 class RentPeriodService:
@@ -150,28 +191,6 @@ class PaymentService:
             return _DEFAULT_GRACE_DAY
         return int(settings.get("grace_day", _DEFAULT_GRACE_DAY))
 
-    @staticmethod
-    def _days_late(period: date, payment_date: date, grace_day: int) -> int:
-        # RN-P02: "en termino hasta el dia de gracia inclusive; la mora
-        # corre desde el dia siguiente (dia 11 = 1 dia de mora)" --
-        # `due_date` es el dia de gracia del MES del periodo (`period` ya
-        # esta normalizado al dia 1 del mes por la migracion #20).
-        due_date = date(period.year, period.month, grace_day)
-        return max((payment_date - due_date).days, 0)
-
-    @staticmethod
-    def _suggested_interest(
-        balance: Decimal, daily_late_fee_pct: Decimal, days_late: int
-    ) -> Decimal:
-        # RN-P03: "interes sugerido = saldo impago x % de mora diaria del
-        # contrato x dias de mora". `daily_late_fee_pct` es un porcentaje
-        # (mismo criterio que `pct` de ajustes, `adjustment_service.py`:
-        # se divide por 100 antes de aplicar).
-        if days_late <= 0 or balance <= 0:
-            return Decimal("0.00")
-        interest = balance * (daily_late_fee_pct / Decimal(100)) * Decimal(days_late)
-        return interest.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-
     async def preview_interest(
         self, rent_period_id: UUID, organization_id: UUID, payment_date: date
     ) -> dict:
@@ -184,8 +203,8 @@ class PaymentService:
 
         balance = rent_period.amount_due - rent_period.paid_total
         grace_day = await self._grace_day(organization_id)
-        days_late = self._days_late(rent_period.period, payment_date, grace_day)
-        suggested_interest = self._suggested_interest(
+        days_late = compute_days_late(rent_period.period, payment_date, grace_day)
+        suggested_interest = compute_suggested_interest(
             balance, contract.daily_late_fee_pct, days_late
         )
         return {
@@ -251,8 +270,8 @@ class PaymentService:
             )
 
         grace_day = await self._grace_day(organization_id)
-        days_late = self._days_late(rent_period.period, payment_date, grace_day)
-        suggested_interest = self._suggested_interest(
+        days_late = compute_days_late(rent_period.period, payment_date, grace_day)
+        suggested_interest = compute_suggested_interest(
             balance, contract.daily_late_fee_pct, days_late
         )
         # RN-P04: sugerido/cobrado/perdonado siempre quedan registrados.
@@ -308,6 +327,71 @@ class PaymentService:
         await self._payment_repo.commit()
         return payment
 
+    async def void_payment(
+        self,
+        payment_id: UUID,
+        organization_id: UUID,
+        *,
+        reason: str,
+        actor_user_id: UUID,
+    ) -> Payment:
+        """RF-05/CA-04-07: anulacion logica del cobro -- recompone el
+        saldo del periodo (`paid_total`/`status`), audita con autor y
+        motivo (RN-D04), y deja el punto de extension de liquidaciones
+        (RF-05 parrafo 2, Modulo 5 RF-03, issue #29) invocado (no-op hoy,
+        ver `settlement_hook.py`). Segunda anulacion sobre el mismo cobro
+        -> `409 PAYMENT_ALREADY_VOIDED`."""
+        payment = await self._payment_repo.get_by_id(payment_id, organization_id)
+        if payment is None:
+            raise NotFoundException()
+        if payment.voided_at is not None:
+            raise PaymentAlreadyVoidedException()
+
+        rent_period = await self._repo.get_by_id(payment.rent_period_id, organization_id)
+        if rent_period is None:  # pragma: no cover -- defensivo, integridad referencial de la DB
+            raise NotFoundException()
+
+        # CA-04-07: "recompone el saldo del periodo (paid->partial o
+        # partial->pending segun corresponda)" -- restar el capital del
+        # cobro anulado nunca puede dejar `paid_total` negativo (RN-P05 ya
+        # garantiza que ningun cobro superaba el saldo al momento de
+        # registrarse), pero se acota a 0 por robustez ante datos
+        # historicos.
+        new_paid_total = max(rent_period.paid_total - payment.amount, Decimal("0.00"))
+        new_status = "pending" if new_paid_total <= 0 else "partial"
+        await self._repo.update_after_payment(
+            rent_period.id, organization_id, paid_total=new_paid_total, status=new_status
+        )
+
+        voided_payment = await self._payment_repo.void(
+            payment_id, organization_id, voided_by=actor_user_id
+        )
+
+        # CA-04-07: "la anulacion se audita con autor y motivo" -- misma
+        # transaccion que el UPDATE de arriba (confirmados juntos por el
+        # `commit()` de abajo).
+        await audit(
+            self._payment_repo.session,
+            organization_id=organization_id,
+            action="payment.voided",
+            entity_type="payment",
+            entity_id=payment_id,
+            before={"paid_total": str(rent_period.paid_total), "status": rent_period.status},
+            after={"reason": reason, "paid_total": str(new_paid_total), "status": new_status},
+            user_id=actor_user_id,
+        )
+
+        # RF-05 parrafo 2 (Modulo 5 RF-03, issue #29): no-op hoy -- ver
+        # docstring de `settlement_hook.py`.
+        await maybe_mark_settlements_for_regeneration(
+            self._payment_repo.session,
+            organization_id=organization_id,
+            payment_id=payment_id,
+        )
+
+        await self._payment_repo.commit()
+        return voided_payment
+
 
 def get_payment_service(
     repo: RentPeriodRepository = Depends(get_rent_period_repository),
@@ -316,3 +400,267 @@ def get_payment_service(
     admin_repo: AdministracionRepository = Depends(get_administracion_repository),
 ) -> PaymentService:
     return PaymentService(repo, payment_repo, contract_repo, admin_repo)
+
+
+# ─── RF-02 (panel del mes) + RF-06/CA-02-05 (estado de deuda) — issue #23 ──
+
+
+@dataclass(frozen=True)
+class RentPeriodPanelEntry:
+    """RF-02: fila del panel del mes -- `RentPeriodCandidate` + los
+    campos calculados (`balance`, `days_late`, `suggested_interest`,
+    `in_arrears`) que dependen de `today`/`grace_day` (RN-P02/P03)."""
+
+    id: UUID
+    contract_id: UUID
+    property_id: UUID
+    landlord_id: UUID
+    renter_id: UUID
+    period: date
+    amount_due: Decimal
+    currency: str
+    status: str
+    paid_total: Decimal
+    balance: Decimal
+    in_arrears: bool
+    days_late: int
+    suggested_interest: Decimal
+
+
+@dataclass(frozen=True)
+class DebtEntry:
+    """RF-06/CA-02-05: deuda acumulada de un contrato (inquilino +
+    propiedad) -- agregada sobre todos sus `rent_periods` `pending`/
+    `partial`. `days_late` es el del periodo mas antiguo adeudado (el
+    que primero entro en mora, "desde cuando" debe -- UC-10)."""
+
+    contract_id: UUID
+    property_id: UUID
+    landlord_id: UUID
+    renter_id: UUID
+    periods_overdue: int
+    balance: Decimal
+    days_late: int
+    suggested_interest: Decimal
+
+
+def _to_panel_entry(
+    candidate: RentPeriodCandidate, *, today: date, grace_day: int
+) -> RentPeriodPanelEntry:
+    balance = candidate.amount_due - candidate.paid_total
+    days_late = compute_days_late(candidate.period, today, grace_day)
+    suggested_interest = compute_suggested_interest(
+        balance, candidate.daily_late_fee_pct, days_late
+    )
+    # RF-02: "en mora" (pendiente o parcial con el dia de gracia vencido).
+    in_arrears = candidate.status in _UNPAID_STATUSES and days_late > 0
+    return RentPeriodPanelEntry(
+        id=candidate.id,
+        contract_id=candidate.contract_id,
+        property_id=candidate.property_id,
+        landlord_id=candidate.landlord_id,
+        renter_id=candidate.renter_id,
+        period=candidate.period,
+        amount_due=candidate.amount_due,
+        currency=candidate.currency,
+        status=candidate.status,
+        paid_total=candidate.paid_total,
+        balance=balance,
+        in_arrears=in_arrears,
+        days_late=days_late,
+        suggested_interest=suggested_interest,
+    )
+
+
+class RentPeriodPanelService:
+    """RF-02: panel de cobranzas del mes (`GET /rent-periods`,
+    `GET /rent-periods/:id`)."""
+
+    def __init__(self, repo: RentPeriodRepository, admin_repo: AdministracionRepository) -> None:
+        self._repo = repo
+        self._admin_repo = admin_repo
+
+    async def _grace_day(self, organization_id: UUID) -> int:
+        settings = await self._admin_repo.get_organization_settings(organization_id)
+        if settings is None:  # pragma: no cover -- defensivo, la org del JWT siempre existe
+            return _DEFAULT_GRACE_DAY
+        return int(settings.get("grace_day", _DEFAULT_GRACE_DAY))
+
+    async def list_panel(
+        self,
+        *,
+        organization_id: UUID,
+        today: date,
+        period: date | None,
+        status: str | None,
+        in_arrears: bool | None,
+        property_id: UUID | None,
+        landlord_id: UUID | None,
+        renter_id: UUID | None,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[RentPeriodPanelEntry], str | None]:
+        """RF-02: `?period=YYYY-MM&status=&in_arrears=true`, filtros de
+        propiedad/propietario/inquilino. `in_arrears` se resuelve en
+        Python (depende de `today`/`grace_day`, no es una columna) --
+        paginacion por cursor tambien en Python sobre la lista ya
+        filtrada/ordenada (escala MVP: volumen mensual por organizacion,
+        no requiere paginar a nivel SQL para este reporte)."""
+        grace_day = await self._grace_day(organization_id)
+        candidates = await self._repo.list_candidates(
+            organization_id=organization_id,
+            period=period,
+            status=status,
+            property_id=property_id,
+            landlord_id=landlord_id,
+            renter_id=renter_id,
+        )
+        entries = [_to_panel_entry(c, today=today, grace_day=grace_day) for c in candidates]
+        if in_arrears is not None:
+            entries = [e for e in entries if e.in_arrears == in_arrears]
+
+        start = _decode_index_cursor(cursor)
+        page = entries[start : start + limit]
+        next_cursor = _encode_index_cursor(start + limit) if start + limit < len(entries) else None
+        return page, next_cursor
+
+    async def get_panel_entry(
+        self, rent_period_id: UUID, organization_id: UUID, *, today: date
+    ) -> RentPeriodPanelEntry | None:
+        """RF-02: `GET /rent-periods/:id`."""
+        candidate = await self._repo.get_candidate(rent_period_id, organization_id)
+        if candidate is None:
+            return None
+        grace_day = await self._grace_day(organization_id)
+        return _to_panel_entry(candidate, today=today, grace_day=grace_day)
+
+
+def get_rent_period_panel_service(
+    repo: RentPeriodRepository = Depends(get_rent_period_repository),
+    admin_repo: AdministracionRepository = Depends(get_administracion_repository),
+) -> RentPeriodPanelService:
+    return RentPeriodPanelService(repo, admin_repo)
+
+
+class DebtService:
+    """RF-06 (`GET /debt`) + CA-02-05 (`GET /renters/:id/debt`): estado de
+    deuda agregado por contrato (inquilino + propiedad)."""
+
+    def __init__(self, repo: RentPeriodRepository, admin_repo: AdministracionRepository) -> None:
+        self._repo = repo
+        self._admin_repo = admin_repo
+
+    async def _grace_day(self, organization_id: UUID) -> int:
+        settings = await self._admin_repo.get_organization_settings(organization_id)
+        if settings is None:  # pragma: no cover -- defensivo, la org del JWT siempre existe
+            return _DEFAULT_GRACE_DAY
+        return int(settings.get("grace_day", _DEFAULT_GRACE_DAY))
+
+    async def _aggregate(
+        self,
+        *,
+        organization_id: UUID,
+        today: date,
+        landlord_id: UUID | None,
+        renter_id: UUID | None,
+        min_days: int | None,
+    ) -> list[DebtEntry]:
+        grace_day = await self._grace_day(organization_id)
+        candidates = await self._repo.list_candidates(
+            organization_id=organization_id,
+            unpaid_only=True,
+            landlord_id=landlord_id,
+            renter_id=renter_id,
+        )
+
+        by_contract: dict[UUID, list[RentPeriodPanelEntry]] = {}
+        for candidate in candidates:
+            entry = _to_panel_entry(candidate, today=today, grace_day=grace_day)
+            by_contract.setdefault(entry.contract_id, []).append(entry)
+
+        result: list[DebtEntry] = []
+        for contract_id, periods in by_contract.items():
+            # RF-06: "periodos adeudados, saldo, dias de mora e interes
+            # sugerido acumulado" -- saldo e interes se SUMAN entre
+            # periodos; `days_late` toma el periodo mas antiguo (el de
+            # mayor mora, "desde cuando" debe).
+            worst_days_late = max(p.days_late for p in periods)
+            first = periods[0]
+            debt_entry = DebtEntry(
+                contract_id=contract_id,
+                property_id=first.property_id,
+                landlord_id=first.landlord_id,
+                renter_id=first.renter_id,
+                periods_overdue=len(periods),
+                balance=sum((p.balance for p in periods), Decimal("0.00")),
+                days_late=worst_days_late,
+                suggested_interest=sum((p.suggested_interest for p in periods), Decimal("0.00")),
+            )
+            if min_days is not None and debt_entry.days_late < min_days:
+                continue
+            result.append(debt_entry)
+
+        result.sort(key=lambda e: (-e.days_late, str(e.contract_id)))
+        return result
+
+    async def list_debt(
+        self,
+        *,
+        organization_id: UUID,
+        today: date,
+        landlord_id: UUID | None,
+        renter_id: UUID | None,
+        min_days: int | None,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[DebtEntry], str | None]:
+        """RF-06: `GET /debt?landlord_id=&renter_id=&min_days=` -- vista
+        global de gestion de morosos (UC-10)."""
+        entries = await self._aggregate(
+            organization_id=organization_id,
+            today=today,
+            landlord_id=landlord_id,
+            renter_id=renter_id,
+            min_days=min_days,
+        )
+        start = _decode_index_cursor(cursor)
+        page = entries[start : start + limit]
+        next_cursor = _encode_index_cursor(start + limit) if start + limit < len(entries) else None
+        return page, next_cursor
+
+    async def renter_debt(
+        self, renter_id: UUID, organization_id: UUID, *, today: date
+    ) -> list[DebtEntry]:
+        """CA-02-05: ficha del inquilino -- contratos con deuda (sin
+        paginar: un inquilino tiene un numero acotado de contratos)."""
+        return await self._aggregate(
+            organization_id=organization_id,
+            today=today,
+            landlord_id=None,
+            renter_id=renter_id,
+            min_days=None,
+        )
+
+
+def get_debt_service(
+    repo: RentPeriodRepository = Depends(get_rent_period_repository),
+    admin_repo: AdministracionRepository = Depends(get_administracion_repository),
+) -> DebtService:
+    return DebtService(repo, admin_repo)
+
+
+def _encode_index_cursor(index: int) -> str:
+    """Cursor opaco (sdd_03 §"Paginacion": "cursor-based -- ?cursor=<opaque>")
+    para reportes agregados en memoria (`RentPeriodPanelService`/
+    `DebtService`): un indice entero base64, no un `(created_at, id)`
+    real -- estas listas ya viven completas en memoria (join +
+    calculo por fila), asi que paginar por indice sobre la lista ya
+    ordenada es equivalente y evita reimplementar keyset pagination
+    sobre columnas calculadas."""
+    return base64.urlsafe_b64encode(str(index).encode("ascii")).decode("ascii")
+
+
+def _decode_index_cursor(cursor: str | None) -> int:
+    if not cursor:
+        return 0
+    return int(base64.urlsafe_b64decode(cursor.encode("ascii")).decode("ascii"))

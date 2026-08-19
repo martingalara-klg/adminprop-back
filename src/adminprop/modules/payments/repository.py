@@ -14,21 +14,66 @@ respetar RN-P01 (un solo `rent_period` por `contract_id`+`period`).
 la clase `PaymentRepository` completa, son del issue #22 -- el #21
 deliberadamente no los agrego (su unico consumidor era el job Beat, que
 maneja su propio commit via `session.begin()` del caller).
+
+`list_candidates`/`get_candidate` (issue #23, RF-02/RF-06) hacen el JOIN
+`rent_periods -> contracts -> properties` para resolver `property_id`/
+`landlord_id`/`renter_id`/`daily_late_fee_pct` de cada periodo -- filtro
+EXPLICITO de `organization_id` en las TRES tablas (docs/skills/
+tenant-isolation.md §"Queries con join/agregacion", RN-D01), no solo en
+`rent_periods`. `days_late`/`suggested_interest` (campos calculados, no
+columnas) se resuelven en `service.py` reutilizando
+`compute_days_late`/`compute_suggested_interest` (RN-P02/P03) -- el
+repository solo devuelve los datos crudos necesarios para ese calculo.
+
+Ese JOIN usa SQL crudo (`text()`, mismo patron que
+`modules/contracts/repository.py.get_expiry_notice_days`) en vez de los
+modelos ORM `Contract`/`Property`: importar `adminprop.modules.properties.models`
+a nivel de modulo aca dispara la carga de `properties/__init__.py`, que
+importa `properties.router` -> `properties.repository` -> `people.models`
+-> `people/__init__.py` -> `people.router` -> (de vuelta) `properties.repository`
+-- un ciclo real, confirmado corriendo `python -c "import adminprop.main"`
+dentro del contenedor (`ImportError: cannot import name 'PropertyRepository'
+from partially initialized module`), porque este repository se alcanza
+muy temprano en el arranque via `contracts.rent_period_hook` (issues
+#17/#18), antes de que `properties`/`people` terminen de cargar por su
+cuenta. SQL crudo rompe esa dependencia de import sin tocar el orden de
+carga de ningun otro modulo.
 """
 
 from __future__ import annotations
 
-from datetime import date
+from dataclasses import dataclass
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adminprop.db.session import get_tenant_db_session
 from adminprop.modules.payments.models import Payment, RentPeriod
+
+
+@dataclass(frozen=True)
+class RentPeriodCandidate:
+    """Fila cruda del JOIN `rent_periods -> contracts -> properties` --
+    todavia sin `days_late`/`suggested_interest`/`balance` (esos son
+    calculados por `service.py`, no datos de la fila)."""
+
+    id: UUID
+    contract_id: UUID
+    property_id: UUID
+    landlord_id: UUID
+    renter_id: UUID
+    period: date
+    amount_due: Decimal
+    currency: str
+    status: str
+    paid_total: Decimal
+    daily_late_fee_pct: Decimal
+    created_at: datetime
 
 
 class RentPeriodRepository:
@@ -123,6 +168,94 @@ class RentPeriodRepository:
     async def commit(self) -> None:
         await self._session.commit()
 
+    # ─── RF-02/RF-06 (issue #23): panel del mes + estado de deuda ──────────
+
+    # RN-D01: filtro EXPLICITO de `organization_id` en las TRES tablas del
+    # join (docs/skills/tenant-isolation.md §"Queries con join/agregacion")
+    # -- no alcanza con filtrarlo solo en `rent_periods`. SQL crudo: ver
+    # motivo (evitar el ciclo de import `properties`<->`people`) en el
+    # docstring del modulo.
+    _CANDIDATE_SQL = """
+        SELECT
+            rp.id AS id,
+            rp.contract_id AS contract_id,
+            c.property_id AS property_id,
+            p.landlord_id AS landlord_id,
+            c.renter_id AS renter_id,
+            rp.period AS period,
+            rp.amount_due AS amount_due,
+            rp.currency AS currency,
+            rp.status AS status,
+            rp.paid_total AS paid_total,
+            c.daily_late_fee_pct AS daily_late_fee_pct,
+            rp.created_at AS created_at
+        FROM rent_periods rp
+        JOIN contracts c ON c.id = rp.contract_id AND c.organization_id = :org_id
+        JOIN properties p ON p.id = c.property_id AND p.organization_id = :org_id
+        WHERE rp.organization_id = :org_id
+    """
+
+    async def list_candidates(
+        self,
+        *,
+        organization_id: UUID,
+        period: date | None = None,
+        status: str | None = None,
+        unpaid_only: bool = False,
+        property_id: UUID | None = None,
+        landlord_id: UUID | None = None,
+        renter_id: UUID | None = None,
+    ) -> list[RentPeriodCandidate]:
+        """RF-02 (panel del mes) + RF-06/CA-02-05 (deuda): candidatos crudos
+        del join, ordenados `created_at desc, id desc` (mismo criterio de
+        orden que el resto de los listados del repo) -- `in_arrears`/
+        `days_late`/`suggested_interest` y la paginacion por cursor las
+        resuelve `service.py` porque dependen de `today`/`grace_day`
+        (RN-P02/P03), no de columnas de la fila. `unpaid_only` filtra
+        `status IN ('pending', 'partial')` -- usado por RF-06/CA-02-05
+        (solo interesan los periodos con deuda)."""
+        conditions: list[str] = []
+        params: dict[str, object] = {"org_id": str(organization_id)}
+        if period is not None:
+            conditions.append("rp.period = :period")
+            params["period"] = period
+        if status is not None:
+            conditions.append("rp.status = :status")
+            params["status"] = status
+        if unpaid_only:
+            conditions.append("rp.status IN ('pending', 'partial')")
+        if property_id is not None:
+            conditions.append("c.property_id = :property_id")
+            params["property_id"] = str(property_id)
+        if landlord_id is not None:
+            conditions.append("p.landlord_id = :landlord_id")
+            params["landlord_id"] = str(landlord_id)
+        if renter_id is not None:
+            conditions.append("c.renter_id = :renter_id")
+            params["renter_id"] = str(renter_id)
+
+        sql = self._CANDIDATE_SQL
+        if conditions:
+            sql += " AND " + " AND ".join(conditions)
+        sql += " ORDER BY rp.created_at DESC, rp.id DESC"
+
+        result = await self._session.execute(text(sql), params)
+        return [RentPeriodCandidate(**dict(row._mapping)) for row in result]
+
+    async def get_candidate(
+        self, rent_period_id: UUID, organization_id: UUID
+    ) -> RentPeriodCandidate | None:
+        """RF-02: `GET /rent-periods/:id` -- misma forma que `list_candidates`
+        pero para un solo periodo (RN-D01: filtro explicito + join en las
+        tres tablas, 404 si es de otro tenant o no existe)."""
+        sql = self._CANDIDATE_SQL + " AND rp.id = :rent_period_id"
+        result = await self._session.execute(
+            text(sql),
+            {"org_id": str(organization_id), "rent_period_id": str(rent_period_id)},
+        )
+        row = result.first()
+        return RentPeriodCandidate(**dict(row._mapping)) if row is not None else None
+
 
 class PaymentRepository:
     """Acceso a datos de `payments` (issue #22, RF-03/RF-04)."""
@@ -180,14 +313,31 @@ class PaymentRepository:
         return row
 
     async def get_by_id(self, payment_id: UUID, organization_id: UUID) -> Payment | None:
-        """RN-D01: filtro explicito de `organization_id` -- usado por el
-        futuro RF-05 (anulacion, issue #23) y por tests."""
+        """RN-D01: filtro explicito de `organization_id` -- usado por
+        RF-05 (anulacion, issue #23) y por tests."""
         stmt = select(Payment).where(
             Payment.id == payment_id,
             Payment.organization_id == organization_id,
         )
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def void(
+        self, payment_id: UUID, organization_id: UUID, *, voided_by: UUID
+    ) -> Payment | None:
+        """RF-05/RN-D04: anulacion logica -- setea `voided_at`/`voided_by`.
+        El caller (`service.py.PaymentService.void_payment`) ya valido
+        existencia y que no estuviera anulado (`409
+        PAYMENT_ALREADY_VOIDED`); filtro explicito de `organization_id`
+        (RN-D01) por defense in depth."""
+        row = await self.get_by_id(payment_id, organization_id)
+        if row is None:  # pragma: no cover -- defensivo, el service ya valido existencia
+            return None
+        row.voided_at = datetime.now(UTC)
+        row.voided_by = voided_by
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
 
     async def commit(self) -> None:
         await self._session.commit()

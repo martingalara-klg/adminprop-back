@@ -431,6 +431,68 @@ def seed(rsa_keypair):
                 row = result.mappings().one()
                 return {"status": row["status"], "paid_total": str(row["paid_total"])}
 
+        # ─── helpers propios de anulacion/panel/deuda (issue #23) ──────────
+
+        async def create_payment_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            rent_period_id: uuid.UUID,
+            created_by: uuid.UUID,
+            payment_date: str = "2026-06-05",
+            method: str = "cash",
+            payment_currency: str = "ARS",
+            amount: str = "1000.00",
+            destination: str = "agency_account",
+            suggested_interest: str = "0.00",
+            charged_interest: str = "0.00",
+            forgiven_interest: str = "0.00",
+            days_late: int = 0,
+        ) -> uuid.UUID:
+            """Siembra un `payment` directamente en DB -- equivalente al
+            resultado de `POST /rent-periods/:id/payments` (issue #22), sin
+            pasar por el endpoint completo en cada test de anulacion."""
+            payment_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO payments "
+                        "(id, organization_id, rent_period_id, payment_date, method, "
+                        "payment_currency, amount, destination, suggested_interest, "
+                        "charged_interest, forgiven_interest, days_late, created_by) "
+                        "VALUES (:id, :org_id, :rent_period_id, :payment_date, :method, "
+                        ":payment_currency, :amount, :destination, :suggested_interest, "
+                        ":charged_interest, :forgiven_interest, :days_late, :created_by)"
+                    ),
+                    {
+                        "id": str(payment_id),
+                        "org_id": str(organization_id),
+                        "rent_period_id": str(rent_period_id),
+                        "payment_date": date.fromisoformat(payment_date),
+                        "method": method,
+                        "payment_currency": payment_currency,
+                        "amount": amount,
+                        "destination": destination,
+                        "suggested_interest": suggested_interest,
+                        "charged_interest": charged_interest,
+                        "forgiven_interest": forgiven_interest,
+                        "days_late": days_late,
+                        "created_by": str(created_by),
+                    },
+                )
+            return payment_id
+
+        async def get_payment(self, payment_id: uuid.UUID) -> dict:
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                result = await session.execute(
+                    sa.text("SELECT voided_at, voided_by FROM payments WHERE id = :id"),
+                    {"id": str(payment_id)},
+                )
+                row = result.mappings().one()
+                return {"voided_at": row["voided_at"], "voided_by": row["voided_by"]}
+
         async def audit_rows(self, organization_id: uuid.UUID, action: str) -> list[dict]:
             session_factory = get_session_factory()
             async with session_factory() as session:
