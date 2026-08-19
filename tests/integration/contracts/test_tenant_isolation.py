@@ -189,3 +189,82 @@ class TestContractCrossTenantIsolation:
 
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+class TestAdjustmentCrossTenantIsolation:
+    """RN-D01 (issue #18): un ajuste de la org B nunca es accesible ni
+    aplicable desde la org A."""
+
+    async def test_get_contract_adjustments_of_another_organization_returns_404(self, client, seed):
+        _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
+        _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
+        property_b, renter_b = await _seed_property_and_renter(seed, owner_b["organization_id"])
+        contract_b_id = await seed.create_contract_row(
+            organization_id=owner_b["organization_id"],
+            property_id=property_b,
+            renter_id=renter_b,
+            status="active",
+        )
+        await seed.create_adjustment_row(
+            organization_id=owner_b["organization_id"], contract_id=contract_b_id
+        )
+
+        response = await client.get(
+            f"/v1/contracts/{contract_b_id}/adjustments", headers=owner_a["headers"]
+        )
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "NOT_FOUND"
+
+    async def test_pending_inbox_never_returns_another_organizations_adjustments(
+        self, client, seed
+    ):
+        _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
+        _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
+        property_b, renter_b = await _seed_property_and_renter(seed, owner_b["organization_id"])
+        contract_b_id = await seed.create_contract_row(
+            organization_id=owner_b["organization_id"],
+            property_id=property_b,
+            renter_id=renter_b,
+            status="active",
+        )
+        adjustment_b_id = await seed.create_adjustment_row(
+            organization_id=owner_b["organization_id"], contract_id=contract_b_id
+        )
+
+        response = await client.get(
+            "/v1/adjustments", params={"status": "pending"}, headers=owner_a["headers"]
+        )
+
+        assert response.status_code == 200
+        ids = {item["id"] for item in response.json()["data"]}
+        assert str(adjustment_b_id) not in ids
+
+    async def test_apply_adjustment_of_another_organization_returns_404(self, client, seed):
+        _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
+        _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
+        property_b, renter_b = await _seed_property_and_renter(seed, owner_b["organization_id"])
+        contract_b_id = await seed.create_contract_row(
+            organization_id=owner_b["organization_id"],
+            property_id=property_b,
+            renter_id=renter_b,
+            status="active",
+        )
+        adjustment_b_id = await seed.create_adjustment_row(
+            organization_id=owner_b["organization_id"], contract_id=contract_b_id
+        )
+
+        response = await client.post(
+            f"/v1/adjustments/{adjustment_b_id}/apply",
+            json={"pct": "5.00"},
+            headers=owner_a["headers"],
+        )
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "NOT_FOUND"
+
+        # El ajuste de la org B no debe haber sido modificado.
+        untouched = await client.get(
+            f"/v1/contracts/{contract_b_id}/adjustments", headers=owner_b["headers"]
+        )
+        assert untouched.json()["data"][0]["status"] == "pending"
