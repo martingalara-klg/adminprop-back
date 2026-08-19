@@ -265,6 +265,51 @@ class BusinessRuleViolationException(AdminPropException):
     message = "La operacion viola una regla de negocio."
 
 
+class AdjustmentPendingExistsException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 409 ADJUSTMENT_PENDING_EXISTS.
+
+    Issue #18 (spec_module_03_contratos.md RF-04, sdd_02 §2.8): no puede
+    haber dos ajustes `pending` del mismo contrato -- el indice parcial
+    unico `idx_contract_adjustments_one_pending_per_contract` (migracion
+    #16) es la red de seguridad; esta excepcion es la validacion
+    app-level defensiva que usa el job `detect_due_adjustments` antes de
+    insertar (mismo criterio que `ContractOverlapException` con el
+    EXCLUDE constraint de `contracts`).
+    """
+
+    status_code = 409
+    error_code = "ADJUSTMENT_PENDING_EXISTS"
+    message = "Ya existe un ajuste pendiente para este contrato."
+
+
+class AdjustmentAlreadyAppliedException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 409 ADJUSTMENT_ALREADY_APPLIED.
+
+    Issue #18: `POST /adjustments/:id/apply` sobre un ajuste que ya esta
+    `applied` -- inmutable (sdd_02 §2.8): una correccion es un ajuste
+    nuevo con nota, nunca reabrir uno ya aplicado.
+    """
+
+    status_code = 409
+    error_code = "ADJUSTMENT_ALREADY_APPLIED"
+    message = "El ajuste ya fue aplicado y es inmutable."
+
+
+class AdjustmentPctRequiredException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 400 ADJUSTMENT_PCT_REQUIRED.
+
+    Issue #18: `pct` se acepta a nivel de schema como opcional (mismo
+    criterio que `ContractUpdate.current_amount`, issue #17) para poder
+    distinguir "el cliente no mando `pct`" -> 400 ADJUSTMENT_PCT_REQUIRED
+    en vez de un generico 422 VALIDATION_ERROR de Pydantic por
+    `extra="forbid"`/campo requerido.
+    """
+
+    status_code = 400
+    error_code = "ADJUSTMENT_PCT_REQUIRED"
+    message = "El porcentaje de ajuste es obligatorio."
+
+
 class EntityHasDependenciesException(AdminPropException):
     """sdd_03 §"Codigos de Error Globales" -- 409 ENTITY_HAS_DEPENDENCIES.
 
