@@ -382,6 +382,58 @@ def seed(rsa_keypair):
                 )
             return contract_id
 
+        async def create_adjustment_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            contract_id: uuid.UUID,
+            due_period: str = "2026-04-01",
+            status: str = "pending",
+            previous_amount: str = "100000.00",
+            pct_applied: str | None = None,
+            new_amount: str | None = None,
+            applied_by: uuid.UUID | None = None,
+            applied_at: datetime | None = None,
+        ) -> uuid.UUID:
+            """Siembra un `contract_adjustment` directamente en DB -- usado
+            por los tests que necesitan un ajuste `pending`/`applied` ya
+            existente (bandeja, aplicacion, aislamiento cross-tenant) sin
+            depender del job diario `detect_due_adjustments` (issue #18)."""
+            adjustment_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO contract_adjustments "
+                        "(id, organization_id, contract_id, due_period, status, "
+                        "previous_amount, pct_applied, new_amount, applied_by, applied_at) "
+                        "VALUES (:id, :org_id, :contract_id, :due_period, :status, "
+                        ":previous_amount, :pct_applied, :new_amount, :applied_by, :applied_at)"
+                    ),
+                    {
+                        "id": str(adjustment_id),
+                        "org_id": str(organization_id),
+                        "contract_id": str(contract_id),
+                        "due_period": date.fromisoformat(due_period),
+                        "status": status,
+                        "previous_amount": previous_amount,
+                        "pct_applied": pct_applied,
+                        "new_amount": new_amount,
+                        "applied_by": str(applied_by) if applied_by else None,
+                        "applied_at": applied_at,
+                    },
+                )
+            return adjustment_id
+
+        async def get_contract_current_amount(self, contract_id: uuid.UUID) -> str:
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                result = await session.execute(
+                    sa.text("SELECT current_amount FROM contracts WHERE id = :id"),
+                    {"id": str(contract_id)},
+                )
+                return str(result.scalar_one())
+
         async def audit_rows(self, organization_id: uuid.UUID, action: str) -> list[dict]:
             session_factory = get_session_factory()
             async with session_factory() as session:

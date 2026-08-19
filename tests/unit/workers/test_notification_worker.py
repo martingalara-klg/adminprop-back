@@ -141,9 +141,22 @@ def test_ca_4_04_generate_rent_periods_stub_runs_without_error():
     assert generate_rent_periods.apply().get() is None
 
 
-def test_ca_4_04_detect_due_adjustments_stub_runs_without_error():
-    """CA-4-04: el stub de Beat corre sin excepcion (issue #18 agrega la logica)."""
-    assert detect_due_adjustments.apply().get() is None
+def test_ca_03_04_detect_due_adjustments_runs_async_body_once(monkeypatch):
+    """CA-03-04 (issue #18): la tarea Celery delega en
+    `_detect_due_adjustments_async` via `asyncio.run(...)` -- mismo
+    criterio que los tests de arriba mockean `send_email`/
+    `_send_notification_email_async` para no tocar Postgres desde un test
+    unitario. La cobertura del cuerpo async real (deteccion multi-org,
+    creacion del ajuste `pending`, notificacion) vive en
+    tests/integration/contracts/test_adjustments.py y
+    tests/integration/workers/test_detect_due_adjustments.py."""
+    mock_async = AsyncMock(return_value=None)
+    monkeypatch.setattr(notification_worker, "_detect_due_adjustments_async", mock_async)
+
+    result = detect_due_adjustments.apply().get()
+
+    assert result is None
+    assert mock_async.call_count == 1
 
 
 def test_ca_4_04_detect_expiring_contracts_stub_runs_without_error():
