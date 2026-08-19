@@ -20,10 +20,10 @@ porque necesita actualizar la fila de `notifications` despues del envio.
 
 Las 3 tareas de Celery Beat (`generate_rent_periods`, `detect_due_adjustments`,
 `detect_expiring_contracts`) partieron como stubs (CA-4-04) que solo
-logueaban inicio/fin para validar que Beat las dispara end-to-end.
-`detect_due_adjustments` (issue #18) y `detect_expiring_contracts` (issue
-#19) ya tienen su logica de negocio real; `generate_rent_periods` sigue
-siendo stub hasta el issue #21.
+logueaban inicio/fin para validar que Beat las dispara end-to-end. Las
+tres ya tienen su logica de negocio real: `detect_due_adjustments` (issue
+#18), `detect_expiring_contracts` (issue #19) y `generate_rent_periods`
+(issue #21, spec_module_04_cobranzas.md §RF-01).
 """
 
 import asyncio
@@ -42,6 +42,8 @@ from adminprop.modules.contracts.adjustment_repository import ContractAdjustment
 from adminprop.modules.contracts.adjustment_service import ContractAdjustmentService
 from adminprop.modules.contracts.repository import ContractRepository
 from adminprop.modules.contracts.service import ContractService
+from adminprop.modules.payments.repository import RentPeriodRepository
+from adminprop.modules.payments.service import RentPeriodService
 from adminprop.modules.properties.repository import PropertyRepository
 from adminprop.shared.email.sender import send_email
 from adminprop.shared.errors.retryable import (
@@ -364,22 +366,65 @@ async def _send_notification_email_async(
 
 
 # ─── Celery Beat (CA-4-04) ──────────────────────────────────────────────────
-# `detect_due_adjustments` (RN-C03, issue #18) y `detect_expiring_contracts`
-# (issue #19) ya tienen logica real. `generate_rent_periods` sigue siendo
-# stub -- logica real: issue #21 (RN-P01).
+# `detect_due_adjustments` (RN-C03, issue #18), `detect_expiring_contracts`
+# (issue #19) y `generate_rent_periods` (RN-P01, issue #21) ya tienen
+# logica real.
 
 
 @celery_app.task(bind=True, name="adminprop.workers.notification_worker.generate_rent_periods")
 def generate_rent_periods(self: Task) -> None:
-    """Stub (issue #4): Beat dispara esta tarea el 1° de cada mes, 00:30 UTC.
+    """Beat dispara esta tarea el 1° de cada mes, 00:30 UTC.
 
-    Logica real (generar el `rent_period` de cada contrato activo, RN-P01)
-    llega con el issue #21 — sdd_04 §1.3.
+    SDD: spec_module_04_cobranzas.md §RF-01. Implements: CA-04-01
+    (idempotencia), CA-04-02 (RN-P01). Itera TODAS las organizaciones
+    `active` (el Beat corre sin tenant) y, por cada una, setea el
+    contexto y genera -- mismo patron que `_detect_due_adjustments_async`
+    (issue #18) y `_detect_expiring_contracts_async` (issue #19).
     """
+    request_id = str(uuid.uuid4())
     logger.info(
-        "generate_rent_periods stub — logica real llega con el issue #21",
-        extra={"attempt": self.request.retries + 1, "service": "notification_worker"},
+        "generate_rent_periods start",
+        extra={
+            "request_id": request_id,
+            "attempt": self.request.retries + 1,
+            "service": "notification_worker",
+        },
     )
+    asyncio.run(_generate_rent_periods_async(request_id))
+    logger.info(
+        "generate_rent_periods done",
+        extra={"request_id": request_id, "service": "notification_worker"},
+    )
+
+
+async def _generate_rent_periods_async(request_id: str) -> None:
+    today = datetime.now(UTC).date()
+    organization_ids = await _list_active_organization_ids()
+
+    for organization_id in organization_ids:
+        async with tenant_scoped_session(organization_id) as session:
+            contract_repo = ContractRepository(session)
+            rent_period_repo = RentPeriodRepository(session)
+            service = RentPeriodService(rent_period_repo, contract_repo)
+            rent_periods_created = await service.generate_monthly(
+                organization_id=organization_id, today=today
+            )
+            # `tenant_scoped_session` comitea al salir del bloque sin
+            # excepcion (mismo patron que `_detect_due_adjustments_async`).
+
+        logger.info(
+            "generate_rent_periods organization done",
+            extra={
+                "request_id": request_id,
+                "organization_id": str(organization_id),
+                # `created` es un atributo reservado de `LogRecord`
+                # (timestamp de creacion del record) -- usar ese nombre en
+                # `extra` revienta `logging` con
+                # "Attempt to overwrite 'created' in LogRecord".
+                "rent_periods_created": rent_periods_created,
+                "service": "notification_worker",
+            },
+        )
 
 
 @celery_app.task(bind=True, name="adminprop.workers.notification_worker.detect_due_adjustments")

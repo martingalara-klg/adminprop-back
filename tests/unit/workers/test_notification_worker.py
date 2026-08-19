@@ -136,9 +136,21 @@ def test_ca_4_02_send_transactional_email_non_retryable_gives_up_immediately(mon
     assert mock_send.call_count == 1
 
 
-def test_ca_4_04_generate_rent_periods_stub_runs_without_error():
-    """CA-4-04: el stub de Beat corre sin excepcion (issue #21 agrega la logica)."""
-    assert generate_rent_periods.apply().get() is None
+def test_ca_04_01_generate_rent_periods_runs_async_body_once(monkeypatch):
+    """CA-04-01 (issue #21): la tarea Celery delega en
+    `_generate_rent_periods_async` via `asyncio.run(...)` -- mismo
+    criterio que `test_ca_03_04_detect_due_adjustments_runs_async_body_once`
+    (el body real toca Postgres, no corresponde a un test unitario). La
+    cobertura del cuerpo async real (generacion multi-org, idempotencia,
+    RN-P01) vive en tests/integration/contracts/test_rent_period_hook.py
+    y tests/integration/workers/test_generate_rent_periods.py."""
+    mock_async = AsyncMock(return_value=None)
+    monkeypatch.setattr(notification_worker, "_generate_rent_periods_async", mock_async)
+
+    result = generate_rent_periods.apply().get()
+
+    assert result is None
+    assert mock_async.call_count == 1
 
 
 def test_ca_03_04_detect_due_adjustments_runs_async_body_once(monkeypatch):
