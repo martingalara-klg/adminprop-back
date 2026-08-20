@@ -34,6 +34,7 @@ _WORK_ORDERS_COLUMNS = {
     "status",
     "approved_quote_id",
     "final_cost",
+    "settled_in_settlement_id",
     "created_by",
     "closed_at",
     "created_at",
@@ -333,9 +334,13 @@ async def test_ca_25_01_fk_work_orders_approved_quote_id_referencia_work_order_q
     assert referenced_table == "work_order_quotes"
 
 
-async def test_ca_25_01_work_orders_settled_in_settlement_id_no_existe_todavia():
+async def test_ca_25_01_work_orders_settled_in_settlement_id_agregada_por_capa6():
     """spec: la FK a `settlements` se agrega en la migracion de la Capa 6
-    (issue #27) -- esta migracion no debe crear la columna."""
+    (issue #27, `20260820_090000_create_capa6_liquidaciones.py`) via
+    ALTER TABLE, tras crearse `settlements` -- esta migracion (Capa 5) no
+    la crea, pero contra un `alembic upgrade head` completo (que incluye
+    la Capa 6) la columna existe. La cobertura especifica del ALTER vive
+    en `tests/integration/db/test_capa6_liquidaciones.py`."""
     engine = get_engine()
     async with engine.connect() as conn:
         result = await conn.execute(
@@ -345,7 +350,7 @@ async def test_ca_25_01_work_orders_settled_in_settlement_id_no_existe_todavia()
             )
         )
         columns = {row[0] for row in result}
-    assert columns == set()
+    assert columns == {"settled_in_settlement_id"}
 
 
 async def test_ca_25_01_fk_work_order_quotes_work_order_id_referencia_work_orders():
