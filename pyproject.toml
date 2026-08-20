@@ -40,6 +40,9 @@ dependencies = [
     # real dentro del contenedor). Se fija `<0.11` hasta migrar a una
     # version de WeasyPrint que declare el pin correcto.
     "pydyf<0.11",
+    # issue #26 — Mantenimiento: FastAPI requiere python-multipart para
+    # parsear `UploadFile`/multipart-form-data (POST .../attachments).
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

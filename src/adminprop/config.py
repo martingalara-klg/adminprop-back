@@ -99,6 +99,14 @@ class Settings(BaseSettings):
     # secretos cuando exista infra cloud (CLAUDE.md §3/§8).
     encryption_key: str = "local_dev_encryption_key_change_me"
 
+    # ─── issue #26 — Mantenimiento: storage local de adjuntos ──────────────
+    # docs/skills/tenant-isolation.md §"Storage de archivos con aislamiento
+    # per-tenant" + spec_data_model.md §Capa 5 "attachments": filesystem
+    # local (volumen Docker en MVP, docker/docker-compose.yml) via
+    # shared/storage/local.py. Default coincide con el volumen montado en
+    # el contenedor api; overridable para tests (tmp_path).
+    attachments_dir: str = "/data/adminprop-storage"
+
 
 @lru_cache
 def get_settings() -> Settings:

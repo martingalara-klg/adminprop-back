@@ -53,6 +53,7 @@ Editar `.env` con valores para desarrollo local. **Todos los campos con `change-
 | `RESEND_API_KEY` | https://resend.com/api-keys (gratis hasta 100 emails/día) |
 | `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` | Generar con paso 2.3 |
 | `SENTRY_DSN` | Dejar vacío en local — el SDK detecta y desactiva |
+| `ATTACHMENTS_DIR` | Opcional (issue #26) — storage local de adjuntos de mantenimiento. Default `/data/adminprop-storage`, ya montado como volumen Docker nombrado (`attachments_data`) en el servicio `api`; sobreescribir solo si necesitás otra ruta |
 
 Todos los secretos (API keys, `SECRET_KEY`, credenciales de servicios externos) se manejan en local como **variables de entorno locales (`.env`, no commiteado); migrar a un gestor de secretos cuando exista infra cloud**.
 

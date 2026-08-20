@@ -63,6 +63,12 @@ services:
     volumes:
       - ../src:/app/src
       - ../tests:/app/tests
+      # issue #26 -- storage local de adjuntos (mantenimiento):
+      # shared/storage/local.py escribe bajo Settings.attachments_dir
+      # (default /data/adminprop-storage). Volumen nombrado para que los
+      # archivos sobrevivan a un `docker compose restart` del contenedor
+      # api, igual criterio que `postgres_data`/`redis_data`.
+      - attachments_data:/data/adminprop-storage
     command: ["uvicorn", "adminprop.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
 
   # --- Workers Celery (issue #4) ---------------------------------------------
@@ -133,3 +139,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  attachments_data:
