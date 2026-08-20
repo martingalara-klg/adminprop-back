@@ -129,6 +129,7 @@ Numeración heredada del sistema de referencia donde los skills la citan (#2..#6
 | 112 | El % de ajuste puede ser **negativo** (renegociación a la baja) con confirmación explícita en UI | `spec_module_03` §Validaciones, decisión 2026-08-06 | ✅ Tomada |
 | 113 | **Recibo de cobro opcional** (PDF sincrónico bajo demanda) y **certificado de libre deuda** (solo sin saldos impagos, auditado) | `spec_module_04` RF-07/RF-08, RN-P08, decisión 2026-08-11 | ✅ Tomada |
 | 114 | **Depósito de garantía: fuera del alcance del MVP** — no se registra ni trackea | `sdd_01` §4 Futuras, decisión 2026-08-11 | ✅ Tomada |
+| 115 | **Evento `quote_approved` agregado al MVP** (aviso al encargado al aprobarse su cotización — cierra la brecha CA-06-03 vs tabla de eventos detectada en el issue #26; se implementa en #31). **WhatsApp como canal: post-MVP** — MVP notifica por email + in-app | `spec_notificaciones` v1.1, `sdd_02` §2.16 v1.2, decisión 2026-08-20 | ✅ Tomada |
 
 ### Decisiones aún pendientes
 

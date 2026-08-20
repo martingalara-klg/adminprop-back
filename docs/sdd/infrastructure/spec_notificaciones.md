@@ -2,16 +2,16 @@
 name: AdminProp — Notificaciones (plataforma transversal)
 description: Servicio transversal de avisos in-app + email — eventos, enrutamiento por rol, panel in-app, y política de reintento por canal
 type: project
-version: 1.0
-fecha: 2026-08-06
+version: 1.1
+fecha: 2026-08-20
 ---
 # Notificaciones — Plataforma Transversal
 
-**Versión:** 1.0 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-06
+**Versión:** 1.1 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-20
 
 ## Propósito
 
-El servicio que los demás módulos usan para avisar: ajuste de alquiler pendiente, contrato por vencer, pedido de reparación nuevo, cotización recibida, trabajo terminado. Dos canales en MVP: **in-app** (transaccional, siempre) y **email** (best-effort vía Resend). No es un módulo con pantallas propias más allá del panel de avisos (UC-20).
+El servicio que los demás módulos usan para avisar: ajuste de alquiler pendiente, contrato por vencer, pedido de reparación nuevo, cotización recibida, cotización aprobada, trabajo terminado. Dos canales en MVP: **in-app** (transaccional, siempre) y **email** (best-effort vía Resend). WhatsApp como canal queda **post-MVP** (decisión #115). No es un módulo con pantallas propias más allá del panel de avisos (UC-20).
 
 ## Eventos del MVP y enrutamiento por rol
 
@@ -21,6 +21,7 @@ El servicio que los demás módulos usan para avisar: ajuste de alquiler pendien
 | `contract_expiring` | Job `detect_expiring_contracts` (Módulo 3 RF-05) | owner + admin |
 | `work_order_created` | Alta de pedido (Módulo 6 RF-01) | usuarios `maintenance` |
 | `quote_submitted` | Cotización subida (Módulo 6 RF-02) | owner + admin |
+| `quote_approved` | Aprobación de cotización (Módulo 6 RF-03) | usuarios `maintenance` |
 | `work_order_closed` | Cierre de trabajo (Módulo 6 RF-04) | owner + admin |
 
 Agregar un evento nuevo = actualizar esta tabla primero (regla de oro de `sdd_03`).
@@ -58,12 +59,12 @@ Agregar un evento nuevo = actualizar esta tabla primero (regla de oro de `sdd_03
 
 ## Validaciones
 
-- `event_type`: uno de los 5 del enum (CHECK en DB).
+- `event_type`: uno de los 6 del enum (CHECK en DB).
 - `payload`: JSON con los IDs mínimos del evento (validado por schema del servicio).
 
 ## Criterios de Aceptación
 
-- [ ] **CA-NT-01:** Cada uno de los 5 eventos genera la notificación in-app a los destinatarios correctos según la tabla de enrutamiento (y a nadie más).
+- [ ] **CA-NT-01:** Cada uno de los 6 eventos genera la notificación in-app a los destinatarios correctos según la tabla de enrutamiento (y a nadie más).
 - [ ] **CA-NT-02:** Si el alta del pedido de reparación falla a mitad de transacción, no queda ninguna notificación creada.
 - [ ] **CA-NT-03:** Con Resend caído, la operación de negocio termina OK, el aviso in-app existe, y el email se reintenta con backoff 30/90/270s; agotados los reintentos queda registrado el fallo con `request_id`.
 - [ ] **CA-NT-04:** El badge muestra las no leídas del usuario; `read-all` las marca todas y el badge queda en cero.
@@ -88,7 +89,12 @@ Agregar un evento nuevo = actualizar esta tabla primero (regla de oro de `sdd_03
 
 | Módulo / Servicio | Motivo |
 |---|---|
-| Módulos 3 y 6 | Emiten los 5 eventos del MVP |
+| Módulos 3 y 6 | Emiten los 6 eventos del MVP |
 | `notification_worker` | Envío de emails post-commit |
 | Resend | Canal email |
 | Módulo 7 | Los destinatarios salen de las membresías activas y sus roles |
+
+## Historial
+
+- **v1.1 (2026-08-20):** evento `quote_approved` agregado (aviso al encargado al aprobarse su cotización — cierra la brecha CA-06-03 detectada en el issue #26; decisión #115). Canal WhatsApp registrado como post-MVP en la misma decisión. La extensión del CHECK de `event_type` en DB y la emisión en la aprobación se implementan en el issue #31.
+- **v1.0 (2026-08-06):** versión inicial con 5 eventos.
