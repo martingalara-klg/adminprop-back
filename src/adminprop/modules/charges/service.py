@@ -92,7 +92,9 @@ class RecurringChargeService:
         if "is_active" in fields_set:
             update_fields["is_active"] = is_active
 
-        updated = await self._repo.update(recurring_charge_id, organization_id, fields=update_fields)
+        updated = await self._repo.update(
+            recurring_charge_id, organization_id, fields=update_fields
+        )
         if updated is None:  # pragma: no cover -- defensivo, ya se valido existencia arriba
             raise NotFoundException()
 
@@ -227,7 +229,9 @@ class ChargeEntryService:
         """RF-05/CA-05-08: `GET /charge-entries?period=` -- checklist
         mensual: que propiedades tienen sus cargos cargados y cuales
         faltan (conceptos `is_active` unicamente, ver `repository.py`)."""
-        return await self._entry_repo.list_verification(organization_id=organization_id, period=period)
+        return await self._entry_repo.list_verification(
+            organization_id=organization_id, period=period
+        )
 
 
 def get_charge_entry_service(
