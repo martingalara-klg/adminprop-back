@@ -151,9 +151,7 @@ async def rows() -> AsyncGenerator[_Rows]:
 
     async with session_factory() as session, session.begin():
         await session.execute(
-            sa.text(
-                "DELETE FROM settlement_line_items WHERE organization_id = :org_id"
-            ),
+            sa.text("DELETE FROM settlement_line_items WHERE organization_id = :org_id"),
             {"org_id": str(org_id)},
         )
         await session.execute(
