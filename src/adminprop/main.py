@@ -7,6 +7,11 @@ from adminprop.modules.administracion.router import (
     users_router,
 )
 from adminprop.modules.auth.router import router as auth_router
+from adminprop.modules.charges.router import (
+    charge_entries_router,
+    property_recurring_charges_router,
+    recurring_charges_router,
+)
 from adminprop.modules.contracts.router import adjustments_router
 from adminprop.modules.contracts.router import router as contracts_router
 from adminprop.modules.health.router import router as health_router
@@ -54,6 +59,9 @@ def create_app() -> FastAPI:
     app.include_router(quotes_router)
     app.include_router(attachments_router)
     app.include_router(property_work_orders_router)
+    app.include_router(property_recurring_charges_router)
+    app.include_router(recurring_charges_router)
+    app.include_router(charge_entries_router)
     return app
 
 
