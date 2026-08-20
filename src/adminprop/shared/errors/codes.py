@@ -363,6 +363,20 @@ class PaymentAlreadyVoidedException(AdminPropException):
     message = "El cobro ya fue anulado."
 
 
+class ChargeEntryAlreadyExistsException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 409 CHARGE_ENTRY_ALREADY_EXISTS.
+
+    Issue #28 (spec_module_05_liquidaciones.md RF-05, CA-05-08): `POST
+    /recurring-charges/:id/entries` con un `(recurring_charge_id, period)`
+    que ya tiene un `charge_entry` cargado -- la correccion es un `PATCH
+    /charge-entries/:id` auditado (RN-D04), nunca un segundo POST.
+    """
+
+    status_code = 409
+    error_code = "CHARGE_ENTRY_ALREADY_EXISTS"
+    message = "Ya existe un cargo cargado para este concepto en ese periodo."
+
+
 class EntityHasDependenciesException(AdminPropException):
     """sdd_03 §"Codigos de Error Globales" -- 409 ENTITY_HAS_DEPENDENCIES.
 
