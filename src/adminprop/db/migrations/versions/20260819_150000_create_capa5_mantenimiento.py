@@ -132,8 +132,7 @@ def upgrade() -> None:
     # acaba de crear -- se agrega la columna + FK con ALTER, tal como
     # documenta el spec ("FK agregada por ALTER tras crear quotes").
     op.execute(
-        "ALTER TABLE work_orders ADD COLUMN approved_quote_id UUID "
-        "REFERENCES work_order_quotes(id)"
+        "ALTER TABLE work_orders ADD COLUMN approved_quote_id UUID REFERENCES work_order_quotes(id)"
     )
 
     # ─── attachments ────────────────────────────────────────────────────
@@ -164,8 +163,7 @@ def upgrade() -> None:
 
     # ─── Indices (spec_data_model.md §"Indices PostgreSQL Recomendados") ──
     op.execute(
-        "CREATE INDEX idx_work_orders_organization_status ON work_orders "
-        "(organization_id, status)"
+        "CREATE INDEX idx_work_orders_organization_status ON work_orders (organization_id, status)"
     )
     op.execute("CREATE INDEX idx_work_orders_property_id ON work_orders (property_id)")
 
@@ -177,8 +175,7 @@ def upgrade() -> None:
     )
 
     op.execute(
-        "CREATE INDEX idx_attachments_entity_type_entity_id ON attachments "
-        "(entity_type, entity_id)"
+        "CREATE INDEX idx_attachments_entity_type_entity_id ON attachments (entity_type, entity_id)"
     )
 
     # ─── Row Level Security (RN-D01) ──────────────────────────────────────

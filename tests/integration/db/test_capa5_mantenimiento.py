@@ -457,9 +457,7 @@ async def test_ca_25_01_indice_parcial_unico_de_approved_por_pedido_existe():
             sa.text("SELECT indexdef FROM pg_indexes WHERE tablename = 'work_order_quotes'")
         )
         defs = [row[0] for row in result]
-    assert any(
-        "UNIQUE" in d and "work_order_id" in d and "status = 'approved'" in d for d in defs
-    )
+    assert any("UNIQUE" in d and "work_order_id" in d and "status = 'approved'" in d for d in defs)
 
 
 async def test_ca_25_indice_entity_type_entity_id_existe_en_attachments():
@@ -500,9 +498,7 @@ class TestCA2501OneApprovedQuotePerWorkOrder:
     async def test_ca_25_01_rejects_update_that_creates_second_approved_quote(self, rows):
         work_order_id = await _insert_work_order(rows)
         await _insert_quote(rows, work_order_id=work_order_id, status="approved")
-        second_quote_id = await _insert_quote(
-            rows, work_order_id=work_order_id, status="submitted"
-        )
+        second_quote_id = await _insert_quote(rows, work_order_id=work_order_id, status="submitted")
         session_factory = get_session_factory()
         with pytest.raises(IntegrityError):
             async with session_factory() as session, session.begin():
@@ -524,9 +520,7 @@ class TestCA2501OneApprovedQuotePerWorkOrder:
         aprobar otra del mismo pedido."""
         work_order_id = await _insert_work_order(rows)
         first_quote_id = await _insert_quote(rows, work_order_id=work_order_id, status="approved")
-        second_quote_id = await _insert_quote(
-            rows, work_order_id=work_order_id, status="submitted"
-        )
+        second_quote_id = await _insert_quote(rows, work_order_id=work_order_id, status="submitted")
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
             await session.execute(
