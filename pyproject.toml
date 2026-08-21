@@ -43,6 +43,11 @@ dependencies = [
     # issue #26 — Mantenimiento: FastAPI requiere python-multipart para
     # parsear `UploadFile`/multipart-form-data (POST .../attachments).
     "python-multipart>=0.0.9",
+    # issue #30 — RF-03 (spec_module_05_liquidaciones.md): export Excel de
+    # liquidaciones generado por `documents_worker` (CLAUDE.md §3
+    # "Documentos: openpyxl (Excel) + WeasyPrint (PDF)"). WeasyPrint ya
+    # esta declarado (issue #24) y se reutiliza para el PDF.
+    "openpyxl>=3.1,<4",
 ]
 
 [project.optional-dependencies]

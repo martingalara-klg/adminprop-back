@@ -16,6 +16,15 @@ aplica a operaciones > 5s.
 from __future__ import annotations
 
 from adminprop.shared.pdf.renderer import render_pdf_from_html
-from adminprop.shared.pdf.template import document_html
+from adminprop.shared.pdf.template import (
+    DocumentSection,
+    document_html,
+    document_html_multi_section,
+)
 
-__all__ = ["document_html", "render_pdf_from_html"]
+__all__ = [
+    "DocumentSection",
+    "document_html",
+    "document_html_multi_section",
+    "render_pdf_from_html",
+]
