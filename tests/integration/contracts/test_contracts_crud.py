@@ -7,7 +7,7 @@ Implements: CA-03-01, CA-03-02, CA-03-03, CA-03-06, CA-03-08, CA-01-04.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 import sqlalchemy as sa
@@ -730,7 +730,13 @@ class TestContractListFilters:
         self, client, seed
     ):
         """RF-01/RF-05: "vence dentro de N dias" -- solo contratos
-        `active` cuyo `end_date` cae dentro de la ventana."""
+        `active` cuyo `end_date` cae dentro de la ventana.
+
+        Fechas relativas a `today` (no hardcodeadas): un `end_date`
+        absoluto queda en el pasado apenas el reloj real lo supera,
+        rompiendo el test sin que el codigo bajo prueba haya cambiado
+        (verificado: fallaba igual en `develop` antes de este fix)."""
+        today = datetime.now(UTC).date()
         _org, owner = await _seed_org_with_owner(seed)
         property_soon, renter_soon = await _seed_property_and_renter(seed, owner["organization_id"])
         property_far, renter_far = await _seed_property_and_renter(seed, owner["organization_id"])
@@ -741,24 +747,24 @@ class TestContractListFilters:
             organization_id=owner["organization_id"],
             property_id=property_soon,
             renter_id=renter_soon,
-            start_date="2025-01-01",
-            end_date="2026-08-20",
+            start_date=(today - timedelta(days=365)).isoformat(),
+            end_date=(today + timedelta(days=1)).isoformat(),
             status="active",
         )
         await seed.create_contract_row(
             organization_id=owner["organization_id"],
             property_id=property_far,
             renter_id=renter_far,
-            start_date="2025-01-01",
-            end_date="2030-01-01",
+            start_date=(today - timedelta(days=365)).isoformat(),
+            end_date=(today + timedelta(days=365 * 4)).isoformat(),
             status="active",
         )
         await seed.create_contract_row(
             organization_id=owner["organization_id"],
             property_id=property_draft,
             renter_id=renter_draft,
-            start_date="2026-01-01",
-            end_date="2026-08-25",
+            start_date=today.isoformat(),
+            end_date=(today + timedelta(days=6)).isoformat(),
             status="draft",
         )
 

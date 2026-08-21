@@ -377,6 +377,37 @@ class ChargeEntryAlreadyExistsException(AdminPropException):
     message = "Ya existe un cargo cargado para este concepto en ese periodo."
 
 
+class SettlementAlreadyExistsException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 409 SETTLEMENT_ALREADY_EXISTS.
+
+    Issue #29 (spec_module_05_liquidaciones.md RF-01, RN-05): `POST
+    /settlements/generate` con un `(landlord_id, period)` que ya tiene
+    una liquidacion -- UNIQUE `settlements_landlord_period_unique`
+    (migracion #27) es la red de seguridad; la correccion es
+    `POST /settlements/:id/regenerate` (RF-03, issue #30), nunca un
+    segundo POST /generate.
+    """
+
+    status_code = 409
+    error_code = "SETTLEMENT_ALREADY_EXISTS"
+    message = "Ya existe una liquidacion para este propietario y periodo."
+
+
+class SettlementExchangeRateRequiredException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 400 SETTLEMENT_EXCHANGE_RATE_REQUIRED.
+
+    Issue #29 (spec_module_05_liquidaciones.md RF-01, RN-L06): el
+    propietario tiene cobros o alquileres en USD en el periodo y no vino
+    `exchange_rate` en el body -- validacion SINCRONICA antes del 202
+    (a diferencia de `ExchangeRateRequiredException`, que es por cobro
+    individual).
+    """
+
+    status_code = 400
+    error_code = "SETTLEMENT_EXCHANGE_RATE_REQUIRED"
+    message = "Se requiere el tipo de cambio para generar la liquidacion: hay montos en USD en el periodo."
+
+
 class EntityHasDependenciesException(AdminPropException):
     """sdd_03 §"Codigos de Error Globales" -- 409 ENTITY_HAS_DEPENDENCIES.
 

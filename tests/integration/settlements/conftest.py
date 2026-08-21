@@ -1,11 +1,10 @@
-"""Fixtures compartidas de tests/integration/maintenance (issue #26).
+"""Fixtures compartidas de tests/integration/settlements (issue #29).
 
 Mismo patron de engine/session-factory fresco por test que
-tests/integration/payments/conftest.py (evita "Future attached to a
-different loop" entre tests async de pytest-asyncio). El `Seeder` se
-duplica deliberadamente -- mismo criterio que el repo ya aplica entre
-`auth`, `superadmin`, `administracion`, `people`, `properties`,
-`contracts` y `payments`.
+tests/integration/{payments,charges,maintenance}/conftest.py (evita
+"Future attached to a different loop" entre tests async de
+pytest-asyncio). El `Seeder` se duplica deliberadamente -- mismo criterio
+que el repo ya aplica entre los demas modulos.
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import date
 
 import pytest
 import sqlalchemy as sa
@@ -68,9 +68,6 @@ def rsa_keypair(tmp_path, monkeypatch):
 
     monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(private_path))
     monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(public_path))
-    # issue #26: aisla el storage de adjuntos por test (nunca el volumen
-    # Docker real) -- mismo criterio que las claves JWT de arriba.
-    monkeypatch.setenv("ATTACHMENTS_DIR", str(tmp_path / "attachments"))
     get_settings.cache_clear()
     jwt_module.clear_key_cache()
     yield
@@ -167,7 +164,7 @@ def seed(rsa_keypair):
             permissions: list[str] | None = None,
         ) -> uuid.UUID:
             role_id = uuid.uuid4()
-            permissions = permissions if permissions is not None else ["work-order:read"]
+            permissions = permissions if permissions is not None else ["settlement:generate"]
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
                 await session.execute(
@@ -211,19 +208,14 @@ def seed(rsa_keypair):
         async def create_organization_with_system_roles(
             self, *, status: str = "active", name: str | None = None
         ) -> dict:
-            """Siembra una organizacion `active` con sus 3 roles de sistema
-            reales (`ROLE_DEFINITIONS`) -- `maintenance` solo tiene
-            `work-order:read`/`quote`/`close` + `attachment:manage`
-            (RN-A01)."""
             org_id = await self.create_organization(status=status, name=name)
-            settings = dict(DEFAULT_ORGANIZATION_SETTINGS)
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
                 await session.execute(
                     sa.text(
                         "UPDATE organizations SET settings = :settings WHERE id = :id"
                     ).bindparams(sa.bindparam("settings", type_=sa.JSON)),
-                    {"id": str(org_id), "settings": json.dumps(settings)},
+                    {"id": str(org_id), "settings": json.dumps(DEFAULT_ORGANIZATION_SETTINGS)},
                 )
             role_ids: dict[str, uuid.UUID] = {}
             for role_name, permissions in ROLE_DEFINITIONS:
@@ -263,10 +255,14 @@ def seed(rsa_keypair):
                 "headers": headers,
             }
 
-        # ─── helpers propios de mantenimiento (issue #26) ──────────────────
+        # ─── helpers propios de settlements (issue #29) ────────────────────
 
         async def create_landlord_row(
-            self, *, organization_id: uuid.UUID, name: str = "Propietario de prueba"
+            self,
+            *,
+            organization_id: uuid.UUID,
+            name: str = "Propietario de prueba",
+            commission_pct: str = "10.00",
         ) -> uuid.UUID:
             landlord_id = uuid.uuid4()
             session_factory = get_session_factory()
@@ -274,11 +270,31 @@ def seed(rsa_keypair):
                 await session.execute(
                     sa.text(
                         "INSERT INTO landlords (id, organization_id, name, commission_pct) "
-                        "VALUES (:id, :org_id, :name, '10.00')"
+                        "VALUES (:id, :org_id, :name, :commission_pct)"
                     ),
-                    {"id": str(landlord_id), "org_id": str(organization_id), "name": name},
+                    {
+                        "id": str(landlord_id),
+                        "org_id": str(organization_id),
+                        "name": name,
+                        "commission_pct": commission_pct,
+                    },
                 )
             return landlord_id
+
+        async def create_renter_row(
+            self, *, organization_id: uuid.UUID, name: str = "Inquilino de prueba"
+        ) -> uuid.UUID:
+            renter_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO renters (id, organization_id, name) "
+                        "VALUES (:id, :org_id, :name)"
+                    ),
+                    {"id": str(renter_id), "org_id": str(organization_id), "name": name},
+                )
+            return renter_id
 
         async def create_property_row(
             self,
@@ -286,7 +302,7 @@ def seed(rsa_keypair):
             organization_id: uuid.UUID,
             landlord_id: uuid.UUID,
             address: str = "Av. Test 123",
-            status: str = "available",
+            status: str = "rented",
         ) -> uuid.UUID:
             property_id = uuid.uuid4()
             session_factory = get_session_factory()
@@ -307,13 +323,187 @@ def seed(rsa_keypair):
                 )
             return property_id
 
-        async def create_property(self, *, organization_id: uuid.UUID) -> uuid.UUID:
-            """Atajo: propietario + propiedad de un solo golpe (los tests de
-            mantenimiento no necesitan variar el propietario)."""
-            landlord_id = await self.create_landlord_row(organization_id=organization_id)
-            return await self.create_property_row(
-                organization_id=organization_id, landlord_id=landlord_id
-            )
+        async def create_contract_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            property_id: uuid.UUID,
+            renter_id: uuid.UUID,
+            currency: str = "ARS",
+            initial_amount: str = "100000.00",
+            current_amount: str | None = None,
+            start_date: str = "2026-01-01",
+            end_date: str = "2027-01-01",
+            daily_late_fee_pct: str = "0.1",
+            status: str = "active",
+        ) -> uuid.UUID:
+            contract_id = uuid.uuid4()
+            current_amount = current_amount if current_amount is not None else initial_amount
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO contracts "
+                        "(id, organization_id, property_id, renter_id, currency, "
+                        "initial_amount, current_amount, start_date, end_date, "
+                        "daily_late_fee_pct, status) "
+                        "VALUES (:id, :org_id, :property_id, :renter_id, :currency, "
+                        ":initial_amount, :current_amount, :start_date, :end_date, "
+                        ":daily_late_fee_pct, :status)"
+                    ),
+                    {
+                        "id": str(contract_id),
+                        "org_id": str(organization_id),
+                        "property_id": str(property_id),
+                        "renter_id": str(renter_id),
+                        "currency": currency,
+                        "initial_amount": initial_amount,
+                        "current_amount": current_amount,
+                        "start_date": date.fromisoformat(start_date),
+                        "end_date": date.fromisoformat(end_date),
+                        "daily_late_fee_pct": daily_late_fee_pct,
+                        "status": status,
+                    },
+                )
+            return contract_id
+
+        async def create_rent_period_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            contract_id: uuid.UUID,
+            period: str = "2026-06-01",
+            amount_due: str = "100000.00",
+            currency: str = "ARS",
+            status: str = "pending",
+            paid_total: str = "0.00",
+        ) -> uuid.UUID:
+            rent_period_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO rent_periods "
+                        "(id, organization_id, contract_id, period, amount_due, currency, "
+                        "status, paid_total) "
+                        "VALUES (:id, :org_id, :contract_id, :period, :amount_due, :currency, "
+                        ":status, :paid_total)"
+                    ),
+                    {
+                        "id": str(rent_period_id),
+                        "org_id": str(organization_id),
+                        "contract_id": str(contract_id),
+                        "period": date.fromisoformat(period),
+                        "amount_due": amount_due,
+                        "currency": currency,
+                        "status": status,
+                        "paid_total": paid_total,
+                    },
+                )
+            return rent_period_id
+
+        async def create_payment_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            rent_period_id: uuid.UUID,
+            created_by: uuid.UUID,
+            payment_date: str = "2026-06-05",
+            method: str = "cash",
+            payment_currency: str = "ARS",
+            amount: str = "1000.00",
+            exchange_rate: str | None = None,
+            destination: str = "agency_account",
+            charged_interest: str = "0.00",
+            voided_at: str | None = None,
+        ) -> uuid.UUID:
+            payment_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO payments "
+                        "(id, organization_id, rent_period_id, payment_date, method, "
+                        "payment_currency, amount, exchange_rate, destination, "
+                        "charged_interest, voided_at, created_by) "
+                        "VALUES (:id, :org_id, :rent_period_id, :payment_date, :method, "
+                        ":payment_currency, :amount, :exchange_rate, :destination, "
+                        ":charged_interest, :voided_at, :created_by)"
+                    ),
+                    {
+                        "id": str(payment_id),
+                        "org_id": str(organization_id),
+                        "rent_period_id": str(rent_period_id),
+                        "payment_date": date.fromisoformat(payment_date),
+                        "method": method,
+                        "payment_currency": payment_currency,
+                        "amount": amount,
+                        "exchange_rate": exchange_rate,
+                        "destination": destination,
+                        "charged_interest": charged_interest,
+                        "voided_at": voided_at,
+                        "created_by": str(created_by),
+                    },
+                )
+            return payment_id
+
+        async def create_recurring_charge_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            property_id: uuid.UUID,
+            charge_type: str = "rentas",
+            label: str = "Rentas",
+            is_active: bool = True,
+        ) -> uuid.UUID:
+            recurring_charge_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO recurring_charges "
+                        "(id, organization_id, property_id, charge_type, label, is_active) "
+                        "VALUES (:id, :org_id, :property_id, :charge_type, :label, :is_active)"
+                    ),
+                    {
+                        "id": str(recurring_charge_id),
+                        "org_id": str(organization_id),
+                        "property_id": str(property_id),
+                        "charge_type": charge_type,
+                        "label": label,
+                        "is_active": is_active,
+                    },
+                )
+            return recurring_charge_id
+
+        async def create_charge_entry_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            recurring_charge_id: uuid.UUID,
+            created_by: uuid.UUID,
+            period: str = "2026-06-01",
+            amount: str = "5000.00",
+        ) -> uuid.UUID:
+            charge_entry_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO charge_entries "
+                        "(id, organization_id, recurring_charge_id, period, amount, created_by) "
+                        "VALUES (:id, :org_id, :recurring_charge_id, :period, :amount, :created_by)"
+                    ),
+                    {
+                        "id": str(charge_entry_id),
+                        "org_id": str(organization_id),
+                        "recurring_charge_id": str(recurring_charge_id),
+                        "period": date.fromisoformat(period),
+                        "amount": amount,
+                        "created_by": str(created_by),
+                    },
+                )
+            return charge_entry_id
 
         async def create_work_order_row(
             self,
@@ -321,9 +511,9 @@ def seed(rsa_keypair):
             organization_id: uuid.UUID,
             property_id: uuid.UUID,
             created_by: uuid.UUID,
-            title: str = "Arreglar caneria",
             payer: str = "agency",
-            status: str = "open",
+            status: str = "closed",
+            final_cost: str = "2000.00",
             settled_in_settlement_id: str | None = None,
         ) -> uuid.UUID:
             work_order_id = uuid.uuid4()
@@ -333,149 +523,41 @@ def seed(rsa_keypair):
                     sa.text(
                         "INSERT INTO work_orders "
                         "(id, organization_id, property_id, title, payer, status, "
-                        "settled_in_settlement_id, created_by) "
-                        "VALUES (:id, :org_id, :property_id, :title, :payer, :status, "
-                        ":settled_in_settlement_id, :created_by)"
+                        "final_cost, settled_in_settlement_id, created_by) "
+                        "VALUES (:id, :org_id, :property_id, 'Reparacion de prueba', :payer, "
+                        ":status, :final_cost, :settled_in_settlement_id, :created_by)"
                     ),
                     {
                         "id": str(work_order_id),
                         "org_id": str(organization_id),
                         "property_id": str(property_id),
-                        "title": title,
                         "payer": payer,
                         "status": status,
+                        "final_cost": final_cost,
                         "settled_in_settlement_id": settled_in_settlement_id,
                         "created_by": str(created_by),
                     },
                 )
             return work_order_id
 
-        async def create_settlement_row(
-            self, *, organization_id: uuid.UUID, generated_by: uuid.UUID
-        ) -> uuid.UUID:
-            """Issue #29: fila minima de `settlements` -- solo para poder
-            referenciar `work_orders.settled_in_settlement_id` (FK real)
-            en los tests de `is_work_order_settled` (RN-L04). No pasa por
-            el flujo de calculo real (fuera de alcance de este modulo)."""
-            landlord_id = uuid.uuid4()
-            settlement_id = uuid.uuid4()
+        async def get_settlement_row(self, settlement_id: uuid.UUID) -> dict:
             session_factory = get_session_factory()
-            async with session_factory() as session, session.begin():
-                await session.execute(
-                    sa.text(
-                        "INSERT INTO landlords (id, organization_id, name, commission_pct) "
-                        "VALUES (:id, :org_id, 'Propietario de prueba', 10.00)"
-                    ),
-                    {"id": str(landlord_id), "org_id": str(organization_id)},
+            async with session_factory() as session:
+                result = await session.execute(
+                    sa.text("SELECT * FROM settlements WHERE id = :id"), {"id": str(settlement_id)}
                 )
-                await session.execute(
-                    sa.text(
-                        "INSERT INTO settlements "
-                        "(id, organization_id, landlord_id, period, commission_pct_used, generated_by) "
-                        "VALUES (:id, :org_id, :landlord_id, '2026-06-01', 10.00, :generated_by)"
-                    ),
-                    {
-                        "id": str(settlement_id),
-                        "org_id": str(organization_id),
-                        "landlord_id": str(landlord_id),
-                        "generated_by": str(generated_by),
-                    },
-                )
-            return settlement_id
+                return dict(result.mappings().one())
 
-        async def create_quote_row(
-            self,
-            *,
-            organization_id: uuid.UUID,
-            work_order_id: uuid.UUID,
-            submitted_by: uuid.UUID,
-            amount: str = "1000.00",
-            status: str = "submitted",
-        ) -> uuid.UUID:
-            quote_id = uuid.uuid4()
-            session_factory = get_session_factory()
-            async with session_factory() as session, session.begin():
-                await session.execute(
-                    sa.text(
-                        "INSERT INTO work_order_quotes "
-                        "(id, organization_id, work_order_id, amount, status, submitted_by) "
-                        "VALUES (:id, :org_id, :work_order_id, :amount, :status, :submitted_by)"
-                    ),
-                    {
-                        "id": str(quote_id),
-                        "org_id": str(organization_id),
-                        "work_order_id": str(work_order_id),
-                        "amount": amount,
-                        "status": status,
-                        "submitted_by": str(submitted_by),
-                    },
-                )
-            return quote_id
-
-        async def set_approved_quote(
-            self, *, work_order_id: uuid.UUID, quote_id: uuid.UUID
-        ) -> None:
-            """Wiring manual de `work_orders.approved_quote_id` -- los
-            tests que siembran una cotizacion `status='approved'`
-            directamente en DB (sin pasar por
-            `WorkOrderQuoteService.approve`) necesitan setear esta FK a
-            mano, igual que en el flujo real."""
-            session_factory = get_session_factory()
-            async with session_factory() as session, session.begin():
-                await session.execute(
-                    sa.text("UPDATE work_orders SET approved_quote_id = :quote_id WHERE id = :id"),
-                    {"quote_id": str(quote_id), "id": str(work_order_id)},
-                )
-
-        async def get_work_order(self, work_order_id: uuid.UUID) -> dict:
+        async def get_work_order_row(self, work_order_id: uuid.UUID) -> dict:
             session_factory = get_session_factory()
             async with session_factory() as session:
                 result = await session.execute(
                     sa.text(
-                        "SELECT status, final_cost, approved_quote_id FROM work_orders "
-                        "WHERE id = :id"
+                        "SELECT status, settled_in_settlement_id FROM work_orders WHERE id = :id"
                     ),
                     {"id": str(work_order_id)},
                 )
-                row = result.mappings().one()
-                return dict(row)
-
-        async def get_quote(self, quote_id: uuid.UUID) -> dict:
-            session_factory = get_session_factory()
-            async with session_factory() as session:
-                result = await session.execute(
-                    sa.text("SELECT status FROM work_order_quotes WHERE id = :id"),
-                    {"id": str(quote_id)},
-                )
-                row = result.mappings().one()
-                return dict(row)
-
-        async def notification_rows(
-            self, organization_id: uuid.UUID, event_type: str
-        ) -> list[dict]:
-            session_factory = get_session_factory()
-            async with session_factory() as session:
-                result = await session.execute(
-                    sa.text(
-                        "SELECT user_id, payload FROM notifications "
-                        "WHERE organization_id = :org_id AND event_type = :event_type "
-                        "ORDER BY created_at"
-                    ),
-                    {"org_id": str(organization_id), "event_type": event_type},
-                )
-                return [dict(row._mapping) for row in result]
-
-        async def audit_rows(self, organization_id: uuid.UUID, action: str) -> list[dict]:
-            session_factory = get_session_factory()
-            async with session_factory() as session:
-                result = await session.execute(
-                    sa.text(
-                        "SELECT entity_id, user_id, before_state, after_state FROM audit_logs "
-                        "WHERE organization_id = :org_id AND action = :action ORDER BY created_at"
-                    ),
-                    {"org_id": str(organization_id), "action": action},
-                )
-                return [dict(row._mapping) for row in result]
+                return dict(result.mappings().one())
 
     return Seeder()
 
@@ -483,15 +565,3 @@ def seed(rsa_keypair):
 @pytest.fixture()
 def auth_headers():
     return _auth_headers
-
-
-# Un jpg minimo (1x1) valido para content_type "image/jpeg" en los tests
-# de attachments -- no necesita ser un jpg decodificable de verdad, el
-# service solo valida `content_type` (no inspecciona bytes de imagen).
-TINY_JPEG_BYTES = bytes.fromhex(
-    "ffd8ffe000104a46494600010100000100010000ffdb004300030202020202"
-    "03020202030303030406040404040408060605060909080a0a090809090a0c"
-    "0f0c0a0b0e0b09090d110d0e0f101011100a0c12131210130f101010ffc9000b"
-    "080001000101011100ffcc0006001005050500ffda0008010100003f00d2cf"
-    "20ffd9"
-)

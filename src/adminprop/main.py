@@ -28,6 +28,7 @@ from adminprop.modules.properties.router import (
     properties_router,
     service_accounts_router,
 )
+from adminprop.modules.settlements.router import router as settlements_router
 from adminprop.modules.superadmin.router import router as superadmin_router
 from adminprop.shared.errors.handlers import register_exception_handlers
 from adminprop.shared.logging import RequestContextMiddleware, setup_logging
@@ -62,6 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(property_recurring_charges_router)
     app.include_router(recurring_charges_router)
     app.include_router(charge_entries_router)
+    app.include_router(settlements_router)
     return app
 
 

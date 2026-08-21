@@ -2,20 +2,14 @@
 ya liquidado no puede cancelarse ni reabrirse"
 (spec_module_06_mantenimiento.md §RF-05, RN-04).
 
-`work_orders.settled_in_settlement_id` (Capa 6, issue #27) todavia no
-existe -- mismo patron que `modules/payments/settlement_hook.py` documenta
-para Modulo 5: la firma final queda lista para que
-`WorkOrderService.cancel` la invoque sin cambios cuando la columna
-exista (issue #27 agrega la columna + reemplaza el cuerpo de esta
-funcion por `work_order.settled_in_settlement_id is not None`).
-
-CONCERN documentado en el PR (ver reporte de la sesion): hasta que exista
-esa columna, la UNICA senal disponible hoy para aproximar "ya liquidado"
-es `status == 'closed'` -- esto es mas estricto que el spec final (un
-pedido `closed` con `payer='landlord'` nunca se liquida via el modulo de
-liquidaciones, pero igual queda bloqueado para cancelar/reabrir bajo esta
-aproximacion). Se documenta como limitacion conocida en vez de dejar
-`cancel()` sin ninguna proteccion para pedidos cerrados.
+Issue #29 (Modulo 5, liquidaciones): `work_orders.settled_in_settlement_id`
+ya esta mapeada en el modelo ORM (`modules/maintenance/models.py.WorkOrder`)
+y `SettlementRepository.apply_calculation` la estampa cuando una
+reparacion `closed`/`payer=agency` se incluye en una liquidacion (RN-L04).
+Cierra el CONCERN que dejo el issue #26: la aproximacion `status ==
+'closed'` (mas estricta que el spec real -- bloqueaba tambien pedidos
+`payer='landlord'`, que nunca se liquidan via este modulo) queda
+reemplazada por la senal real.
 """
 
 from __future__ import annotations
@@ -24,7 +18,8 @@ from adminprop.modules.maintenance.models import WorkOrder
 
 
 def is_work_order_settled(work_order: WorkOrder) -> bool:
-    """Aproximacion documentada (ver docstring del modulo): hasta que
-    exista `settled_in_settlement_id` (issue #27), todo pedido `closed`
-    se trata como si ya estuviera liquidado a efectos de CA-06-07."""
-    return work_order.status == "closed"
+    """RN-L04: un pedido queda "ya liquidado" cuando quedo vinculado a una
+    liquidacion (`settled_in_settlement_id IS NOT NULL`) -- la senal real,
+    ya no la aproximacion por `status == 'closed'` (issue #26 CONCERN,
+    cerrado en el issue #29)."""
+    return work_order.settled_in_settlement_id is not None
