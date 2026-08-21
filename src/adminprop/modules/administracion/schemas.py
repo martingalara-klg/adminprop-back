@@ -150,6 +150,46 @@ def _cuit_check_digit(digits: str) -> int:
     return check
 
 
+# ─── Visor del log de auditoria (RF-05) ─────────────────────────────────
+
+
+class AuditLogEntry(BaseModel):
+    """Item de GET /v1/audit-logs y GET /v1/audit-logs/:id.
+
+    RF-05: "Muestra: quien, que accion, sobre que entidad, valores
+    anterior/nuevo, request_id y fecha." `user_email` es una
+    conveniencia del visor (LEFT JOIN sobre `users`, identidad global sin
+    RLS) para no forzar al frontend a resolver el email a partir de
+    `user_id` con otra llamada -- no persiste en `audit_logs` (sdd_02
+    §2.17 no lo lista como columna).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    user_id: UUID | None
+    user_email: str | None
+    action: str
+    entity_type: str
+    entity_id: UUID | None
+    before_state: dict | list | None
+    after_state: dict | list | None
+    request_id: str | None
+    created_at: datetime
+
+
+class AuditLogResponse(BaseModel):
+    data: AuditLogEntry
+
+
+class AuditLogListResponse(BaseModel):
+    """RF-05 / CA-07-06: paginacion `page`/`page_size` -- unica excepcion
+    de `sdd_03` §Paginacion (el resto de la API es cursor-based)."""
+
+    data: list[AuditLogEntry]
+    meta: dict
+
+
 class OrganizationSettingsUpdate(BaseModel):
     """Body de PUT /v1/organization/settings.
 
