@@ -51,6 +51,17 @@ class WorkOrder(Base):
     approved_quote_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("work_order_quotes.id")
     )
+    # FK declarada a nivel ORM (la migracion #27, capa 6, ya la crea via
+    # ALTER TABLE posterior -- mismo motivo que `approved_quote_id`
+    # arriba). Sin `ForeignKey("settlements.id")` -- `settlements` no
+    # tiene su modelo ORM cargado antes que este (mismo motivo
+    # documentado en `modules/people/models.py.Landlord.organization_id`
+    # para `organizations`: `NoReferencedTableError` si la tabla referida
+    # no esta en `Base.metadata` al resolver el mapper). RN-L04 (issue
+    # #29): NULL mientras la reparacion no fue incluida en ninguna
+    # liquidacion; `SettlementRepository.gather_generation_data` filtra
+    # `IS NULL` y `apply_calculation` la estampa al generar.
+    settled_in_settlement_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     created_by: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(

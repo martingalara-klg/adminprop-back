@@ -324,6 +324,7 @@ def seed(rsa_keypair):
             title: str = "Arreglar caneria",
             payer: str = "agency",
             status: str = "open",
+            settled_in_settlement_id: str | None = None,
         ) -> uuid.UUID:
             work_order_id = uuid.uuid4()
             session_factory = get_session_factory()
@@ -331,8 +332,10 @@ def seed(rsa_keypair):
                 await session.execute(
                     sa.text(
                         "INSERT INTO work_orders "
-                        "(id, organization_id, property_id, title, payer, status, created_by) "
-                        "VALUES (:id, :org_id, :property_id, :title, :payer, :status, :created_by)"
+                        "(id, organization_id, property_id, title, payer, status, "
+                        "settled_in_settlement_id, created_by) "
+                        "VALUES (:id, :org_id, :property_id, :title, :payer, :status, "
+                        ":settled_in_settlement_id, :created_by)"
                     ),
                     {
                         "id": str(work_order_id),
@@ -341,10 +344,44 @@ def seed(rsa_keypair):
                         "title": title,
                         "payer": payer,
                         "status": status,
+                        "settled_in_settlement_id": settled_in_settlement_id,
                         "created_by": str(created_by),
                     },
                 )
             return work_order_id
+
+        async def create_settlement_row(
+            self, *, organization_id: uuid.UUID, generated_by: uuid.UUID
+        ) -> uuid.UUID:
+            """Issue #29: fila minima de `settlements` -- solo para poder
+            referenciar `work_orders.settled_in_settlement_id` (FK real)
+            en los tests de `is_work_order_settled` (RN-L04). No pasa por
+            el flujo de calculo real (fuera de alcance de este modulo)."""
+            landlord_id = uuid.uuid4()
+            settlement_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO landlords (id, organization_id, name, commission_pct) "
+                        "VALUES (:id, :org_id, 'Propietario de prueba', 10.00)"
+                    ),
+                    {"id": str(landlord_id), "org_id": str(organization_id)},
+                )
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO settlements "
+                        "(id, organization_id, landlord_id, period, commission_pct_used, generated_by) "
+                        "VALUES (:id, :org_id, :landlord_id, '2026-06-01', 10.00, :generated_by)"
+                    ),
+                    {
+                        "id": str(settlement_id),
+                        "org_id": str(organization_id),
+                        "landlord_id": str(landlord_id),
+                        "generated_by": str(generated_by),
+                    },
+                )
+            return settlement_id
 
         async def create_quote_row(
             self,
