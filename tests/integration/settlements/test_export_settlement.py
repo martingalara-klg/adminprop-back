@@ -70,7 +70,7 @@ class TestExportSettlement:
     """CA-05-07: "el export Excel y el PDF ... quedan descargables desde
     el detalle"."""
 
-    async def test_export_xlsx_downloads_valid_workbook(self, client, seed):
+    async def test_ca_05_07_export_xlsx_downloads_valid_workbook(self, client, seed):
         _org, owner, settlement_id = await _seed_generated_settlement(seed)
 
         response = await client.get(

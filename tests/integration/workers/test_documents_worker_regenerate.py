@@ -82,7 +82,7 @@ class TestCa0505RepairNotDoubleDeducted:
     veces" -- RN-L04: la reparacion sigue contando en ESTA liquidacion al
     regenerar (no desaparece), pero nunca se duplica ni la toma otra."""
 
-    async def test_repair_survives_regeneration_without_double_counting(self, seed):
+    async def test_ca_05_05_repair_survives_regeneration_without_double_counting(self, seed):
         ctx = await _Ctx(seed).build()
         rent_period = await seed.create_rent_period_row(
             organization_id=ctx["org_id"], contract_id=ctx["contract_id"], period="2026-06-01"
@@ -173,7 +173,7 @@ class TestCa0506RegenerationRecomputesAndAudits:
     """CA-05-06: "al regenerar, los totales se recomputan,
     regenerated_count incrementa y la auditoria registra el cambio"."""
 
-    async def test_voided_payment_reduces_total_collected_on_regenerate(self, seed):
+    async def test_ca_05_06_voided_payment_reduces_total_collected_on_regenerate(self, seed):
         ctx = await _Ctx(seed).build()
         rent_period = await seed.create_rent_period_row(
             organization_id=ctx["org_id"],
