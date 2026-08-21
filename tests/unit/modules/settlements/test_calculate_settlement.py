@@ -184,8 +184,11 @@ class TestCa0504AlreadySettled:
         assert line.source_entity_id == payment_id
         assert line.amount_ars == Decimal("50000.00")
 
-    def test_commission_base_includes_both_administration_and_landlord_account(self):
-        """RN-L02: "incluidos los cobrados directo por el dueño"."""
+    def test_ca_04_08_landlord_account_payment_pays_commission(self):
+        """CA-04-08: "Un cobro con destino 'cuenta del propietario' aparece
+        en la liquidación como 'ya rendido': descuenta del neto pero paga
+        comisión (verificable en Módulo 5)." RN-L02: "incluidos los
+        cobrados directo por el dueño"."""
         admin_payment_id = uuid.uuid4()
         direct_payment_id = uuid.uuid4()
         data = _empty_data(
@@ -235,7 +238,7 @@ class TestWarnings:
         )
         assert result.warnings == []
 
-    def test_unpaid_period_and_missing_charge_produce_warnings(self):
+    def test_ca_05_03_unpaid_period_and_missing_charge_produce_warnings(self):
         from adminprop.modules.settlements.repository import (
             MissingChargeEntryRow,
             UnpaidRentPeriodRow,
