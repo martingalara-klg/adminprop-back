@@ -96,8 +96,9 @@ async def test_ca_nt_indice_parcial_del_spec_existe():
     )
 
 
-async def test_ca_nt_event_type_check_tiene_los_5_valores_del_mvp():
-    """spec_notificaciones.md "Eventos del MVP": exactamente estos 5."""
+async def test_ca_nt_event_type_check_tiene_los_6_valores_del_mvp():
+    """spec_notificaciones.md v1.1 "Eventos del MVP": exactamente estos 6
+    (issue #31 agrego `quote_approved`, decision #115)."""
     engine = get_engine()
     async with engine.connect() as conn:
         result = await conn.execute(
