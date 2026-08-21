@@ -367,7 +367,9 @@ class SettlementService:
         (ya incluido siempre en `line_items`, sdd_03 §11: "consolidated
         ... devuelve los totales + detalle plano")."""
         if scope not in _VALID_SCOPES:
-            raise ValidationError(field="scope", message="scope debe ser consolidated o per_property.")
+            raise ValidationError(
+                field="scope", message="scope debe ser consolidated o per_property."
+            )
 
         settlement = await self._repo.get_by_id(settlement_id, organization_id)
         if settlement is None:

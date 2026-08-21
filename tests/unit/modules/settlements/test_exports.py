@@ -51,18 +51,18 @@ class _Settlement:
 
 
 def _settlement(**overrides) -> _Settlement:
-    defaults = dict(
-        id=uuid.uuid4(),
-        period=date(2026, 6, 1),
-        exchange_rate=None,
-        total_collected=Decimal("180000.00"),
-        commission_total=Decimal("18000.00"),
-        charges_total=Decimal("5000.00"),
-        repairs_total=Decimal("2000.00"),
-        already_settled_total=Decimal("0.00"),
-        net_amount=Decimal("155000.00"),
-        regenerated_count=0,
-    )
+    defaults = {
+        "id": uuid.uuid4(),
+        "period": date(2026, 6, 1),
+        "exchange_rate": None,
+        "total_collected": Decimal("180000.00"),
+        "commission_total": Decimal("18000.00"),
+        "charges_total": Decimal("5000.00"),
+        "repairs_total": Decimal("2000.00"),
+        "already_settled_total": Decimal("0.00"),
+        "net_amount": Decimal("155000.00"),
+        "regenerated_count": 0,
+    }
     defaults.update(overrides)
     return _Settlement(**defaults)
 
@@ -73,11 +73,11 @@ class TestGroupLineItemsByProperty:
 
     def test_groups_items_by_property_and_computes_subtotal(self):
         items = [
-            _LineItem("rent_collected", _PROPERTY_A, Decimal("100000"), "ARS", Decimal("100000.00")),
-            _LineItem("tax_charge", _PROPERTY_A, Decimal("5000"), "ARS", Decimal("5000.00")),
-            _LineItem("rent_collected", _PROPERTY_B, Decimal("80000"), "ARS", Decimal("80000.00")),
-            _LineItem("repair", _PROPERTY_B, Decimal("2000"), "ARS", Decimal("2000.00")),
-            _LineItem("commission", None, Decimal("18000"), "ARS", Decimal("18000.00")),
+            _LineItem("rent_collected", _PROPERTY_A, Decimal(100000), "ARS", Decimal("100000.00")),
+            _LineItem("tax_charge", _PROPERTY_A, Decimal(5000), "ARS", Decimal("5000.00")),
+            _LineItem("rent_collected", _PROPERTY_B, Decimal(80000), "ARS", Decimal("80000.00")),
+            _LineItem("repair", _PROPERTY_B, Decimal(2000), "ARS", Decimal("2000.00")),
+            _LineItem("commission", None, Decimal(18000), "ARS", Decimal("18000.00")),
         ]
         labels = {_PROPERTY_A: "Av. Test 123", _PROPERTY_B: "Belgrano 456"}
 
@@ -98,9 +98,7 @@ class TestGroupLineItemsByProperty:
         """RN-L01/RN-P07: "ya rendido" es informativo -- no afecta el
         subtotal de la propiedad."""
         items = [
-            _LineItem(
-                "already_settled", _PROPERTY_A, Decimal("50000"), "ARS", Decimal("50000.00")
-            ),
+            _LineItem("already_settled", _PROPERTY_A, Decimal(50000), "ARS", Decimal("50000.00")),
         ]
         groups, _general = group_line_items_by_property(items, {_PROPERTY_A: "Prop A"})
 
@@ -110,15 +108,15 @@ class TestGroupLineItemsByProperty:
 
     def test_unknown_property_id_falls_back_to_raw_uuid_label(self):
         items = [
-            _LineItem("rent_collected", _PROPERTY_A, Decimal("1000"), "ARS", Decimal("1000.00")),
+            _LineItem("rent_collected", _PROPERTY_A, Decimal(1000), "ARS", Decimal("1000.00")),
         ]
         groups, _general = group_line_items_by_property(items, {})
         assert groups[0].property_label == str(_PROPERTY_A)
 
     def test_groups_sorted_by_property_label(self):
         items = [
-            _LineItem("rent_collected", _PROPERTY_B, Decimal("1"), "ARS", Decimal("1.00")),
-            _LineItem("rent_collected", _PROPERTY_A, Decimal("1"), "ARS", Decimal("1.00")),
+            _LineItem("rent_collected", _PROPERTY_B, Decimal(1), "ARS", Decimal("1.00")),
+            _LineItem("rent_collected", _PROPERTY_A, Decimal(1), "ARS", Decimal("1.00")),
         ]
         labels = {_PROPERTY_A: "AAA", _PROPERTY_B: "ZZZ"}
         groups, _general = group_line_items_by_property(items, labels)
@@ -130,8 +128,8 @@ class TestBuildSettlementWorkbook:
 
     def test_workbook_contains_property_sections_and_consolidated_summary(self):
         items = [
-            _LineItem("rent_collected", _PROPERTY_A, Decimal("100000"), "ARS", Decimal("100000.00")),
-            _LineItem("commission", None, Decimal("10000"), "ARS", Decimal("10000.00")),
+            _LineItem("rent_collected", _PROPERTY_A, Decimal(100000), "ARS", Decimal("100000.00")),
+            _LineItem("commission", None, Decimal(10000), "ARS", Decimal("10000.00")),
         ]
         groups, general_items = group_line_items_by_property(items, {_PROPERTY_A: "Av. Test 123"})
         settlement = _settlement()
@@ -159,8 +157,8 @@ class TestBuildSettlementPdf:
 
     def test_pdf_contains_property_sections_and_consolidated_summary(self):
         items = [
-            _LineItem("rent_collected", _PROPERTY_A, Decimal("100000"), "ARS", Decimal("100000.00")),
-            _LineItem("commission", None, Decimal("10000"), "ARS", Decimal("10000.00")),
+            _LineItem("rent_collected", _PROPERTY_A, Decimal(100000), "ARS", Decimal("100000.00")),
+            _LineItem("commission", None, Decimal(10000), "ARS", Decimal("10000.00")),
         ]
         groups, general_items = group_line_items_by_property(items, {_PROPERTY_A: "Av. Test 123"})
         settlement = _settlement()

@@ -361,7 +361,9 @@ async def _regenerate_settlement_async(
             # RN-L05: `commission_pct_used` NO se re-congela en una
             # regeneracion (el % vigente se congela solo al GENERAR,
             # RF-02) -- se reutiliza el valor ya persistido.
-            effective_rate = exchange_rate if exchange_rate is not None else settlement.exchange_rate
+            effective_rate = (
+                exchange_rate if exchange_rate is not None else settlement.exchange_rate
+            )
             result = calculate_settlement(
                 data=gathered,
                 commission_pct=settlement.commission_pct_used,

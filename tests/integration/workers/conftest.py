@@ -351,9 +351,7 @@ def seed():
             session_factory = get_session_factory()
             async with session_factory() as session:
                 result = await session.execute(
-                    sa.text(
-                        "SELECT * FROM attachments WHERE entity_id = :id ORDER BY created_at"
-                    ),
+                    sa.text("SELECT * FROM attachments WHERE entity_id = :id ORDER BY created_at"),
                     {"id": str(entity_id)},
                 )
                 return [dict(row._mapping) for row in result]

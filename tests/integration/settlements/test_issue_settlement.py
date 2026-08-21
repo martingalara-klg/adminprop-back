@@ -132,8 +132,7 @@ class TestIssueSettlement:
 
     async def test_maintenance_role_cannot_issue_settlement(self, client, seed):
         """RN-A01: `maintenance` no tiene `settlement:issue`."""
-        _org, owner, _landlord_id, settlement_id = await _seed_and_generate(client, seed)
-        org = _org
+        org, _owner, _landlord_id, settlement_id = await _seed_and_generate(client, seed)
         maintenance = await seed.add_member(
             organization_id=org["organization_id"],
             role_id=org["roles"]["maintenance"],
