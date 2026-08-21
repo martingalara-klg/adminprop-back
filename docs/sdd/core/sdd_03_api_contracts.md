@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.2
+version: 1.3
 fecha: 2026-08-14
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.2
+**Versión:** 1.3
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -256,6 +256,9 @@ POST   /notifications/read-all
 GET    /audit-logs                       (page + page_size; filtros: entity_type, entity_id, user_id, action, date range)
 GET    /audit-logs/:id
 ```
+
+- `meta` de la paginación page/page_size: `{ total, page, page_size }` (v1.3 — documenta lo implementado en el issue #32).
+- Cada entrada incluye `user_email` (derivado de `users` por conveniencia del visor, solo lectura — el "quién" de RF-05) además de `user_id`, `before_state`/`after_state`, `request_id` y `created_at`.
 
 ---
 
