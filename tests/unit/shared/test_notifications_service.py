@@ -21,21 +21,23 @@ from adminprop.shared.notifications.service import (
 
 
 class TestEventRecipientRoutingTable:
-    """RN-01: la tabla de enrutamiento cubre exactamente los 5 eventos
-    del MVP (spec_notificaciones.md "Eventos del MVP y enrutamiento por
-    rol")."""
+    """RN-01: la tabla de enrutamiento cubre exactamente los 6 eventos
+    del MVP (spec_notificaciones.md v1.1 "Eventos del MVP y enrutamiento
+    por rol" -- issue #31 agrego `quote_approved`, decision #115)."""
 
-    def test_covers_exactly_the_5_mvp_events(self):
+    def test_covers_exactly_the_6_mvp_events(self):
         assert set(EVENT_RECIPIENT_ROLES) == {
             "adjustment_pending",
             "contract_expiring",
             "quote_submitted",
+            "quote_approved",
             "work_order_created",
             "work_order_closed",
         }
 
-    def test_work_order_created_routes_to_maintenance_only(self):
-        assert EVENT_RECIPIENT_ROLES["work_order_created"] == ("maintenance",)
+    @pytest.mark.parametrize("event_type", ["work_order_created", "quote_approved"])
+    def test_maintenance_only_events_route_to_maintenance_only(self, event_type):
+        assert EVENT_RECIPIENT_ROLES[event_type] == ("maintenance",)
 
     @pytest.mark.parametrize(
         "event_type",
