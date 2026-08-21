@@ -185,9 +185,7 @@ class TestCA0706FilterByEntityAndUser:
         assert response.status_code == 200
         assert response.json()["meta"]["page_size"] == 50
 
-    async def test_list_audit_logs_page_size_above_100_returns_validation_error(
-        self, client, seed
-    ):
+    async def test_list_audit_logs_page_size_above_100_returns_validation_error(self, client, seed):
         """sdd_03 §16: maximo 100 -- Pydantic/FastAPI rechaza con
         400 VALIDATION_ERROR (sdd_03 §"Codigos de Error Globales") antes
         de tocar el repository."""

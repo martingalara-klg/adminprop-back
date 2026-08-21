@@ -214,9 +214,7 @@ class TestAuditLogCrossTenantIsolation:
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "NOT_FOUND"
 
-    async def test_list_audit_logs_never_returns_another_organizations_events(
-        self, client, seed
-    ):
+    async def test_list_audit_logs_never_returns_another_organizations_events(self, client, seed):
         _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
         _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
 
