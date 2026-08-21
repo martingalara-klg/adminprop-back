@@ -1,10 +1,11 @@
-"""Logica de negocio del ciclo de mantenimiento (issue #26).
+"""Logica de negocio del ciclo de mantenimiento (issue #26, cierre en el #31).
 
 SDD: docs/sdd/features/spec_module_06_mantenimiento.md §RF-01..RF-06.
 Implements: CA-06-01 (alta + notificacion a maintenance), CA-06-02
 (cotizaciones + notificacion a owner/admin), CA-06-03 (aprobacion,
-RN-02), CA-06-04 (cierre + notificacion), CA-06-05 (historial por
-propiedad), CA-06-07 (RN-04, bloqueo de cancelacion/reapertura via
+RN-02, notificacion `quote_approved` al encargado), CA-06-04 (cierre +
+notificacion), CA-06-05 (historial por propiedad), CA-06-07 (RN-04,
+bloqueo de cancelacion/reapertura via
 `settlement_hook.is_work_order_settled`).
 
 CA-06-06 (accesos denegados del rol maintenance a otros modulos) NO se
@@ -13,18 +14,14 @@ implementa aca: ya lo enforza `shared/rbac.requires_permission` +
 -- este modulo solo aporta los tests que lo verifican contra los otros
 routers (ver "Decisiones de implementacion" del PR).
 
-CONCERN documentado en el PR: CA-06-03 pide "el encargado es notificado"
-al aprobarse una cotizacion, pero el CHECK de `notifications.event_type`
-(migracion `20260814_201500_create_notifications.py`, issue #11) solo
-admite `adjustment_pending`, `contract_expiring`, `quote_submitted`,
-`work_order_created`, `work_order_closed` -- NO existe un evento
-`quote_approved` en el enum, y agregarlo requeriria una migracion ALTER
-fuera de alcance de este issue (ver CLAUDE.md §8 "Nunca hacer sin
-preguntar: modificar schema sin migracion"). `approve()` audita la
-aprobacion (`audit()`, trazable en `audit_logs`) pero NO llama a
-`notifications.emit(...)` para el encargado -- divergencia real entre
-`spec_module_06` (CA-06-03) y `spec_notificaciones.md`/el enum ya
-migrado, reportada como concern en vez de resuelta en silencio.
+Issue #31 cierra la brecha CA-06-03 documentada en el #26 (decision
+#115, spec_notificaciones.md v1.1): la migracion
+`20260821_100000_add_quote_approved_to_notifications.py` agrega el
+sexto valor `quote_approved` al CHECK de `notifications.event_type`, y
+`approve()` ahora llama a `notifications.emit(...)` para el encargado
+(usuarios `maintenance`, `EVENT_RECIPIENT_ROLES` en
+`shared/notifications/service.py`) en la MISMA transaccion que la
+aprobacion (RF-01), ademas de seguir auditando (`audit()`).
 """
 
 from __future__ import annotations
@@ -441,17 +438,22 @@ class WorkOrderQuoteService:
         return quote
 
     async def approve(
-        self, quote_id: UUID, organization_id: UUID, *, actor_user_id: UUID
+        self,
+        quote_id: UUID,
+        organization_id: UUID,
+        *,
+        actor_user_id: UUID,
+        request_id: str,
     ) -> tuple[WorkOrder, WorkOrderQuote]:
         """RF-03/CA-06-03: aprueba UNA cotizacion -- el pedido pasa a
         `in_progress`, las demas quedan `discarded` (RN-02). Reaprobar
         (misma u otra cotizacion del mismo pedido) -> 409
         QUOTE_ALREADY_APPROVED.
 
-        Ver el CONCERN documentado en el docstring del modulo: la
-        notificacion al encargado que pide CA-06-03 no se emite (el enum
-        de `notifications.event_type` no tiene `quote_approved`) -- se
-        audita la aprobacion en su lugar.
+        Issue #31: notifica al encargado (`quote_approved`, usuarios
+        `maintenance` de la organizacion) ademas de auditar -- mismo
+        patron que `create()`/`close()`/`add_quote()` (emit en la misma
+        transaccion, enqueue del email DESPUES del commit).
         """
         quote = await self._quote_repo.get_by_id(quote_id, organization_id)
         if quote is None:
@@ -491,7 +493,20 @@ class WorkOrderQuoteService:
             after={"status": "approved", "work_order_status": "in_progress"},
             user_id=actor_user_id,
         )
+
+        notification_ids = await notifications.emit(
+            self._quote_repo.session,
+            organization_id=organization_id,
+            event_type="quote_approved",
+            payload={
+                "work_order_id": str(quote.work_order_id),
+                "quote_id": str(quote_id),
+            },
+        )
         await self._quote_repo.commit()
+        notifications.enqueue_pending_emails(
+            notification_ids, organization_id=organization_id, request_id=request_id
+        )
         return updated_work_order, approved_quote
 
     async def upload_quote_attachment(

@@ -250,9 +250,10 @@ async def approve_quote(
     work_order_service: WorkOrderService = Depends(get_work_order_service),
 ) -> WorkOrderApproveResponse:
     """RF-03/CA-06-03: aprueba una cotizacion -- `open -> in_progress`,
-    las demas quedan `discarded`. Reaprobar -> 409 QUOTE_ALREADY_APPROVED."""
+    las demas quedan `discarded`. Reaprobar -> 409 QUOTE_ALREADY_APPROVED.
+    Issue #31: notifica `quote_approved` al encargado."""
     updated_work_order, _approved_quote = await quote_service.approve(
-        quote_id, organization_id, actor_user_id=payload.sub
+        quote_id, organization_id, actor_user_id=payload.sub, request_id=request_id_var.get()
     )
     detail = await work_order_service.get_detail(updated_work_order.id, organization_id)
     if detail is None:  # pragma: no cover -- defensivo, ya validado arriba
