@@ -151,3 +151,30 @@ class TestRegenerateSettlement:
 
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "NOT_FOUND"
+
+    async def test_settlement_read_only_user_cannot_regenerate(
+        self, client, seed, auth_headers, _mock_celery_apply_async
+    ):
+        """Regenerar recalcula y persiste totales -- es una operacion
+        mutante de la misma familia que `POST /generate` (RF-03), nunca
+        de solo lectura. `settlement:read` (sin `settlement:generate`)
+        debe recibir `403 FORBIDDEN`."""
+        _org, _owner, _landlord_id, _contract_id, settlement_id = await _seed_and_generate(
+            client, seed
+        )
+        read_only_user = await seed.create_user()
+        read_only_headers = auth_headers(
+            user_id=read_only_user["id"],
+            organization_id=_org["organization_id"],
+            role_name="read_only",
+            permissions=["settlement:read"],
+        )
+
+        response = await client.post(
+            f"/v1/settlements/{settlement_id}/regenerate",
+            json={},
+            headers=read_only_headers,
+        )
+
+        assert response.status_code == 403
+        _mock_celery_apply_async.assert_not_called()

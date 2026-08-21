@@ -4,14 +4,13 @@
 SDD: core/sdd_03_api_contracts.md §11 "Liquidaciones" +
 docs/sdd/features/spec_module_05_liquidaciones.md §RF-01/RF-02/RF-03/RF-04.
 
-Permiso `settlement:generate` para el POST /generate, `settlement:issue`
-para POST /issue, `settlement:read` para los GET y `POST /regenerate`
-(regenerar es una correccion sobre datos ya leidos, no una emision nueva
--- catalogo real de sdd_03 §"Catalogo de Permisos": no existe un
-`settlement:regenerate` atomico separado, y `settlement:generate` queda
-reservado a la generacion inicial por simetria con el resto del catalogo,
-que no distingue "crear" de "recalcular" para otros recursos regenerables
-como `charge-entries`)."""
+Permiso `settlement:generate` para el POST /generate Y para
+POST /regenerate (regenerar = generar de nuevo, RF-03: "para corregir se
+regenera la existente" -- misma familia mutante que la generacion
+inicial, catalogo real de sdd_03 §"Catalogo de Permisos": no existe un
+`settlement:regenerate` atomico separado). `settlement:issue` para
+POST /issue, `settlement:read` solo para los GET (nunca para una
+operacion que recalcula y persiste totales)."""
 
 from __future__ import annotations
 
@@ -269,21 +268,26 @@ async def issue_settlement(
     "/{settlement_id}/regenerate",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=SettlementRegenerateAccepted,
-    dependencies=[Depends(requires_permission("settlement:read"))],
+    dependencies=[Depends(requires_permission("settlement:generate"))],
 )
 async def regenerate_settlement(
     settlement_id: UUID,
     dto: SettlementRegenerateRequest,
     request: Request,
     organization_id: UUID = Depends(get_current_tenant),
-    payload: JWTPayload = Depends(requires_permission("settlement:read")),
+    payload: JWTPayload = Depends(requires_permission("settlement:generate")),
     service: SettlementService = Depends(get_settlement_service),
 ) -> SettlementRegenerateAccepted:
     """RF-03/RN-L03 + sdd_03 §11 "POST /settlements/:id/regenerate": 202,
     recalcula con los datos corregidos (cobros anulados/agregados, cargos
     corregidos, TC nuevo opcional). CA-05-06: `regenerated_count++` y
     queda auditado -- el calculo real corre en `documents_worker`, mismo
-    patron async que `POST /generate`."""
+    patron async que `POST /generate`.
+
+    Permiso `settlement:generate` (no `settlement:read`): regenerar
+    recalcula totales y persiste cambios -- es una operacion mutante de
+    la misma familia que `POST /generate` (RF-03: "para corregir se
+    regenera la existente"), nunca de solo lectura."""
     settlement = await service.regenerate(
         settlement_id=settlement_id,
         organization_id=organization_id,
