@@ -33,10 +33,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
+from tests.integration.e2e.conftest import seed_demo_organization
 
 from adminprop.workers.documents_worker import _generate_settlement_async
 from adminprop.workers.notification_worker import _generate_rent_periods_async
-from tests.integration.e2e.conftest import seed_demo_organization
 
 pytestmark = pytest.mark.asyncio
 
