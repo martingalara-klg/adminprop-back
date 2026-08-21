@@ -1,18 +1,24 @@
-"""tests/integration/maintenance/test_approve_quote.py -- issue #26.
+"""tests/integration/maintenance/test_approve_quote.py -- issue #26,
+notificacion `quote_approved` cableada en el #31.
 
-SDD: spec_module_06_mantenimiento.md §RF-03. Covers: CA-06-03.
-
-CONCERN (ver docstring de `modules/maintenance/service.py`): CA-06-03
-pide "el encargado es notificado" al aprobarse la cotizacion, pero el
-enum `notifications.event_type` (migracion #11) no tiene `quote_approved`
--- esta suite verifica la parte SI implementable (transicion de estado +
-409 en re-aprobacion + auditoria) y deja explicito que la notificacion al
-encargado NO se emite (divergencia documentada, no un olvido).
+SDD: spec_module_06_mantenimiento.md §RF-03 + infrastructure/
+spec_notificaciones.md v1.1. Covers: CA-06-03.
 """
 
 from __future__ import annotations
 
+import json
+
 import pytest
+
+
+def _payload(row: dict) -> dict:
+    """`notifications.payload` es JSONB -- normaliza str vs dict segun
+    como lo devuelva el driver (asyncpg auto-decodifica JSON/JSONB en la
+    mayoria de los casos, pero el helper es defensivo, mismo criterio que
+    `NotificationRepository._parse_payload`)."""
+    raw = row["payload"]
+    return json.loads(raw) if isinstance(raw, str) else raw
 
 
 async def _seed_work_order_with_two_quotes(seed):
@@ -118,6 +124,31 @@ class TestCA0603ApproveQuote:
 
         assert second.status_code == 409
         assert second.json()["error"]["code"] == "QUOTE_ALREADY_APPROVED"
+
+    @pytest.mark.asyncio
+    async def test_ca_06_03_approving_a_quote_notifies_maintenance_user(self, client, seed):
+        """CA-06-03 (parte diferida del #26, issue #31): "al aprobarse una
+        cotización, el encargado recibe la notificación `quote_approved`"
+        -- verifica la fila in-app, no distingue emisores del mismo
+        pedido (payload correcto)."""
+        (
+            org,
+            owner,
+            maintenance_user,
+            work_order_id,
+            quote_a_id,
+            _quote_b_id,
+        ) = await _seed_work_order_with_two_quotes(seed)
+
+        response = await client.post(f"/v1/quotes/{quote_a_id}/approve", headers=owner["headers"])
+        assert response.status_code == 200
+
+        rows = await seed.notification_rows(org["organization_id"], "quote_approved")
+        assert len(rows) == 1
+        assert rows[0]["user_id"] == maintenance_user["id"]
+        payload = _payload(rows[0])
+        assert payload["work_order_id"] == str(work_order_id)
+        assert payload["quote_id"] == str(quote_a_id)
 
     @pytest.mark.asyncio
     async def test_approve_unknown_quote_returns_404(self, client, seed):

@@ -1,22 +1,30 @@
-"""Acceso a datos de `notifications` (issue #11).
+"""Acceso a datos de `notifications` (issue #11, extendido en el #31).
 
-SDD: infrastructure/spec_data_model.md §Capa 7 "notifications".
+SDD: infrastructure/spec_data_model.md §Capa 7 "notifications" +
+     infrastructure/spec_notificaciones.md RF-02 (panel in-app).
 
 Mismo criterio que `shared/audit/repository.py` y
 `modules/administracion/repository.py`: SQL crudo via `text()` -- esta
-tabla todavía no tiene un dueño ORM (el panel in-app del issue #31 podría
-introducir un modelo SQLAlchemy si necesita queries más ricas).
+tabla todavía no tiene un dueño ORM. El issue #31 agrega los metodos del
+panel (`list_by_user`, `count_unread`, `mark_read`, `mark_all_read`,
+`commit`) aca mismo, no en un repository nuevo de `modules/notifications/`,
+para no duplicar el SQL de acceso a `notifications` -- ese modulo solo
+aporta router+service+schemas (ver docs/skills/module-structure.md).
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 import sqlalchemy as sa
+from fastapi import Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from adminprop.db.session import get_tenant_db_session
 
 # `none_as_null=True`: mismo motivo que `shared/audit/repository.py` --
 # sin esto, un `payload={}` se serializaria correctamente pero un valor
@@ -32,6 +40,17 @@ class RecipientRow:
 
     user_id: UUID
     email: str
+
+
+@dataclass(frozen=True)
+class NotificationRow:
+    """Fila propia del usuario para el panel in-app (RF-02, issue #31)."""
+
+    id: UUID
+    event_type: str
+    payload: dict
+    read_at: datetime | None
+    created_at: datetime
 
 
 @dataclass(frozen=True)
@@ -186,3 +205,134 @@ class NotificationRepository:
         if row is None:  # pragma: no cover -- defensivo
             return None
         return row.name, row.owner_email
+
+    # ─── RF-02: panel in-app (issue #31) ───────────────────────────────
+
+    async def list_by_user(
+        self, *, organization_id: UUID, user_id: UUID, unread_only: bool
+    ) -> list[NotificationRow]:
+        """RF-02: `GET /notifications` propias del usuario, mas recientes
+        primero. `?unread=true` filtra `read_at IS NULL`. Filtro EXPLICITO
+        de `organization_id` + `user_id` (RN-D01, defense in depth) --
+        nunca solo `user_id` (un `user_id` filtrado sin `organization_id`
+        bastaria por unicidad de PK, pero el filtro explicito es el
+        criterio del repo, ver docs/skills/tenant-isolation.md)."""
+        stmt = text(
+            f"""
+            SELECT id, event_type, payload, read_at, created_at
+            FROM notifications
+            WHERE organization_id = :organization_id
+              AND user_id = :user_id
+              {"AND read_at IS NULL" if unread_only else ""}
+            ORDER BY created_at DESC
+            """
+        )
+        result = await self._session.execute(
+            stmt, {"organization_id": str(organization_id), "user_id": str(user_id)}
+        )
+        return [
+            NotificationRow(
+                id=row.id,
+                event_type=row.event_type,
+                payload=_parse_payload(row.payload),
+                read_at=row.read_at,
+                created_at=row.created_at,
+            )
+            for row in result
+        ]
+
+    async def count_unread(self, *, organization_id: UUID, user_id: UUID) -> int:
+        """RF-02: badge -- cantidad de no leidas del usuario (cacheado 5
+        min por `shared/notifications/unread_cache.py`, sdd_04 §1.4)."""
+        stmt = text(
+            """
+            SELECT count(*) FROM notifications
+            WHERE organization_id = :organization_id
+              AND user_id = :user_id
+              AND read_at IS NULL
+            """
+        )
+        result = await self._session.execute(
+            stmt, {"organization_id": str(organization_id), "user_id": str(user_id)}
+        )
+        return result.scalar_one()
+
+    async def mark_read(
+        self, *, notification_id: UUID, organization_id: UUID, user_id: UUID
+    ) -> bool:
+        """RF-02: `POST /notifications/:id/read`. Filtro explicito por
+        `user_id` ademas de `organization_id`: una notificacion es propia
+        de UN destinatario -- un usuario no puede marcar como leida la de
+        otro miembro de la misma organizacion (RN-D01 aplicado tambien a
+        nivel de fila propia, no solo de tenant). Devuelve `False` si no
+        existe / es de otro usuario / de otra organizacion -- el service
+        mapea eso a 404 (no distingue los tres casos, mismo criterio
+        cross-tenant de `docs/skills/tenant-isolation.md`)."""
+        stmt = text(
+            """
+            UPDATE notifications SET read_at = now()
+            WHERE id = :id AND organization_id = :organization_id AND user_id = :user_id
+              AND read_at IS NULL
+            RETURNING id
+            """
+        )
+        result = await self._session.execute(
+            stmt,
+            {
+                "id": str(notification_id),
+                "organization_id": str(organization_id),
+                "user_id": str(user_id),
+            },
+        )
+        return result.first() is not None or await self._exists_already_read(
+            notification_id, organization_id, user_id
+        )
+
+    async def _exists_already_read(
+        self, notification_id: UUID, organization_id: UUID, user_id: UUID
+    ) -> bool:
+        """Idempotencia de `mark_read`: si la fila existe pero ya estaba
+        leida, el UPDATE de arriba no la toca (WHERE read_at IS NULL) --
+        sin este chequeo, marcar dos veces la misma notificacion
+        retornaria 404 en la segunda llamada, un falso negativo."""
+        stmt = text(
+            "SELECT 1 FROM notifications "
+            "WHERE id = :id AND organization_id = :organization_id AND user_id = :user_id"
+        )
+        result = await self._session.execute(
+            stmt,
+            {
+                "id": str(notification_id),
+                "organization_id": str(organization_id),
+                "user_id": str(user_id),
+            },
+        )
+        return result.first() is not None
+
+    async def mark_all_read(self, *, organization_id: UUID, user_id: UUID) -> int:
+        """RF-02: `POST /notifications/read-all` -- marca TODAS las no
+        leidas del usuario, devuelve cuantas se marcaron (CA-NT-04: "el
+        badge queda en cero")."""
+        stmt = text(
+            """
+            UPDATE notifications SET read_at = now()
+            WHERE organization_id = :organization_id AND user_id = :user_id
+              AND read_at IS NULL
+            RETURNING id
+            """
+        )
+        result = await self._session.execute(
+            stmt, {"organization_id": str(organization_id), "user_id": str(user_id)}
+        )
+        return len(result.fetchall())
+
+    async def commit(self) -> None:
+        await self._session.commit()
+
+
+def get_notification_repository(
+    session: AsyncSession = Depends(get_tenant_db_session),
+) -> NotificationRepository:
+    """DI del router de `modules/notifications/` (issue #31) -- mismo
+    patron que `modules/maintenance/repository.py.get_work_order_repository`."""
+    return NotificationRepository(session)

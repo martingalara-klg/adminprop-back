@@ -56,8 +56,13 @@ ALL_PERMISSIONS: tuple[str, ...] = (
 #   catalogo real, ver sdd_03 §"Resumen de Autorizacion por Recurso" --
 #   "Usuarios, roles, configuracion de la org": owner si, admin no),
 #   organization:configure.
-# - maintenance: solo work-order:read/quote/close + attachment:manage
-#   (scoped a work orders, RN-A01).
+# - maintenance: work-order:read/quote/close + attachment:manage (scoped
+#   a work orders, RN-A01) + notification:read (issue #31, fix: sdd_03
+#   §"Resumen de Autorizacion por Recurso" fila "Notificaciones propias"
+#   dice owner/admin/maintenance = "✅" los 3 -- este catalogo tenia el
+#   permiso listado en ALL_PERMISSIONS pero faltaba en MAINTENANCE_PERMISSIONS,
+#   lo que hubiera devuelto 403 FORBIDDEN a un usuario `maintenance`
+#   pidiendo sus propias notificaciones `work_order_created`/`quote_approved`).
 _ADMIN_EXCLUDED_PERMISSIONS = frozenset({"user:manage", "role:read", "organization:configure"})
 
 OWNER_PERMISSIONS: tuple[str, ...] = ALL_PERMISSIONS
@@ -69,6 +74,7 @@ MAINTENANCE_PERMISSIONS: tuple[str, ...] = (
     "work-order:quote",
     "work-order:close",
     "attachment:manage",
+    "notification:read",
 )
 
 # Orden estable: se sirve tal cual a `INSERT INTO roles`.

@@ -21,6 +21,7 @@ from adminprop.modules.maintenance.router import (
     quotes_router,
     work_orders_router,
 )
+from adminprop.modules.notifications.router import router as notifications_router
 from adminprop.modules.payments.router import debt_router, payments_root_router
 from adminprop.modules.payments.router import router as payments_router
 from adminprop.modules.people.router import landlords_router, renters_router
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
     app.include_router(recurring_charges_router)
     app.include_router(charge_entries_router)
     app.include_router(settlements_router)
+    app.include_router(notifications_router)
     return app
 
 

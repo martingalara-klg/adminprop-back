@@ -195,6 +195,11 @@ _EVENT_COPY: dict[str, dict[str, str]] = {
         "body": "Se recibió una cotización para un pedido de mantenimiento.",
         "link_path": "/maintenance/work-orders/{work_order_id}",
     },
+    "quote_approved": {
+        "subject": "Cotización aprobada",
+        "body": "Se aprobó tu cotización para un pedido de mantenimiento.",
+        "link_path": "/maintenance/work-orders/{work_order_id}",
+    },
     "work_order_closed": {
         "subject": "Trabajo de mantenimiento finalizado",
         "body": "Se cerró un pedido de mantenimiento.",
@@ -207,7 +212,7 @@ def _build_email_content(event_type: str, payload: dict) -> tuple[str, str, str]
     """Arma `(subject, html, text)` del email para `event_type`.
 
     `event_type` ya fue validado por `shared.notifications.service.emit()`
-    contra el mismo catalogo de 5 eventos (CHECK de la migracion) -- el
+    contra el mismo catalogo de 6 eventos (CHECK de la migracion) -- el
     `.get()` con default es defensivo, no deberia activarse en runtime.
     """
     copy = _EVENT_COPY.get(

@@ -79,6 +79,7 @@ class TestCA0001OrganizationCreation:
             "work-order:quote",
             "work-order:close",
             "attachment:manage",
+            "notification:read",
         }
 
     async def test_slug_collision_appends_numeric_suffix(self, client, super_admin_headers):

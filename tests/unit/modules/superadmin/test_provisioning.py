@@ -50,12 +50,16 @@ class TestRoleProvisioningCatalog:
         assert set(ADMIN_PERMISSIONS) == set(ALL_PERMISSIONS) - excluded
         assert excluded.isdisjoint(ADMIN_PERMISSIONS)
 
-    def test_maintenance_is_scoped_to_work_orders_and_attachments_only(self):
+    def test_maintenance_is_scoped_to_work_orders_attachments_and_own_notifications(self):
+        """Issue #31: agrega `notification:read` -- sdd_03 §"Resumen de
+        Autorizacion por Recurso" fila "Notificaciones propias" otorga
+        acceso completo a los 3 roles (owner/admin/maintenance)."""
         assert set(MAINTENANCE_PERMISSIONS) == {
             "work-order:read",
             "work-order:quote",
             "work-order:close",
             "attachment:manage",
+            "notification:read",
         }
         # RN-A01: maintenance nunca contract:*/payment:*/settlement:*.
         forbidden = {"contract:manage", "payment:create", "settlement:generate"}

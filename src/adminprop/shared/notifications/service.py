@@ -1,9 +1,16 @@
-"""NotificationService transversal (issue #11).
+"""NotificationService transversal (issue #11, extendido en el #31).
 
-SDD: infrastructure/spec_notificaciones.md RF-01 (emisión), RF-04
+SDD: infrastructure/spec_notificaciones.md v1.1 RF-01 (emisión), RF-04
      (retry de email) + core/sdd_02_domain_model.md §2.16 "Notification".
 Implements: RN-01 (enrutamiento por rol), RN-02 (una fila por
-            destinatario), CA-NT-02, CA-NT-05.
+            destinatario), CA-NT-01, CA-NT-02, CA-NT-05.
+
+Issue #31: agrega `quote_approved` -> `maintenance` a la tabla de
+enrutamiento (decision #115, sexto evento del MVP -- requiere la
+migracion `20260821_100000_add_quote_approved_to_notifications.py` que
+extiende el CHECK de `notifications.event_type`) e invalida el cache del
+badge de no leidas (`unread_cache.py`, `sdd_04` §1.4: "Invalidacion: al
+crear/leer notificacion") de cada destinatario recien notificado.
 
 API funcional (no clase con estado), mismo criterio que
 `shared/audit/service.py`: `emit()` recibe la MISMA `session` que la
@@ -26,15 +33,17 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adminprop.shared.notifications.repository import NotificationRepository
+from adminprop.shared.notifications.unread_cache import invalidate_unread_count
 
-# RN-01 (spec_notificaciones.md "Eventos del MVP y enrutamiento por rol"):
-# agregar un evento nuevo = actualizar esta tabla primero (regla de oro
-# de sdd_03, citada también en el SDD de notificaciones).
+# RN-01 (spec_notificaciones.md v1.1 "Eventos del MVP y enrutamiento por
+# rol"): agregar un evento nuevo = actualizar esta tabla primero (regla
+# de oro de sdd_03, citada también en el SDD de notificaciones).
 EVENT_RECIPIENT_ROLES: dict[str, tuple[str, ...]] = {
     "adjustment_pending": ("owner", "admin"),
     "contract_expiring": ("owner", "admin"),
     "work_order_created": ("maintenance",),
     "quote_submitted": ("owner", "admin"),
+    "quote_approved": ("maintenance",),
     "work_order_closed": ("owner", "admin"),
 }
 
@@ -74,6 +83,10 @@ async def emit(
             payload=payload,
         )
         notification_ids.append(notification_id)
+        # sdd_04 §1.4 "Badge de notificaciones no leidas | 5 min |
+        # Al crear/leer notificacion": invalida el cache del destinatario
+        # recien notificado (issue #31).
+        await invalidate_unread_count(organization_id, recipient.user_id)
     return notification_ids
 
 

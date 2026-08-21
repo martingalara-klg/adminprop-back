@@ -23,6 +23,7 @@ import pytest
 import sqlalchemy as sa
 
 from adminprop.db.session import get_engine, get_session_factory, set_tenant_context
+from adminprop.shared.cache.redis import get_redis_client
 from adminprop.shared.errors.retryable import RetryableNotificationError
 from adminprop.shared.notifications.service import emit
 from adminprop.workers import notification_worker
@@ -35,11 +36,21 @@ pytestmark = pytest.mark.asyncio
 async def _fresh_engine_per_test() -> AsyncGenerator[None]:
     get_session_factory.cache_clear()
     get_engine.cache_clear()
+    # Issue #31: `emit()` ahora invalida el cache del badge de no leidas
+    # (`shared/notifications/unread_cache.py`) via `get_redis_client()` --
+    # mismo motivo que el resto de los conftest de integration (evita
+    # "Event loop is closed" al reusar un cliente Redis cacheado de un
+    # test anterior con su propio loop de pytest-asyncio ya cerrado).
+    get_redis_client.cache_clear()
     yield
     engine = get_engine()
     await engine.dispose()
     get_session_factory.cache_clear()
     get_engine.cache_clear()
+    redis = get_redis_client()
+    await redis.flushdb()
+    await redis.aclose()
+    get_redis_client.cache_clear()
 
 
 async def _seed_org_with_owner_and_notification() -> tuple[uuid.UUID, uuid.UUID]:
