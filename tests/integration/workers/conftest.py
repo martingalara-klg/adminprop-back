@@ -25,6 +25,7 @@ from datetime import date
 import pytest
 import sqlalchemy as sa
 
+from adminprop.config import get_settings
 from adminprop.db.session import get_engine, get_session_factory
 from adminprop.shared.auth.passwords import hash_password
 from adminprop.shared.cache.redis import get_redis_client
@@ -44,6 +45,19 @@ async def _fresh_engine_per_test() -> AsyncGenerator[None]:
     await redis.flushdb()
     await redis.aclose()
     get_redis_client.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_attachments_dir(tmp_path, monkeypatch) -> None:
+    """Issue #30: `_generate_settlement_async`/`_regenerate_settlement_async`
+    ahora guardan los exports Excel/PDF como Adjuntos -- aisla el storage
+    por test (nunca el volumen Docker real / `/data` del runner de CI),
+    mismo criterio que `tests/integration/maintenance/conftest.py`
+    (issue #26) y `tests/integration/settlements/conftest.py`."""
+    monkeypatch.setenv("ATTACHMENTS_DIR", str(tmp_path / "attachments"))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def _unique_email() -> str:

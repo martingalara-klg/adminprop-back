@@ -68,6 +68,11 @@ def rsa_keypair(tmp_path, monkeypatch):
 
     monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(private_path))
     monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(public_path))
+    # Issue #30: documents_worker ahora guarda los exports Excel/PDF como
+    # Adjuntos al terminar el calculo -- aisla el storage por test (nunca
+    # el volumen Docker real / `/data` del runner de CI), mismo criterio
+    # que tests/integration/maintenance/conftest.py (issue #26).
+    monkeypatch.setenv("ATTACHMENTS_DIR", str(tmp_path / "attachments"))
     get_settings.cache_clear()
     jwt_module.clear_key_cache()
     yield
