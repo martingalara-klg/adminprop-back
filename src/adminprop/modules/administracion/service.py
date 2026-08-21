@@ -17,6 +17,11 @@ from fastapi import Depends
 from redis.asyncio import Redis
 
 from adminprop.config import Settings, get_settings
+from adminprop.modules.administracion.audit_query_repository import (
+    AuditLogQueryRepository,
+    AuditLogRow,
+    get_audit_log_query_repository,
+)
 from adminprop.modules.administracion.repository import (
     AdministracionRepository,
     InvitationRow,
@@ -395,3 +400,48 @@ def get_organization_settings_service(
     repo: AdministracionRepository = Depends(get_administracion_repository),
 ) -> OrganizationSettingsService:
     return OrganizationSettingsService(repo)
+
+
+class AuditLogQueryService:
+    """RF-05: visor del log de auditoria (issue #32). Solo lectura --
+    RN-04/RN-D03 (append-only, sin UPDATE/DELETE via API)."""
+
+    def __init__(self, repo: AuditLogQueryRepository) -> None:
+        self._repo = repo
+
+    async def list_entries(
+        self,
+        organization_id: UUID,
+        *,
+        page: int,
+        page_size: int,
+        entity_type: str | None,
+        entity_id: UUID | None,
+        user_id: UUID | None,
+        action: str | None,
+        date_from: datetime | None,
+        date_to: datetime | None,
+    ) -> tuple[list[AuditLogRow], int]:
+        """CA-07-06: filtra por entidad y usuario, pagina con
+        `page`/`page_size` (defaults y limites ya validados por Pydantic
+        en el router -- `sdd_03` §16: default 50, maximo 100)."""
+        return await self._repo.list_entries(
+            organization_id=organization_id,
+            page=page,
+            page_size=page_size,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            user_id=user_id,
+            action=action,
+            date_from=date_from,
+            date_to=date_to,
+        )
+
+    async def get(self, organization_id: UUID, audit_log_id: UUID) -> AuditLogRow | None:
+        return await self._repo.get_by_id(organization_id, audit_log_id)
+
+
+def get_audit_log_query_service(
+    repo: AuditLogQueryRepository = Depends(get_audit_log_query_repository),
+) -> AuditLogQueryService:
+    return AuditLogQueryService(repo)

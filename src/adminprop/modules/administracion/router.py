@@ -12,12 +12,17 @@ recursos relacionados.
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 
+from adminprop.modules.administracion.audit_query_repository import AuditLogRow
 from adminprop.modules.administracion.repository import InvitationRow, MemberRow, RoleRow
 from adminprop.modules.administracion.schemas import (
+    AuditLogEntry,
+    AuditLogListResponse,
+    AuditLogResponse,
     BillingHeader,
     ChangeUserRoleRequest,
     InvitationListResponse,
@@ -34,14 +39,17 @@ from adminprop.modules.administracion.schemas import (
     UserSummary,
 )
 from adminprop.modules.administracion.service import (
+    AuditLogQueryService,
     OrganizationSettingsService,
     RoleService,
     UserService,
+    get_audit_log_query_service,
     get_organization_settings_service,
     get_role_service,
     get_user_service,
 )
 from adminprop.shared.auth.jwt import JWTPayload
+from adminprop.shared.errors.codes import NotFoundException
 from adminprop.shared.logging.json_logger import request_id_var
 from adminprop.shared.rbac import requires_permission
 from adminprop.shared.tenant import get_current_tenant
@@ -51,6 +59,12 @@ roles_router = APIRouter(prefix="/v1/roles", tags=["administracion"])
 organization_settings_router = APIRouter(
     prefix="/v1/organization/settings", tags=["administracion"]
 )
+audit_logs_router = APIRouter(prefix="/v1/audit-logs", tags=["administracion"])
+
+# sdd_03 §16 "Audit Logs": page/page_size (default 50, maximo 100) --
+# UNICA excepcion de sdd_03 §Paginacion al resto de la API, cursor-based.
+_AUDIT_LOG_PAGE_SIZE_DEFAULT = 50
+_AUDIT_LOG_PAGE_SIZE_MAX = 100
 
 
 def _request_id() -> str:
@@ -82,6 +96,21 @@ def _to_user_summary(row: MemberRow) -> UserSummary:
 def _to_role_summary(row: RoleRow) -> RoleSummary:
     return RoleSummary(
         id=row.id, name=row.name, permissions=row.permissions, is_system_role=row.is_system_role
+    )
+
+
+def _to_audit_log_entry(row: AuditLogRow) -> AuditLogEntry:
+    return AuditLogEntry(
+        id=row.id,
+        user_id=row.user_id,
+        user_email=row.user_email,
+        action=row.action,
+        entity_type=row.entity_type,
+        entity_id=row.entity_id,
+        before_state=row.before_state,
+        after_state=row.after_state,
+        request_id=row.request_id,
+        created_at=row.created_at,
     )
 
 
@@ -303,3 +332,63 @@ async def update_organization_settings(
         actor_user_id=payload.sub,
     )
     return OrganizationSettingsResponse(data=_to_settings_data(settings))
+
+
+# ─── RF-05: visor del log de auditoria ────────────────────────────────────
+
+
+@audit_logs_router.get(
+    "",
+    response_model=AuditLogListResponse,
+    dependencies=[Depends(requires_permission("audit:read"))],
+)
+async def list_audit_logs(
+    organization_id: UUID = Depends(get_current_tenant),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=_AUDIT_LOG_PAGE_SIZE_DEFAULT, ge=1, le=_AUDIT_LOG_PAGE_SIZE_MAX),
+    entity_type: str | None = Query(default=None),
+    entity_id: UUID | None = Query(default=None),
+    user_id: UUID | None = Query(default=None),
+    action: str | None = Query(default=None),
+    date_from: datetime | None = Query(default=None),
+    date_to: datetime | None = Query(default=None),
+    service: AuditLogQueryService = Depends(get_audit_log_query_service),
+) -> AuditLogListResponse:
+    """RF-05 + CA-07-06: filtra por entidad, usuario, accion y rango de
+    fechas; pagina con `page`/`page_size` (default 50, maximo 100 --
+    sdd_03 §16, unica excepcion a la paginacion cursor-based del resto de
+    la API). Permiso `audit:read` (owner y admin; `maintenance` no lo
+    tiene -- 403 FORBIDDEN, CA-07-04)."""
+    items, total = await service.list_entries(
+        organization_id,
+        page=page,
+        page_size=page_size,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        user_id=user_id,
+        action=action,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return AuditLogListResponse(
+        data=[_to_audit_log_entry(item) for item in items],
+        meta={"page": page, "page_size": page_size, "total": total},
+    )
+
+
+@audit_logs_router.get(
+    "/{audit_log_id}",
+    response_model=AuditLogResponse,
+    dependencies=[Depends(requires_permission("audit:read"))],
+)
+async def get_audit_log(
+    audit_log_id: UUID,
+    organization_id: UUID = Depends(get_current_tenant),
+    service: AuditLogQueryService = Depends(get_audit_log_query_service),
+) -> AuditLogResponse:
+    """RF-05: detalle de un evento de auditoria. RN-D01: cross-tenant o
+    inexistente -> 404 NOT_FOUND (nunca 403)."""
+    entry = await service.get(organization_id, audit_log_id)
+    if entry is None:
+        raise NotFoundException()
+    return AuditLogResponse(data=_to_audit_log_entry(entry))

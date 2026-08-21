@@ -7,9 +7,15 @@ la Organizacion".
 """
 
 from adminprop.modules.administracion.router import (
+    audit_logs_router,
     organization_settings_router,
     roles_router,
     users_router,
 )
 
-__all__ = ["organization_settings_router", "roles_router", "users_router"]
+__all__ = [
+    "audit_logs_router",
+    "organization_settings_router",
+    "roles_router",
+    "users_router",
+]

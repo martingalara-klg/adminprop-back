@@ -179,3 +179,60 @@ class TestOrganizationSettingsCrossTenantIsolation:
         )
 
         assert response.status_code == 404
+
+
+class TestAuditLogCrossTenantIsolation:
+    """RN-D01 (issue #32, RF-05): el visor de auditoria nunca expone
+    eventos de otra organizacion."""
+
+    async def test_get_audit_log_of_another_organization_returns_404(self, client, seed):
+        _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
+        _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
+
+        change_in_b = await client.put(
+            "/v1/organization/settings",
+            json={
+                "grace_day": 22,
+                "contract_expiry_notice_days": 90,
+                "billing_name": None,
+                "billing_cuit": None,
+                "billing_contact": None,
+            },
+            headers=owner_b["headers"],
+        )
+        assert change_in_b.status_code == 200
+
+        listed_in_b = await client.get(
+            "/v1/audit-logs", params={"action": "settings.changed"}, headers=owner_b["headers"]
+        )
+        audit_log_id_in_b = listed_in_b.json()["data"][0]["id"]
+
+        response = await client.get(
+            f"/v1/audit-logs/{audit_log_id_in_b}", headers=owner_a["headers"]
+        )
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "NOT_FOUND"
+
+    async def test_list_audit_logs_never_returns_another_organizations_events(self, client, seed):
+        _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
+        _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
+
+        await client.put(
+            "/v1/organization/settings",
+            json={
+                "grace_day": 18,
+                "contract_expiry_notice_days": 90,
+                "billing_name": None,
+                "billing_cuit": None,
+                "billing_contact": None,
+            },
+            headers=owner_b["headers"],
+        )
+
+        response = await client.get(
+            "/v1/audit-logs", params={"action": "settings.changed"}, headers=owner_a["headers"]
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"] == []
