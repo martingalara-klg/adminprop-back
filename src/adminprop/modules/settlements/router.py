@@ -65,9 +65,7 @@ async def list_settlements(
         landlord_id=landlord_id,
         status=status,
     )
-    return SettlementListResponse(
-        data=[SettlementSummary.model_validate(s) for s in settlements]
-    )
+    return SettlementListResponse(data=[SettlementSummary.model_validate(s) for s in settlements])
 
 
 @router.post(
@@ -88,7 +86,9 @@ async def generate_settlement(
     L04/L05/L06. Validaciones sincronicas ANTES del 202 (existencia,
     duplicado, TC requerido, mes no futuro, regla de "sin propiedad/
     movimientos") -- el calculo real corre en `documents_worker`."""
-    request_id = request.headers.get("X-Request-Id") or str(getattr(request.state, "request_id", ""))
+    request_id = request.headers.get("X-Request-Id") or str(
+        getattr(request.state, "request_id", "")
+    )
     settlement = await service.generate(
         organization_id=organization_id,
         landlord_id=dto.landlord_id,

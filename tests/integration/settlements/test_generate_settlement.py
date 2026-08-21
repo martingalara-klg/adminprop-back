@@ -41,9 +41,7 @@ def _mock_celery_apply_async(monkeypatch):
     """Evita depender de un worker Celery real -- mismo criterio que
     `tests/unit/shared/test_notifications_service.py`."""
     mock = MagicMock()
-    monkeypatch.setattr(
-        "adminprop.workers.documents_worker.generate_settlement.apply_async", mock
-    )
+    monkeypatch.setattr("adminprop.workers.documents_worker.generate_settlement.apply_async", mock)
     return mock
 
 

@@ -23,7 +23,7 @@ tenant-isolation.md §"Queries con join/agregacion", RN-D01).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
@@ -432,9 +432,7 @@ class SettlementRepository:
         )
         return GatheredSettlementData(
             payments=[SettlementPaymentRow(**dict(r)) for r in payments_result.mappings()],
-            charge_entries=[
-                SettlementChargeEntryRow(**dict(r)) for r in charges_result.mappings()
-            ],
+            charge_entries=[SettlementChargeEntryRow(**dict(r)) for r in charges_result.mappings()],
             repairs=[SettlementRepairRow(**dict(r)) for r in repairs_result.mappings()],
         )
 

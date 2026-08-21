@@ -152,9 +152,7 @@ class TestCa0501FormulaEndToEnd:
         row = await seed.get_settlement_row(settlement_id)
         total_collected = Decimal("100000.00") + Decimal("80000.00") + Decimal("1500.50")
         commission_total = (total_collected * Decimal("10.00") / 100).quantize(Decimal("0.01"))
-        expected_net = (
-            total_collected - commission_total - Decimal("5000.00") - Decimal("2000.00")
-        )
+        expected_net = total_collected - commission_total - Decimal("5000.00") - Decimal("2000.00")
 
         assert Decimal(row["total_collected"]) == total_collected.quantize(Decimal("0.01"))
         assert Decimal(row["commission_total"]) == commission_total
@@ -172,9 +170,7 @@ class TestCa0501FormulaEndToEnd:
 
 
 class TestCa0502UsdConversionEndToEnd:
-    async def test_usd_payment_is_converted_to_ars_with_the_settlement_exchange_rate(
-        self, seed
-    ):
+    async def test_usd_payment_is_converted_to_ars_with_the_settlement_exchange_rate(self, seed):
         ctx = await _Ctx(seed).build()
         rent_period = await seed.create_rent_period_row(
             organization_id=ctx["org_id"],
@@ -248,9 +244,7 @@ class TestCa0503WithErrorsEndToEnd:
 
 
 class TestCa0504AlreadySettledEndToEnd:
-    async def test_landlord_account_payment_is_already_settled_and_pays_commission(
-        self, seed
-    ):
+    async def test_landlord_account_payment_is_already_settled_and_pays_commission(self, seed):
         ctx = await _Ctx(seed).build()
         rent_period = await seed.create_rent_period_row(
             organization_id=ctx["org_id"], contract_id=ctx["contract_a"], period="2026-06-01"

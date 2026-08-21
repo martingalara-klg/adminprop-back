@@ -136,7 +136,7 @@ def calculate_settlement(
     line_items: list[SettlementLineItemData] = []
     total_collected = Decimal("0.00")
     already_settled_total = Decimal("0.00")
-    commission_base = Decimal("0")
+    commission_base = Decimal(0)
 
     for payment in data.payments:
         gross = payment.amount + payment.charged_interest
@@ -344,9 +344,7 @@ class SettlementService:
         from adminprop.workers.documents_worker import generate_settlement
 
         await set_job_status(settlement.id, "pending")
-        generate_settlement.apply_async(
-            args=[str(settlement.id), str(organization_id), request_id]
-        )
+        generate_settlement.apply_async(args=[str(settlement.id), str(organization_id), request_id])
         return settlement
 
     async def get_detail(self, settlement_id: UUID, organization_id: UUID) -> SettlementDetailData:

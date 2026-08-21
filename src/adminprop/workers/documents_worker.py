@@ -45,7 +45,9 @@ class DocumentsTask(Task):
     bind=True,
     name="adminprop.workers.documents_worker.generate_settlement",
 )
-def generate_settlement(self: Task, settlement_id: str, organization_id: str, request_id: str) -> None:
+def generate_settlement(
+    self: Task, settlement_id: str, organization_id: str, request_id: str
+) -> None:
     """RF-01: calcula la liquidacion `settlement_id` (placeholder `draft`
     ya creado por `SettlementService.generate` ANTES del 202). Recibe IDs
     como string -- docs/skills/async-worker.md."""
@@ -59,9 +61,7 @@ def generate_settlement(self: Task, settlement_id: str, organization_id: str, re
             "service": "documents_worker",
         },
     )
-    asyncio.run(
-        _generate_settlement_async(UUID(settlement_id), UUID(organization_id), request_id)
-    )
+    asyncio.run(_generate_settlement_async(UUID(settlement_id), UUID(organization_id), request_id))
 
 
 async def _generate_settlement_async(
@@ -127,7 +127,7 @@ async def _generate_settlement_async(
         # `async with`, que hace rollback).
         await set_job_status(settlement_id, "pending")
         raise
-    except (NonRetryableError, Exception) as exc:  # noqa: BLE001 -- ver docstring
+    except (NonRetryableError, Exception) as exc:
         # RF-01: "failed: no se genero (error real); el motivo queda en
         # el job y en Sentry" -- se loguea con exc_info (Sentry lo
         # captura via su integracion de logging) y se marca `failed` en

@@ -60,9 +60,7 @@ async def test_generate_settlement_async_applies_tenant_scoped_session(monkeypat
     fake_repo.list_missing_charge_entries.return_value = []
     fake_repo.apply_calculation = AsyncMock()
 
-    monkeypatch.setattr(
-        documents_worker, "SettlementRepository", lambda session: fake_repo
-    )
+    monkeypatch.setattr(documents_worker, "SettlementRepository", lambda session: fake_repo)
     monkeypatch.setattr(documents_worker, "set_job_status", AsyncMock())
 
     await documents_worker._generate_settlement_async(settlement_id, org_id, "req-1")
@@ -117,9 +115,7 @@ async def test_generate_settlement_async_with_warnings_sets_with_errors(monkeypa
         payments=[], charge_entries=[], repairs=[]
     )
     fake_repo.list_unpaid_rent_periods.return_value = [
-        UnpaidRentPeriodRow(
-            rent_period_id=uuid.uuid4(), property_id=uuid.uuid4(), status="pending"
-        )
+        UnpaidRentPeriodRow(rent_period_id=uuid.uuid4(), property_id=uuid.uuid4(), status="pending")
     ]
     fake_repo.list_missing_charge_entries.return_value = []
     fake_repo.apply_calculation = AsyncMock()
@@ -204,9 +200,7 @@ def test_generate_settlement_task_runs_without_raising(monkeypatch):
 
     settlement_id = str(uuid.uuid4())
     organization_id = str(uuid.uuid4())
-    documents_worker.generate_settlement.apply(
-        args=[settlement_id, organization_id, "req-6"]
-    ).get()
+    documents_worker.generate_settlement.apply(args=[settlement_id, organization_id, "req-6"]).get()
 
     assert called["args"] == (
         uuid.UUID(settlement_id),

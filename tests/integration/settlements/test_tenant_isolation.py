@@ -15,9 +15,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def _mock_celery_apply_async(monkeypatch):
     mock = MagicMock()
-    monkeypatch.setattr(
-        "adminprop.workers.documents_worker.generate_settlement.apply_async", mock
-    )
+    monkeypatch.setattr("adminprop.workers.documents_worker.generate_settlement.apply_async", mock)
     return mock
 
 
@@ -38,9 +36,7 @@ class TestTenantIsolation:
     """RN-D01 enforcement: tenant A no accede a recursos del tenant B."""
 
     @pytest.mark.asyncio
-    async def test_generate_settlement_for_other_tenant_landlord_returns_404(
-        self, client, seed
-    ):
+    async def test_generate_settlement_for_other_tenant_landlord_returns_404(self, client, seed):
         org_a = await seed.create_organization_with_system_roles()
         owner_a = await seed.add_member(
             organization_id=org_a["organization_id"],
@@ -68,9 +64,7 @@ class TestTenantIsolation:
             role_id=org_a["roles"]["owner"],
             role_name="owner",
         )
-        org_b, landlord_b_id, contract_b_id = await _seed_org_with_landlord_property_contract(
-            seed
-        )
+        org_b, landlord_b_id, contract_b_id = await _seed_org_with_landlord_property_contract(seed)
         owner_b = await seed.add_member(
             organization_id=org_b["organization_id"],
             role_id=org_b["roles"]["owner"],
@@ -104,9 +98,7 @@ class TestTenantIsolation:
             role_id=org_a["roles"]["owner"],
             role_name="owner",
         )
-        org_b, landlord_b_id, contract_b_id = await _seed_org_with_landlord_property_contract(
-            seed
-        )
+        org_b, landlord_b_id, contract_b_id = await _seed_org_with_landlord_property_contract(seed)
         owner_b = await seed.add_member(
             organization_id=org_b["organization_id"],
             role_id=org_b["roles"]["owner"],

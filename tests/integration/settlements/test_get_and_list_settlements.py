@@ -16,9 +16,7 @@ import pytest
 @pytest.fixture(autouse=True)
 def _mock_celery_apply_async(monkeypatch):
     mock = MagicMock()
-    monkeypatch.setattr(
-        "adminprop.workers.documents_worker.generate_settlement.apply_async", mock
-    )
+    monkeypatch.setattr("adminprop.workers.documents_worker.generate_settlement.apply_async", mock)
     return mock
 
 
@@ -68,9 +66,7 @@ class TestGetSettlementDetail:
         assert data["attachments"] == []
 
     @pytest.mark.asyncio
-    async def test_get_settlement_reflects_with_errors_job_status_from_redis(
-        self, client, seed
-    ):
+    async def test_get_settlement_reflects_with_errors_job_status_from_redis(self, client, seed):
         """CA-05-03: "con periodos impagos o cargos faltantes termina
         with_errors y las advertencias se listan en el detalle"."""
         from adminprop.modules.settlements.job_status import set_job_status
@@ -107,7 +103,7 @@ class TestGetSettlementDetail:
 class TestListSettlements:
     @pytest.mark.asyncio
     async def test_list_filters_by_period_and_landlord_id(self, client, seed):
-        org, owner, landlord_id, settlement_id = await _seed_and_generate(
+        _org, owner, landlord_id, settlement_id = await _seed_and_generate(
             client, seed, period="2026-06"
         )
 
@@ -122,7 +118,7 @@ class TestListSettlements:
 
     @pytest.mark.asyncio
     async def test_list_filters_by_status_draft(self, client, seed):
-        org, owner, landlord_id, settlement_id = await _seed_and_generate(client, seed)
+        _org, owner, _landlord_id, settlement_id = await _seed_and_generate(client, seed)
 
         response = await client.get("/v1/settlements?status=draft", headers=owner["headers"])
 
