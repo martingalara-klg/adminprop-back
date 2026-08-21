@@ -44,7 +44,7 @@ class TestCA0706FilterByEntityAndUser:
     cambio."""
 
     async def test_ca_07_06_filters_by_entity_type_and_entity_id(self, client, seed):
-        org, owner, admin = await _seed_org_with_owner_and_admin(seed)
+        _org, owner, admin = await _seed_org_with_owner_and_admin(seed)
 
         role_change = await client.patch(
             f"/v1/users/{admin['id']}",
@@ -81,7 +81,7 @@ class TestCA0706FilterByEntityAndUser:
         assert entry["action"] == "user.role_changed"
 
     async def test_ca_07_06_filters_by_user_id(self, client, seed):
-        org, owner, admin = await _seed_org_with_owner_and_admin(seed)
+        _org, owner, admin = await _seed_org_with_owner_and_admin(seed)
 
         await client.patch(
             f"/v1/users/{admin['id']}",
@@ -112,7 +112,7 @@ class TestCA0706FilterByEntityAndUser:
         assert all(item["user_id"] == str(owner["id"]) for item in body["data"])
 
     async def test_ca_07_06_shows_before_and_after_state(self, client, seed):
-        org, owner, admin = await _seed_org_with_owner_and_admin(seed)
+        _org, owner, admin = await _seed_org_with_owner_and_admin(seed)
 
         await client.patch(
             f"/v1/users/{admin['id']}",
@@ -134,7 +134,7 @@ class TestCA0706FilterByEntityAndUser:
         assert entry["user_id"] == str(owner["id"])
 
     async def test_ca_07_06_paginates_with_page_and_page_size(self, client, seed):
-        org, owner, admin = await _seed_org_with_owner_and_admin(seed)
+        _org, owner, _admin = await _seed_org_with_owner_and_admin(seed)
 
         # Genera 3 eventos "settings.changed" reales (uno por PUT distinto).
         for grace_day in (11, 12, 13):
@@ -201,7 +201,7 @@ class TestCA0706FilterByEntityAndUser:
         assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 
     async def test_get_audit_log_by_id_returns_full_entry(self, client, seed):
-        org, owner, admin = await _seed_org_with_owner_and_admin(seed)
+        _org, owner, admin = await _seed_org_with_owner_and_admin(seed)
 
         await client.patch(
             f"/v1/users/{admin['id']}",
@@ -229,7 +229,7 @@ class TestCA0704AdminReadsAuditMaintenanceForbidden:
     auditoria."""
 
     async def test_admin_can_list_audit_logs(self, client, seed):
-        org, owner, admin = await _seed_org_with_owner_and_admin(seed)
+        _org, owner, admin = await _seed_org_with_owner_and_admin(seed)
         await client.put(
             "/v1/organization/settings",
             json={

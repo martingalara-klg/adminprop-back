@@ -186,8 +186,8 @@ class TestAuditLogCrossTenantIsolation:
     eventos de otra organizacion."""
 
     async def test_get_audit_log_of_another_organization_returns_404(self, client, seed):
-        org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
-        org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
+        _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
+        _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
 
         change_in_b = await client.put(
             "/v1/organization/settings",
@@ -217,8 +217,8 @@ class TestAuditLogCrossTenantIsolation:
     async def test_list_audit_logs_never_returns_another_organizations_events(
         self, client, seed
     ):
-        org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
-        org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
+        _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
+        _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
 
         await client.put(
             "/v1/organization/settings",
