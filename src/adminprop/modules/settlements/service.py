@@ -23,6 +23,7 @@ from uuid import UUID
 
 from fastapi import Depends
 
+from adminprop.modules.settlements.exports import group_line_items_by_property
 from adminprop.modules.settlements.repository import (
     GatheredSettlementData,
     MissingChargeEntryRow,
@@ -32,6 +33,7 @@ from adminprop.modules.settlements.repository import (
 )
 from adminprop.shared.errors.codes import (
     BusinessRuleViolationException,
+    InvalidStatusTransitionException,
     NotFoundException,
     SettlementAlreadyExistsException,
     SettlementExchangeRateRequiredException,
@@ -258,6 +260,13 @@ class SettlementDetailData:
     line_items: list
     job_status: str
     warnings: list[str]
+    needs_regeneration: bool
+    property_groups: list | None = None
+    general_items: list | None = None
+
+
+# RF-04: `GET /settlements/:id?scope=`.
+_VALID_SCOPES = ("consolidated", "per_property")
 
 
 class SettlementService:
@@ -347,10 +356,19 @@ class SettlementService:
         generate_settlement.apply_async(args=[str(settlement.id), str(organization_id), request_id])
         return settlement
 
-    async def get_detail(self, settlement_id: UUID, organization_id: UUID) -> SettlementDetailData:
-        """RF-01/RF-02: `GET /settlements/:id` -- mezcla la fila de
-        Postgres (totales + line items, siempre reales una vez que el
-        job termino) con el estado del job (Redis, ver `job_status.py`)."""
+    async def get_detail(
+        self, settlement_id: UUID, organization_id: UUID, *, scope: str = "consolidated"
+    ) -> SettlementDetailData:
+        """RF-01/RF-02/RF-04: `GET /settlements/:id?scope=` -- mezcla la
+        fila de Postgres (totales + line items, siempre reales una vez que
+        el job termino) con el estado del job (Redis, ver `job_status.py`).
+        `scope=per_property` (RF-04) agrupa las lineas por propiedad con
+        subtotal; `consolidated` (default) devuelve solo el detalle plano
+        (ya incluido siempre en `line_items`, sdd_03 §11: "consolidated
+        ... devuelve los totales + detalle plano")."""
+        if scope not in _VALID_SCOPES:
+            raise ValidationError(field="scope", message="scope debe ser consolidated o per_property.")
+
         settlement = await self._repo.get_by_id(settlement_id, organization_id)
         if settlement is None:
             raise NotFoundException()
@@ -363,11 +381,27 @@ class SettlementService:
         job_status = job["status"] if job is not None else "completed"
         warnings = job["warnings"] if job is not None else []
 
+        flags = await self._repo.list_needs_regeneration_flags([settlement_id], organization_id)
+        needs_regeneration = flags.get(settlement_id, False)
+
+        property_groups = None
+        general_items = None
+        if scope == "per_property":
+            # RF-04: agrupa por propiedad -- reutiliza la funcion pura
+            # `group_line_items_by_property` (misma que usan los exports,
+            # `exports.py`).
+            property_ids = {item.property_id for item in line_items if item.property_id is not None}
+            labels = await self._repo.list_property_labels(list(property_ids), organization_id)
+            property_groups, general_items = group_line_items_by_property(line_items, labels)
+
         return SettlementDetailData(
             settlement=settlement,
             line_items=line_items,
             job_status=job_status,
             warnings=warnings,
+            needs_regeneration=needs_regeneration,
+            property_groups=property_groups,
+            general_items=general_items,
         )
 
     async def list(
@@ -377,11 +411,121 @@ class SettlementService:
         period: date | None,
         landlord_id: UUID | None,
         status: str | None,
-    ) -> list:
-        """sdd_03 §11: `GET /settlements?period=&landlord_id=&status=`."""
-        return await self._repo.list(
+    ) -> tuple[list, dict[UUID, bool]]:
+        """sdd_03 §11: `GET /settlements?period=&landlord_id=&status=`.
+        Devuelve tambien el mapa de "requiere regeneracion" por id
+        (CA-05-06: "visible asi en el listado")."""
+        settlements = await self._repo.list(
             organization_id=organization_id, period=period, landlord_id=landlord_id, status=status
         )
+        flags = await self._repo.list_needs_regeneration_flags(
+            [s.id for s in settlements], organization_id
+        )
+        return settlements, flags
+
+    async def issue(
+        self, settlement_id: UUID, organization_id: UUID, *, actor_user_id: UUID, request_id: str
+    ):
+        """RF-03: `POST /settlements/:id/issue` -- `draft -> issued`
+        (unica transicion valida, RF-03). No se puede emitir mientras el
+        job de calculo (generacion o regeneracion) todavia esta
+        `pending`/`processing` -- los totales todavia no son definitivos."""
+        settlement = await self._repo.get_by_id(settlement_id, organization_id)
+        if settlement is None:
+            raise NotFoundException()
+        if settlement.status != "draft":
+            # RF-03: "draft -> issued" es la unica transicion -- una
+            # liquidacion ya `issued` no vuelve a emitirse (se REGENERA,
+            # RN-L03, pero sigue `issued`).
+            raise InvalidStatusTransitionException(
+                details={"from_status": settlement.status, "to_status": "issued"}
+            )
+
+        from adminprop.modules.settlements.job_status import get_job_status
+
+        job = await get_job_status(settlement_id)
+        job_status = job["status"] if job is not None else "completed"
+        if job_status in ("pending", "processing"):
+            raise BusinessRuleViolationException(
+                message="La liquidacion todavia se esta calculando; espera a que termine antes de emitirla."
+            )
+
+        updated = await self._repo.issue(settlement_id, organization_id)
+        if updated is None:  # pragma: no cover -- defensivo, ya se valido existencia arriba
+            raise NotFoundException()
+
+        from adminprop.shared.audit.service import audit
+
+        # RF-03: la emision queda auditada (RN-D04, correccion/estado de
+        # liquidaciones siempre trazado).
+        await audit(
+            self._repo.session,
+            organization_id=organization_id,
+            action="settlement.issued",
+            entity_type="settlement",
+            entity_id=settlement_id,
+            before={"status": "draft"},
+            after={"status": "issued"},
+            user_id=actor_user_id,
+            request_id=request_id,
+        )
+        await self._repo.commit()
+        return updated
+
+    async def regenerate(
+        self,
+        *,
+        settlement_id: UUID,
+        organization_id: UUID,
+        exchange_rate: Decimal | None,
+        actor_user_id: UUID,
+        request_id: str,
+    ):
+        """RF-03/RN-L03: `POST /settlements/:id/regenerate` -- recalcula
+        con los datos actuales (cobros anulados/agregados, cargos
+        corregidos, TC nuevo si se pasa). Una liquidacion `issued` sigue
+        siendo regenerable (R-04, "la flexibilidad es deliberada") --
+        SIN transicion de estado (`status` no cambia). Validaciones
+        sincronicas antes del 202, mismo patron que `generate`."""
+        settlement = await self._repo.get_by_id(settlement_id, organization_id)
+        if settlement is None:
+            raise NotFoundException()
+
+        from adminprop.modules.settlements.job_status import get_job_status, set_job_status
+
+        job = await get_job_status(settlement_id)
+        job_status = job["status"] if job is not None else "completed"
+        if job_status in ("pending", "processing"):
+            raise BusinessRuleViolationException(
+                message="Ya hay un calculo en curso para esta liquidacion."
+            )
+
+        effective_rate = exchange_rate if exchange_rate is not None else settlement.exchange_rate
+        gathered = await self._repo.gather_generation_data(
+            settlement.landlord_id, organization_id, settlement.period
+        )
+        # RN-L06/CA-05-02: TC obligatorio SINCRONICO si hay USD, igual que
+        # `generate` -- puede haber cobros nuevos en USD desde la
+        # generacion original.
+        has_usd = any(payment.currency == "USD" for payment in gathered.payments)
+        if has_usd and effective_rate is None:
+            raise SettlementExchangeRateRequiredException(field="exchange_rate")
+
+        # Import diferido: mismo motivo que `generate` (ciclo real con
+        # `workers.documents_worker`).
+        from adminprop.workers.documents_worker import regenerate_settlement
+
+        await set_job_status(settlement_id, "pending")
+        regenerate_settlement.apply_async(
+            args=[
+                str(settlement_id),
+                str(organization_id),
+                request_id,
+                str(exchange_rate) if exchange_rate is not None else None,
+                str(actor_user_id),
+            ]
+        )
+        return settlement
 
 
 def get_settlement_service(
