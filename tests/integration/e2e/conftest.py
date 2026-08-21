@@ -466,9 +466,7 @@ async def seed_demo_organization(seed, *, contract_start: str = "2025-01-01") ->
     org_id = org["organization_id"]
     roles = org["roles"]
 
-    owner = await seed.add_member(
-        organization_id=org_id, role_id=roles["owner"], role_name="owner"
-    )
+    owner = await seed.add_member(organization_id=org_id, role_id=roles["owner"], role_name="owner")
     maintenance_user = await seed.add_member(
         organization_id=org_id, role_id=roles["maintenance"], role_name="maintenance"
     )

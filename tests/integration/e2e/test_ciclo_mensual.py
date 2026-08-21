@@ -93,9 +93,7 @@ class TestCicloMensualCompleto:
         # ─── Paso 1: generacion de periodos del mes (job Beat) ─────────────
         # spec_module_04_cobranzas.md §RF-01. Implements: CA-04-01
         # (idempotencia), CA-04-02 (RN-P01).
-        monkeypatch.setattr(
-            "adminprop.workers.notification_worker.datetime", _FrozenDateTime
-        )
+        monkeypatch.setattr("adminprop.workers.notification_worker.datetime", _FrozenDateTime)
         await _generate_rent_periods_async(request_id=str(uuid.uuid4()))
 
         rent_period_ars = await seed.get_rent_period_by_contract(
@@ -399,12 +397,8 @@ class TestCicloMensualCompleto:
         assert property_groups is not None
         groups_by_property = {g["property_id"]: g for g in property_groups}
         assert set(groups_by_property) == {str(property_ars), str(property_usd)}
-        assert Decimal(groups_by_property[str(property_ars)]["subtotal_ars"]) == Decimal(
-            "88000.00"
-        )
-        assert Decimal(groups_by_property[str(property_usd)]["subtotal_ars"]) == Decimal(
-            "500.00"
-        )
+        assert Decimal(groups_by_property[str(property_ars)]["subtotal_ars"]) == Decimal("88000.00")
+        assert Decimal(groups_by_property[str(property_usd)]["subtotal_ars"]) == Decimal("500.00")
 
         # ─── Paso 7: exports Excel/PDF descargables ────────────────────────
         # CA-05-07: "el export Excel y el PDF ... quedan descargables
@@ -429,10 +423,6 @@ class TestCicloMensualCompleto:
         assert pdf_response.headers["content-type"] == "application/pdf"
         assert pdf_response.content[:4] == b"%PDF"
 
-        attachments = await client.get(
-            f"/v1/settlements/{settlement_id}", headers=owner_headers
-        )
-        attachment_formats = {
-            a["format"] for a in attachments.json()["data"]["attachments"]
-        }
+        attachments = await client.get(f"/v1/settlements/{settlement_id}", headers=owner_headers)
+        attachment_formats = {a["format"] for a in attachments.json()["data"]["attachments"]}
         assert attachment_formats == {"xlsx", "pdf"}
