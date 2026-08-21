@@ -1,13 +1,13 @@
 """Endpoints /v1/landlords/* y /v1/renters/* (issue #13, extendido
-#23/#24).
+#23/#24/#30).
 
 SDD: core/sdd_03_api_contracts.md §5 "Propietarios" + §6 "Inquilinos".
 Implements: CA-02-01, 02, 03, 04, 06, 07 (issue #13); CA-02-05 (estado
-de deuda, issue #23); CA-04-11/CA-04-12 (libre deuda, RF-08, issue #24).
-
-Fuera de alcance de este issue (ver "Decisiones de implementacion" del PR):
-- `GET /landlords/:id/settlements` (historial de liquidaciones) -- depende
-  del modulo de Liquidaciones, todavia inexistente.
+de deuda, issue #23); CA-04-11/CA-04-12 (libre deuda, RF-08, issue #24);
+CA-05-07 (historial de liquidaciones en la ficha del propietario, issue
+#30 -- "descargables desde el detalle y desde la ficha del propietario":
+el detalle/export vive en `GET /settlements/:id`/`GET /settlements/:id/export`,
+esta lista es el punto de entrada desde la ficha).
 """
 
 from __future__ import annotations
@@ -46,6 +46,7 @@ from adminprop.modules.properties.repository import (
     PropertyRepository,
     get_property_repository,
 )
+from adminprop.modules.settlements.schemas import SettlementListResponse, SettlementSummary
 from adminprop.shared.auth.jwt import JWTPayload
 from adminprop.shared.errors.codes import NotFoundException
 from adminprop.shared.rbac import requires_permission
@@ -216,6 +217,51 @@ async def delete_landlord(
     propietario tiene propiedades activas (chequeo extensible, ver
     `repository.py` -- siempre `False` hoy)."""
     await service.delete(landlord_id, organization_id)
+
+
+@landlords_router.get(
+    "/{landlord_id}/settlements",
+    response_model=SettlementListResponse,
+    dependencies=[Depends(requires_permission("settlement:read"))],
+)
+async def get_landlord_settlements(
+    landlord_id: UUID,
+    organization_id: UUID = Depends(get_current_tenant),
+    service: LandlordService = Depends(get_landlord_service),
+    session: AsyncSession = Depends(get_tenant_db_session),
+) -> SettlementListResponse:
+    """sdd_03 §5 "GET /landlords/:id/settlements" (historial de
+    liquidaciones) + CA-05-07 (issue #30): punto de entrada desde la
+    ficha del propietario -- el detalle/export de cada liquidacion sigue
+    viviendo en `GET /settlements/:id`/`GET /settlements/:id/export`
+    (modulo `settlements`). Permiso `settlement:read` (no `landlord:read`):
+    es un listado de liquidaciones, mismo permiso que
+    `GET /settlements`.
+
+    `SettlementService`/`SettlementRepository` se importan DIFERIDO --
+    mismo ciclo de import documentado en `get_renter_debt` de este
+    archivo (`properties/people` cargan muy temprano; un import a nivel
+    de modulo de otro modulo de negocio aca arriesga el mismo ciclo)."""
+    landlord = await service.get(landlord_id, organization_id)
+    if landlord is None:
+        # RN-D01: 404, no 403 -- no distingue "no existe" de "otra org".
+        raise NotFoundException()
+
+    from adminprop.modules.settlements.repository import SettlementRepository
+    from adminprop.modules.settlements.service import SettlementService
+
+    settlement_service = SettlementService(SettlementRepository(session))
+    settlements, flags = await settlement_service.list(
+        organization_id=organization_id, period=None, landlord_id=landlord_id, status=None
+    )
+    return SettlementListResponse(
+        data=[
+            SettlementSummary.model_validate(s).model_copy(
+                update={"needs_regeneration": flags.get(s.id, False)}
+            )
+            for s in settlements
+        ]
+    )
 
 
 # ─── Inquilinos (/v1/renters) — RF-03 ────────────────────────────────────

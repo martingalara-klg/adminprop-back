@@ -26,11 +26,17 @@ from pathlib import Path
 from adminprop.config import get_settings
 
 # spec_module_06_mantenimiento.md §Validaciones: "jpg/png/webp/pdf".
+# xlsx agregado en el issue #30 (spec_module_05_liquidaciones.md §RF-03,
+# "Excel (openpyxl) ... guardados como Adjuntos") -- `attachments` es
+# generica desde su diseno (issue #26), este allowlist es el unico lugar
+# que necesitaba extenderse para que `documents_worker` pueda persistir
+# el export Excel de una liquidacion con el mismo mecanismo.
 ALLOWED_CONTENT_TYPES: dict[str, str] = {
     "image/jpeg": "jpg",
     "image/png": "png",
     "image/webp": "webp",
     "application/pdf": "pdf",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
 }
 
 # spec_module_06_mantenimiento.md §Validaciones: "<= 10 MB por archivo".

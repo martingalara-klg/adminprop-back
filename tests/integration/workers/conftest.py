@@ -25,6 +25,7 @@ from datetime import date
 import pytest
 import sqlalchemy as sa
 
+from adminprop.config import get_settings
 from adminprop.db.session import get_engine, get_session_factory
 from adminprop.shared.auth.passwords import hash_password
 from adminprop.shared.cache.redis import get_redis_client
@@ -44,6 +45,19 @@ async def _fresh_engine_per_test() -> AsyncGenerator[None]:
     await redis.flushdb()
     await redis.aclose()
     get_redis_client.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_attachments_dir(tmp_path, monkeypatch) -> None:
+    """Issue #30: `_generate_settlement_async`/`_regenerate_settlement_async`
+    ahora guardan los exports Excel/PDF como Adjuntos -- aisla el storage
+    por test (nunca el volumen Docker real / `/data` del runner de CI),
+    mismo criterio que `tests/integration/maintenance/conftest.py`
+    (issue #26) y `tests/integration/settlements/conftest.py`."""
+    monkeypatch.setenv("ATTACHMENTS_DIR", str(tmp_path / "attachments"))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def _unique_email() -> str:
@@ -169,6 +183,8 @@ def seed():
             period: str = "2026-06-01",
             currency: str = "ARS",
             status: str = "pending",
+            amount_due: str = "100000.00",
+            paid_total: str = "0.00",
         ) -> uuid.UUID:
             rent_period_id = uuid.uuid4()
             session_factory = get_session_factory()
@@ -176,16 +192,20 @@ def seed():
                 await session.execute(
                     sa.text(
                         "INSERT INTO rent_periods "
-                        "(id, organization_id, contract_id, period, amount_due, currency, status) "
-                        "VALUES (:id, :org_id, :contract_id, :period, 100000.00, :currency, :status)"
+                        "(id, organization_id, contract_id, period, amount_due, currency, "
+                        "status, paid_total) "
+                        "VALUES (:id, :org_id, :contract_id, :period, :amount_due, :currency, "
+                        ":status, :paid_total)"
                     ),
                     {
                         "id": str(rent_period_id),
                         "org_id": str(organization_id),
                         "contract_id": str(contract_id),
                         "period": date.fromisoformat(period),
+                        "amount_due": amount_due,
                         "currency": currency,
                         "status": status,
+                        "paid_total": paid_total,
                     },
                 )
             return rent_period_id
@@ -326,5 +346,40 @@ def seed():
                     {"id": str(work_order_id)},
                 )
                 return dict(result.mappings().one())
+
+        async def get_line_items(self, settlement_id: uuid.UUID) -> list[dict]:
+            """Issue #30 -- CA-05-05/CA-05-06 (regeneracion): mismo helper
+            que `tests/integration/settlements/conftest.py`."""
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                result = await session.execute(
+                    sa.text(
+                        "SELECT * FROM settlement_line_items WHERE settlement_id = :id "
+                        "ORDER BY created_at"
+                    ),
+                    {"id": str(settlement_id)},
+                )
+                return [dict(row._mapping) for row in result]
+
+        async def get_attachments(self, entity_id: uuid.UUID) -> list[dict]:
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                result = await session.execute(
+                    sa.text("SELECT * FROM attachments WHERE entity_id = :id ORDER BY created_at"),
+                    {"id": str(entity_id)},
+                )
+                return [dict(row._mapping) for row in result]
+
+        async def audit_rows(self, organization_id: uuid.UUID, action: str) -> list[dict]:
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                result = await session.execute(
+                    sa.text(
+                        "SELECT entity_id, user_id, before_state, after_state FROM audit_logs "
+                        "WHERE organization_id = :org_id AND action = :action ORDER BY created_at"
+                    ),
+                    {"org_id": str(organization_id), "action": action},
+                )
+                return [dict(row._mapping) for row in result]
 
     return Seeder()

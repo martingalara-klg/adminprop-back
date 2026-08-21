@@ -87,14 +87,38 @@ class SettlementLineItemDetail(BaseModel):
     created_at: datetime
 
 
+class SettlementPropertyGroup(BaseModel):
+    """RF-04: `scope=per_property` -- una propiedad con sus lineas y el
+    subtotal (`exports.PropertyGroup` serializado)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    property_id: UUID
+    property_label: str
+    line_items: list[SettlementLineItemDetail]
+    subtotal_ars: Decimal
+
+
+class SettlementAttachmentSummary(BaseModel):
+    """RF-03 (issue #30): metadata de un export ya generado (Excel/PDF),
+    descargable via `GET /settlements/:id/export?format=`."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    file_name: str
+    mime_type: str
+    format: str
+    created_at: datetime
+
+
 class SettlementDetail(BaseModel):
-    """RF-01/RF-02: totales + line items + estado del job (RF-01,
-    trackeado fuera de `status`, ver `job_status.py`) + advertencias
-    (CA-05-03, "con periodos impagos o cargos faltantes termina
-    `with_errors` y las advertencias se listan en el detalle"). El campo
-    de adjuntos (Excel/PDF) existe en el schema del SDD pero queda vacio
-    hasta el issue #30 (exports), tal como indica el alcance de esta
-    tarea."""
+    """RF-01/RF-02/RF-03/RF-04: totales + line items + estado del job
+    (RF-01, trackeado fuera de `status`, ver `job_status.py`) +
+    advertencias (CA-05-03) + bandera "requiere regeneracion" (CA-05-06,
+    derivada -- ver `repository.list_needs_regeneration_flags`) +
+    agrupacion por propiedad opcional (`scope=per_property`, RF-04) +
+    adjuntos ya generados (Excel/PDF, issue #30)."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -104,6 +128,7 @@ class SettlementDetail(BaseModel):
     status: str
     job_status: str
     warnings: list[str]
+    needs_regeneration: bool
     exchange_rate: Decimal | None
     total_collected: Decimal
     commission_total: Decimal
@@ -118,10 +143,10 @@ class SettlementDetail(BaseModel):
     created_at: datetime
     updated_at: datetime
     line_items: list[SettlementLineItemDetail]
-    attachments: list[dict] = Field(
-        default_factory=list,
-        description="Vacio hasta el issue #30 (exports Excel/PDF).",
+    property_groups: list[SettlementPropertyGroup] | None = Field(
+        default=None, description="Solo presente con ?scope=per_property (RF-04)."
     )
+    attachments: list[SettlementAttachmentSummary] = Field(default_factory=list)
 
 
 class SettlementResponse(BaseModel):
@@ -140,6 +165,7 @@ class SettlementSummary(BaseModel):
     status: str
     net_amount: Decimal
     commission_pct_used: Decimal
+    needs_regeneration: bool = False
     created_at: datetime
 
 
@@ -149,3 +175,19 @@ class SettlementListResponse(BaseModel):
     paginar (mismo criterio que `ChargeVerificationResponse`)."""
 
     data: list[SettlementSummary]
+
+
+# ─── POST /settlements/:id/regenerate — RF-03 (issue #30) ────────────────
+
+
+class SettlementRegenerateRequest(BaseModel):
+    """Body de POST /v1/settlements/:id/regenerate -- sdd_03 §11: el TC
+    nuevo es opcional (si no viene, se mantiene el de la liquidacion)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    exchange_rate: Decimal | None = Field(default=None, gt=0)
+
+
+class SettlementRegenerateAccepted(BaseModel):
+    data: SettlementGenerateAcceptedData

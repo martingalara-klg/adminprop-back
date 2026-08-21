@@ -68,6 +68,11 @@ def rsa_keypair(tmp_path, monkeypatch):
 
     monkeypatch.setenv("JWT_PRIVATE_KEY_PATH", str(private_path))
     monkeypatch.setenv("JWT_PUBLIC_KEY_PATH", str(public_path))
+    # Issue #30: documents_worker ahora guarda los exports Excel/PDF como
+    # Adjuntos al terminar el calculo -- aisla el storage por test (nunca
+    # el volumen Docker real / `/data` del runner de CI), mismo criterio
+    # que tests/integration/maintenance/conftest.py (issue #26).
+    monkeypatch.setenv("ATTACHMENTS_DIR", str(tmp_path / "attachments"))
     get_settings.cache_clear()
     jwt_module.clear_key_cache()
     yield
@@ -547,6 +552,41 @@ def seed(rsa_keypair):
                     sa.text("SELECT * FROM settlements WHERE id = :id"), {"id": str(settlement_id)}
                 )
                 return dict(result.mappings().one())
+
+        async def audit_rows(self, organization_id: uuid.UUID, action: str) -> list[dict]:
+            """Mismo helper que `tests/integration/payments/conftest.py`
+            -- duplicado deliberado (issue #30, ver docstring del modulo)."""
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                result = await session.execute(
+                    sa.text(
+                        "SELECT entity_id, user_id, before_state, after_state FROM audit_logs "
+                        "WHERE organization_id = :org_id AND action = :action ORDER BY created_at"
+                    ),
+                    {"org_id": str(organization_id), "action": action},
+                )
+                return [dict(row._mapping) for row in result]
+
+        async def get_line_items(self, settlement_id: uuid.UUID) -> list[dict]:
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                result = await session.execute(
+                    sa.text(
+                        "SELECT * FROM settlement_line_items WHERE settlement_id = :id "
+                        "ORDER BY created_at"
+                    ),
+                    {"id": str(settlement_id)},
+                )
+                return [dict(row._mapping) for row in result]
+
+        async def get_attachments(self, entity_id: uuid.UUID) -> list[dict]:
+            session_factory = get_session_factory()
+            async with session_factory() as session:
+                result = await session.execute(
+                    sa.text("SELECT * FROM attachments WHERE entity_id = :id ORDER BY created_at"),
+                    {"id": str(entity_id)},
+                )
+                return [dict(row._mapping) for row in result]
 
         async def get_work_order_row(self, work_order_id: uuid.UUID) -> dict:
             session_factory = get_session_factory()
