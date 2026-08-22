@@ -47,6 +47,7 @@ class _Ctx:
             "org_id": org_id,
             "user_id": user["id"],
             "landlord_id": landlord_id,
+            "renter_id": renter_id,
             "property_id": property_id,
             "contract_id": contract_id,
         }
@@ -241,9 +242,17 @@ class TestCa0506RegenerationRecomputesAndAudits:
 
     async def test_regenerate_with_new_exchange_rate_updates_settlement_row(self, seed):
         ctx = await _Ctx(seed).build()
+        # Issue #72/RN-L06: la conversion decide por la moneda del
+        # CONTRATO, no por `payment_currency`.
+        usd_contract = await seed.create_contract_row(
+            organization_id=ctx["org_id"],
+            property_id=ctx["property_id"],
+            renter_id=ctx["renter_id"],
+            currency="USD",
+        )
         rent_period = await seed.create_rent_period_row(
             organization_id=ctx["org_id"],
-            contract_id=ctx["contract_id"],
+            contract_id=usd_contract,
             period="2026-06-01",
             currency="USD",
         )

@@ -302,55 +302,37 @@ class TestCicloMensualCompleto:
 
         # ─── Verificacion: totales calculados a mano contra la respuesta ──
         #
-        # HALLAZGO E2E (documentado, no corregido en este PR -- ver
-        # reporte de la Fase 8 / issue #33): `SettlementRepository.
+        # Fix del issue #72 (RN-L06/CA-05-02): `SettlementRepository.
         # _PAYMENTS_SQL` (src/adminprop/modules/settlements/repository.py)
-        # selecciona `pay.payment_currency AS currency`, y tanto
-        # `calculate_settlement._convert_to_ars` como el gate sincronico
-        # `has_usd` de `SettlementService.generate`/`regenerate`
-        # (RN-L06/CA-05-02) deciden la conversion a ARS en base a ESE
-        # campo. Pero `payments.amount` esta denominado en la MONEDA DEL
-        # CONTRATO (RF-03: "el periodo pasa a paid cuando el capital
-        # imputado alcanza amount_due", ambos en la misma unidad;
-        # confirmado por `tests/integration/payments/test_register_
-        # payment.py::TestExchangeRateRequired`, que registra un pago
-        # parcial de "500.00" contra un `amount_due` USD de "1000.00").
-        # Para un contrato USD cobrado en pesos (CA-04-03, `payment_
-        # currency="ARS"`, `exchange_rate` grabado en el pago), la
-        # liquidacion NO convierte ese cobro (trata "500.00" como si ya
-        # fueran ARS) porque `currency` != "USD" segun ese campo -- el TC
-        # de la liquidacion queda persistido pero no se aplica a este
-        # cobro. La conversion SI funcionaria si `payment_currency`
-        # coincidiera con la moneda del contrato (USD), pero entonces no
-        # se podria ejercer CA-04-03 (que exige pagarlo en pesos). Ambos
-        # CA no son simultaneamente satisfacibles con el codigo actual
-        # para el mismo cobro -- posible fix de una linea (cambiar el
-        # alias de la query a `c.currency AS currency`), pero se deja sin
-        # tocar (fuera de alcance de este issue, "CERO cambios de logica
-        # de produccion") y se reporta para revision humana.
+        # ahora selecciona `c.currency AS currency` (moneda del CONTRATO,
+        # RN-P06) en vez de `pay.payment_currency` (moneda en la que se
+        # cobro fisicamente, RN-P05). Un contrato USD cobrado en pesos
+        # (CA-04-03, `payment_currency="ARS"` con `exchange_rate` propio
+        # del cobro) sigue siendo un "cobro USD" para la liquidacion: se
+        # convierte con el TC de la LIQUIDACION (que puede ser distinto
+        # al TC del cobro -- son independientes, uno es del momento del
+        # pago y el otro del momento de liquidar).
         #
-        # Calculo manual documentado contra el comportamiento ACTUAL del
-        # sistema (en Decimal -- nunca floats):
+        # Calculo manual documentado (en Decimal -- nunca floats):
         #
         #   Propiedad ARS: alquiler 100000.00 + interes cobrado 1000.00
         #                  = 101000.00 (destino agency_account)
-        #   Propiedad USD: alquiler 500.00 (payment_currency=ARS, TC
-        #                  1200.0000 grabado en el cobro pero NO aplicado
-        #                  por la liquidacion -- ver hallazgo arriba)
-        #                  = 500.00 (destino agency_account)
-        #   total_collected      = 101000.00 + 500.00 = 101500.00
-        #   commission_base      = 101500.00 (TODOS los destinos, RN-L02;
+        #   Propiedad USD: alquiler 500.00 USD (moneda del contrato)
+        #                  convertido con el TC de la liquidacion
+        #                  (1200.0000) = 600000.00 (destino agency_account)
+        #   total_collected      = 101000.00 + 600000.00 = 701000.00
+        #   commission_base      = 701000.00 (TODOS los destinos, RN-L02;
         #                          aca no hay cobros "ya rendidos")
-        #   commission_total     = 101500.00 x 10% = 10150.00
+        #   commission_total     = 701000.00 x 10% = 70100.00
         #   charges_total        = 5000.00 (expensas municipales, Prop ARS)
         #   repairs_total        = 8000.00 (reparacion agency cerrada, Prop ARS)
-        #   net_amount           = 101500.00 - 10150.00 - 5000.00 - 8000.00
-        #                        = 78350.00
-        expected_total_collected = Decimal("101500.00")
-        expected_commission_total = Decimal("10150.00")
+        #   net_amount           = 701000.00 - 70100.00 - 5000.00 - 8000.00
+        #                        = 617900.00
+        expected_total_collected = Decimal("701000.00")
+        expected_commission_total = Decimal("70100.00")
         expected_charges_total = Decimal("5000.00")
         expected_repairs_total = Decimal("8000.00")
-        expected_net_amount = Decimal("78350.00")
+        expected_net_amount = Decimal("617900.00")
 
         get_response = await client.get(
             f"/v1/settlements/{settlement_id}",
@@ -385,8 +367,9 @@ class TestCicloMensualCompleto:
 
         # CA-05-07 / RF-04: `scope=per_property` agrupa por propiedad con
         # subtotal -- Prop ARS = 101000 (alquiler) - 5000 (cargo) - 8000
-        # (reparacion) = 88000.00; Prop USD = 500.00 (solo alquiler, sin
-        # convertir -- ver hallazgo documentado arriba).
+        # (reparacion) = 88000.00; Prop USD = 500.00 USD convertido con el
+        # TC de la liquidacion (1200.0000) = 600000.00 (solo alquiler, sin
+        # cargos ni reparaciones en esta propiedad).
         per_property_response = await client.get(
             f"/v1/settlements/{settlement_id}",
             params={"scope": "per_property"},
@@ -398,7 +381,9 @@ class TestCicloMensualCompleto:
         groups_by_property = {g["property_id"]: g for g in property_groups}
         assert set(groups_by_property) == {str(property_ars), str(property_usd)}
         assert Decimal(groups_by_property[str(property_ars)]["subtotal_ars"]) == Decimal("88000.00")
-        assert Decimal(groups_by_property[str(property_usd)]["subtotal_ars"]) == Decimal("500.00")
+        assert Decimal(groups_by_property[str(property_usd)]["subtotal_ars"]) == Decimal(
+            "600000.00"
+        )
 
         # ─── Paso 7: exports Excel/PDF descargables ────────────────────────
         # CA-05-07: "el export Excel y el PDF ... quedan descargables

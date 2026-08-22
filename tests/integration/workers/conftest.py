@@ -152,7 +152,12 @@ def seed():
             return property_id
 
         async def create_contract_row(
-            self, *, organization_id: uuid.UUID, property_id: uuid.UUID, renter_id: uuid.UUID
+            self,
+            *,
+            organization_id: uuid.UUID,
+            property_id: uuid.UUID,
+            renter_id: uuid.UUID,
+            currency: str = "ARS",
         ) -> uuid.UUID:
             contract_id = uuid.uuid4()
             session_factory = get_session_factory()
@@ -163,7 +168,7 @@ def seed():
                         "(id, organization_id, property_id, renter_id, currency, "
                         "initial_amount, current_amount, start_date, end_date, "
                         "daily_late_fee_pct, status) "
-                        "VALUES (:id, :org_id, :property_id, :renter_id, 'ARS', "
+                        "VALUES (:id, :org_id, :property_id, :renter_id, :currency, "
                         "100000.00, 100000.00, '2026-01-01', '2027-01-01', 0.1, 'active')"
                     ),
                     {
@@ -171,6 +176,7 @@ def seed():
                         "org_id": str(organization_id),
                         "property_id": str(property_id),
                         "renter_id": str(renter_id),
+                        "currency": currency,
                     },
                 )
             return contract_id
