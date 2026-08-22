@@ -175,10 +175,15 @@ class TestCa0502UsdConversionEndToEnd:
         ctx = await _Ctx(seed).build()
         # RN-P06: el contrato es la fuente de la moneda para RN-L06 (issue
         # #72) -- se paga en dolares, moneda del cobro == moneda del
-        # contrato, escenario "sin sorpresas" de CA-05-02.
+        # contrato, escenario "sin sorpresas" de CA-05-02. Propiedad nueva
+        # (no `property_a`/`property_b`, que ya tienen contrato ARS
+        # vigente con las mismas fechas -- `contracts_no_overlap`).
+        usd_property = await seed.create_property_row(
+            organization_id=ctx["org_id"], landlord_id=ctx["landlord_id"], address="Prop USD"
+        )
         usd_contract = await seed.create_contract_row(
             organization_id=ctx["org_id"],
-            property_id=ctx["property_a"],
+            property_id=usd_property,
             renter_id=ctx["renter_id"],
             currency="USD",
         )
@@ -236,9 +241,14 @@ class TestCa0502UsdConversionEndToEnd:
         liquidacion no convertia el cobro (lo trataba como si ya fueran
         pesos)."""
         ctx = await _Ctx(seed).build()
+        # Propiedad nueva (no `property_a`/`property_b`, que ya tienen
+        # contrato ARS vigente con las mismas fechas -- `contracts_no_overlap`).
+        usd_property = await seed.create_property_row(
+            organization_id=ctx["org_id"], landlord_id=ctx["landlord_id"], address="Prop USD"
+        )
         usd_contract = await seed.create_contract_row(
             organization_id=ctx["org_id"],
-            property_id=ctx["property_a"],
+            property_id=usd_property,
             renter_id=ctx["renter_id"],
             currency="USD",
         )

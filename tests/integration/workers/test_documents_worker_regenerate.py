@@ -243,10 +243,15 @@ class TestCa0506RegenerationRecomputesAndAudits:
     async def test_regenerate_with_new_exchange_rate_updates_settlement_row(self, seed):
         ctx = await _Ctx(seed).build()
         # Issue #72/RN-L06: la conversion decide por la moneda del
-        # CONTRATO, no por `payment_currency`.
+        # CONTRATO, no por `payment_currency`. Propiedad nueva (no
+        # `property_id`, que ya tiene contrato ARS vigente con las mismas
+        # fechas -- `contracts_no_overlap`).
+        usd_property = await seed.create_property_row(
+            organization_id=ctx["org_id"], landlord_id=ctx["landlord_id"], address="Prop USD"
+        )
         usd_contract = await seed.create_contract_row(
             organization_id=ctx["org_id"],
-            property_id=ctx["property_id"],
+            property_id=usd_property,
             renter_id=ctx["renter_id"],
             currency="USD",
         )
