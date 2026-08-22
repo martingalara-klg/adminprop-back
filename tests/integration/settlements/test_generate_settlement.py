@@ -20,7 +20,7 @@ from unittest.mock import MagicMock
 import pytest
 
 
-async def _seed_owner_with_property(seed):
+async def _seed_owner_with_property(seed, *, currency: str = "ARS"):
     org = await seed.create_organization_with_system_roles()
     owner = await seed.add_member(
         organization_id=org["organization_id"], role_id=org["roles"]["owner"], role_name="owner"
@@ -31,7 +31,10 @@ async def _seed_owner_with_property(seed):
         organization_id=org["organization_id"], landlord_id=landlord_id
     )
     contract_id = await seed.create_contract_row(
-        organization_id=org["organization_id"], property_id=property_id, renter_id=renter_id
+        organization_id=org["organization_id"],
+        property_id=property_id,
+        renter_id=renter_id,
+        currency=currency,
     )
     return org, owner, landlord_id, contract_id
 
@@ -103,7 +106,8 @@ class TestCa0502ExchangeRateRequired:
     async def test_usd_payment_without_exchange_rate_returns_400(
         self, client, seed, _mock_celery_apply_async
     ):
-        org, owner, landlord_id, contract_id = await _seed_owner_with_property(seed)
+        # Issue #72/RN-L06: el gate decide por la moneda del CONTRATO.
+        org, owner, landlord_id, contract_id = await _seed_owner_with_property(seed, currency="USD")
         rent_period_id = await seed.create_rent_period_row(
             organization_id=org["organization_id"],
             contract_id=contract_id,
@@ -129,10 +133,44 @@ class TestCa0502ExchangeRateRequired:
         _mock_celery_apply_async.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_usd_contract_paid_in_ars_without_exchange_rate_returns_400(
+        self, client, seed, _mock_celery_apply_async
+    ):
+        """Issue #72 (RN-L06): un contrato USD cobrado en pesos
+        (`payment_currency=ARS`) sigue siendo un "cobro USD" para el gate
+        -- `payments.amount` esta en la moneda del CONTRATO (RN-P06), no
+        en la moneda en la que se cobro fisicamente."""
+        org, owner, landlord_id, contract_id = await _seed_owner_with_property(seed, currency="USD")
+        rent_period_id = await seed.create_rent_period_row(
+            organization_id=org["organization_id"],
+            contract_id=contract_id,
+            period="2026-06-01",
+            currency="USD",
+        )
+        await seed.create_payment_row(
+            organization_id=org["organization_id"],
+            rent_period_id=rent_period_id,
+            created_by=owner["id"],
+            payment_currency="ARS",
+            amount="500.00",
+        )
+
+        response = await client.post(
+            "/v1/settlements/generate",
+            json={"landlord_id": str(landlord_id), "period": "2026-06"},
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "SETTLEMENT_EXCHANGE_RATE_REQUIRED"
+        _mock_celery_apply_async.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_usd_payment_with_exchange_rate_returns_202(
         self, client, seed, _mock_celery_apply_async
     ):
-        org, owner, landlord_id, contract_id = await _seed_owner_with_property(seed)
+        # Issue #72/RN-L06: el gate decide por la moneda del CONTRATO.
+        org, owner, landlord_id, contract_id = await _seed_owner_with_property(seed, currency="USD")
         rent_period_id = await seed.create_rent_period_row(
             organization_id=org["organization_id"],
             contract_id=contract_id,

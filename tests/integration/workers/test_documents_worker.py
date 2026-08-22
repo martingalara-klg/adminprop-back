@@ -61,6 +61,7 @@ class _Ctx:
             "org_id": org_id,
             "user_id": user["id"],
             "landlord_id": landlord_id,
+            "renter_id": renter_id,
             "property_a": property_a,
             "property_b": property_b,
             "contract_a": contract_a,
@@ -172,9 +173,23 @@ class TestCa0501FormulaEndToEnd:
 class TestCa0502UsdConversionEndToEnd:
     async def test_usd_payment_is_converted_to_ars_with_the_settlement_exchange_rate(self, seed):
         ctx = await _Ctx(seed).build()
+        # RN-P06: el contrato es la fuente de la moneda para RN-L06 (issue
+        # #72) -- se paga en dolares, moneda del cobro == moneda del
+        # contrato, escenario "sin sorpresas" de CA-05-02. Propiedad nueva
+        # (no `property_a`/`property_b`, que ya tienen contrato ARS
+        # vigente con las mismas fechas -- `contracts_no_overlap`).
+        usd_property = await seed.create_property_row(
+            organization_id=ctx["org_id"], landlord_id=ctx["landlord_id"], address="Prop USD"
+        )
+        usd_contract = await seed.create_contract_row(
+            organization_id=ctx["org_id"],
+            property_id=usd_property,
+            renter_id=ctx["renter_id"],
+            currency="USD",
+        )
         rent_period = await seed.create_rent_period_row(
             organization_id=ctx["org_id"],
-            contract_id=ctx["contract_a"],
+            contract_id=usd_contract,
             period="2026-06-01",
             currency="USD",
             status="paid",
@@ -211,6 +226,78 @@ class TestCa0502UsdConversionEndToEnd:
                 {"id": str(settlement_id)},
             )
             line = result.mappings().one()
+            assert Decimal(line["original_amount"]) == Decimal("500.00")
+            assert line["original_currency"] == "USD"
+            assert Decimal(line["amount_ars"]) == Decimal("500000.00")
+
+    async def test_usd_contract_paid_in_ars_is_still_converted_with_the_settlement_exchange_rate(
+        self, seed
+    ):
+        """Issue #72 (RN-L06/CA-04-03): un contrato USD cobrado en pesos
+        (`payment_currency=ARS`, con `exchange_rate` manual del propio
+        cobro) sigue siendo un monto USD para la liquidacion -- `amount`
+        esta denominado en la moneda del CONTRATO (RN-P06), no en la
+        moneda en la que se cobro fisicamente. Antes del fix, esta
+        liquidacion no convertia el cobro (lo trataba como si ya fueran
+        pesos)."""
+        ctx = await _Ctx(seed).build()
+        # Propiedad nueva (no `property_a`/`property_b`, que ya tienen
+        # contrato ARS vigente con las mismas fechas -- `contracts_no_overlap`).
+        usd_property = await seed.create_property_row(
+            organization_id=ctx["org_id"], landlord_id=ctx["landlord_id"], address="Prop USD"
+        )
+        usd_contract = await seed.create_contract_row(
+            organization_id=ctx["org_id"],
+            property_id=usd_property,
+            renter_id=ctx["renter_id"],
+            currency="USD",
+        )
+        rent_period = await seed.create_rent_period_row(
+            organization_id=ctx["org_id"],
+            contract_id=usd_contract,
+            period="2026-06-01",
+            currency="USD",
+            status="paid",
+        )
+        # CA-04-03: el cobro se registra en ARS (moneda distinta a la del
+        # contrato) con su propio TC manual -- ese TC es del MOMENTO DEL
+        # PAGO (RN-P06) y es independiente del TC de la liquidacion.
+        await seed.create_payment_row(
+            organization_id=ctx["org_id"],
+            rent_period_id=rent_period,
+            created_by=ctx["user_id"],
+            payment_currency="ARS",
+            amount="500.00",
+        )
+
+        settlement_id = await _create_placeholder_settlement(
+            ctx["org_id"],
+            ctx["landlord_id"],
+            generated_by=ctx["user_id"],
+            commission_pct=Decimal("10.00"),
+            exchange_rate=Decimal("1000.0000"),
+        )
+
+        await _generate_settlement_async(settlement_id, ctx["org_id"], "req-issue-72")
+
+        row = await seed.get_settlement_row(settlement_id)
+        # RN-L06: convertido con el TC de la LIQUIDACION (1000.0000), no
+        # dejado como si ya fueran pesos.
+        assert Decimal(row["total_collected"]) == Decimal("500000.00")
+
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            result = await session.execute(
+                sa.text(
+                    "SELECT original_amount, original_currency, amount_ars "
+                    "FROM settlement_line_items "
+                    "WHERE settlement_id = :id AND line_type = 'rent_collected'"
+                ),
+                {"id": str(settlement_id)},
+            )
+            line = result.mappings().one()
+            # RF-02: el detalle conserva el valor USD ORIGINAL (moneda del
+            # contrato) junto al convertido -- no la moneda del cobro.
             assert Decimal(line["original_amount"]) == Decimal("500.00")
             assert line["original_currency"] == "USD"
             assert Decimal(line["amount_ars"]) == Decimal("500000.00")
