@@ -107,9 +107,7 @@ class TestCa0502ExchangeRateRequired:
         self, client, seed, _mock_celery_apply_async
     ):
         # Issue #72/RN-L06: el gate decide por la moneda del CONTRATO.
-        org, owner, landlord_id, contract_id = await _seed_owner_with_property(
-            seed, currency="USD"
-        )
+        org, owner, landlord_id, contract_id = await _seed_owner_with_property(seed, currency="USD")
         rent_period_id = await seed.create_rent_period_row(
             organization_id=org["organization_id"],
             contract_id=contract_id,
@@ -142,9 +140,7 @@ class TestCa0502ExchangeRateRequired:
         (`payment_currency=ARS`) sigue siendo un "cobro USD" para el gate
         -- `payments.amount` esta en la moneda del CONTRATO (RN-P06), no
         en la moneda en la que se cobro fisicamente."""
-        org, owner, landlord_id, contract_id = await _seed_owner_with_property(
-            seed, currency="USD"
-        )
+        org, owner, landlord_id, contract_id = await _seed_owner_with_property(seed, currency="USD")
         rent_period_id = await seed.create_rent_period_row(
             organization_id=org["organization_id"],
             contract_id=contract_id,
@@ -174,9 +170,7 @@ class TestCa0502ExchangeRateRequired:
         self, client, seed, _mock_celery_apply_async
     ):
         # Issue #72/RN-L06: el gate decide por la moneda del CONTRATO.
-        org, owner, landlord_id, contract_id = await _seed_owner_with_property(
-            seed, currency="USD"
-        )
+        org, owner, landlord_id, contract_id = await _seed_owner_with_property(seed, currency="USD")
         rent_period_id = await seed.create_rent_period_row(
             organization_id=org["organization_id"],
             contract_id=contract_id,
