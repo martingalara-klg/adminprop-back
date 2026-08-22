@@ -315,7 +315,11 @@ class SettlementService:
         gathered = await self._repo.gather_generation_data(landlord_id, organization_id, period)
 
         # CA-05-02/RN-L06: TC obligatorio SINCRONICO si hay USD en el
-        # periodo -- validacion ANTES de crear cualquier fila.
+        # periodo -- validacion ANTES de crear cualquier fila. Issue #72:
+        # `payment.currency` es la moneda del CONTRATO (repository.py
+        # `_PAYMENTS_SQL`), no `payment_currency` -- "cobros o alquileres
+        # USD" (RN-L06) se decide por la moneda pactada, no por la moneda
+        # en la que se cobro fisicamente.
         has_usd = any(payment.currency == "USD" for payment in gathered.payments)
         if has_usd and exchange_rate is None:
             raise SettlementExchangeRateRequiredException(field="exchange_rate")
@@ -508,7 +512,8 @@ class SettlementService:
         )
         # RN-L06/CA-05-02: TC obligatorio SINCRONICO si hay USD, igual que
         # `generate` -- puede haber cobros nuevos en USD desde la
-        # generacion original.
+        # generacion original. Issue #72: `payment.currency` es la moneda
+        # del CONTRATO (ver comentario en `generate`).
         has_usd = any(payment.currency == "USD" for payment in gathered.payments)
         if has_usd and effective_rate is None:
             raise SettlementExchangeRateRequiredException(field="exchange_rate")

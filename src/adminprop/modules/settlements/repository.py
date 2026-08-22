@@ -42,7 +42,7 @@ class SettlementPaymentRow:
 
     payment_id: UUID
     property_id: UUID
-    currency: str
+    currency: str  # Issue #72: moneda del CONTRATO (`c.currency`), no `payment_currency`.
     amount: Decimal
     charged_interest: Decimal
     destination: str
@@ -97,11 +97,21 @@ class GatheredSettlementData:
 # `pay.voided_at IS NULL` -- CLAUDE.md §"Fuentes de verdad": "EXCLUÍ
 # anulados". Ambos `destination` (agency_account/landlord_account): la
 # comision (RF-02) se calcula sobre los dos, `service.py` separa por tipo.
+#
+# Issue #72 (RN-L06/CA-05-02): `currency` es la MONEDA DEL CONTRATO
+# (`c.currency`), NO `pay.payment_currency`. `payments.amount` esta
+# denominado en la moneda del contrato (RN-P06: "el importe del cobro es
+# a capital en la moneda del contrato") -- `payment_currency` solo indica
+# en que moneda se cobro FISICAMENTE (RN-P05: "TC manual obligatorio si
+# difiere la moneda"), y no participa de la formula de liquidacion. Un
+# contrato USD pagado en pesos (CA-04-03) sigue siendo un monto USD para
+# RN-L06 ("cobros o alquileres USD"): debe convertirse con el TC de la
+# liquidacion igual que un contrato USD pagado en dolares.
 _PAYMENTS_SQL = """
     SELECT
         pay.id AS payment_id,
         p.id AS property_id,
-        pay.payment_currency AS currency,
+        c.currency AS currency,
         pay.amount AS amount,
         pay.charged_interest AS charged_interest,
         pay.destination AS destination
