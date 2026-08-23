@@ -20,7 +20,7 @@ from functools import lru_cache
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -34,6 +34,49 @@ from adminprop.shared.tenant import get_current_tenant
 # Setting de sesion Postgres que las politicas RLS leen via
 # current_setting('app.current_tenant_id', true) (missing_ok=true).
 TENANT_CONTEXT_SETTING = "app.current_tenant_id"
+
+
+def _register_tenant_context_reapplication(
+    session: AsyncSession, organization_id: UUID | None
+) -> None:
+    """Reemite `SET LOCAL app.current_tenant_id` al inicio de CADA
+    transaccion de `session`, no solo la primera.
+
+    Bug descubierto en el issue #42 al hacer RLS real (antes, con el pool
+    conectando como superusuario, era invisible): `SET LOCAL` (is_local=
+    true, la unica opcion segura para un pool no transaction-scoped hoy --
+    ver `set_tenant_context`) vive SOLO en la transaccion donde se
+    ejecuta. Varios services hacen `insert -> notifications.emit -> commit`
+    y el router reutiliza la MISMA sesion para una query posterior (ej.
+    `WorkOrderService.create` + `get_detail`); `AsyncSession` autocomienza
+    una transaccion NUEVA despues de ese commit, sin el tenant context ->
+    RLS ve NULL -> 0 filas -> 404 espurio con el tenant correcto. Los
+    workers Celery (`documents_worker.py`, que hace commits intermedios de
+    `status: pending -> processing -> completed`) tienen el mismo riesgo.
+
+    El evento ORM `after_begin` corre al inicio de toda transaccion
+    (la primera y cualquiera posterior a un commit/rollback dentro de la
+    misma sesion) -- reemitir el SET LOCAL aca la hace resistente a
+    cualquier commit intermedio, sin cambiar el modelo transaccional de
+    los services/workers existentes.
+
+    `isinstance` guard: los tests unitarios de este modulo pasan dobles
+    (`AsyncMock`) en lugar de una `AsyncSession` real -- `session.sync_session`
+    no existe en esos dobles y `event.listens_for` fallaria al registrar
+    sobre un target invalido. Se salta silenciosamente en ese caso (el
+    comportamiento real se verifica en integracion, con Postgres real).
+    """
+    if not isinstance(session, AsyncSession):
+        return  # pragma: no cover -- solo se salta con dobles de test (mocks)
+
+    tenant_id = str(organization_id) if organization_id is not None else ""
+
+    @event.listens_for(session.sync_session, "after_begin")
+    def _reapply_tenant_context(sync_session, transaction, connection) -> None:
+        connection.execute(
+            text("SELECT set_config(:setting, :tenant_id, true)"),
+            {"setting": TENANT_CONTEXT_SETTING, "tenant_id": tenant_id},
+        )
 
 
 def to_async_dsn(database_url: str) -> str:
@@ -120,11 +163,15 @@ async def get_superadmin_db_session() -> AsyncGenerator[AsyncSession]:
     No existe todavia el middleware global que conmuta el rol de sesion
     segun el JWT (`tenant-isolation.md` lo describe como responsabilidad
     del middleware, issue futuro); esta dependency es el equivalente
-    explicito para los endpoints `/superadmin/*` mientras tanto. El
-    `SET ROLE`/`RESET ROLE` es hoy un no-op funcional en este entorno
-    (issue #42 -- PgBouncer transaction-scoped todavia no esta configurado
-    en docker-compose local) pero se aplica igual para que el codigo quede
-    correcto cuando la infra lo soporte.
+    explicito para los endpoints `/superadmin/*` mientras tanto.
+
+    El `SET ROLE`/`RESET ROLE` es funcional de verdad desde el issue #42:
+    el pool de runtime conecta como `adminprop_app` (no el superusuario de
+    Postgres), y la migracion `20260823_090000_grant_superadmin_role_to_app`
+    le otorga membresia en `adminprop_superadmin` (con `INHERIT FALSE`,
+    asi que el bypass de RLS solo aplica mientras el `SET ROLE` explicito
+    de abajo este activo en la transaccion, nunca por herencia implicita
+    en el resto de las queries de `adminprop_app`).
     """
     session_factory = get_session_factory()
     async with session_factory() as session:
@@ -146,9 +193,16 @@ async def tenant_scoped_session(
     worker hay que llamar a `set_tenant_context` explicitamente. Este
     context manager abre la sesion, fija el contexto en la misma
     transaccion y la entrega lista para usar.
+
+    Issue #42: tambien registra `_register_tenant_context_reapplication` --
+    workers como `documents_worker.py` hacen commits intermedios (updates
+    de `status: pending -> processing -> completed`) sobre la misma
+    sesion; sin reemitir el contexto en cada transaccion nueva, las
+    queries posteriores a esos commits pierden el tenant bajo RLS real.
     """
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        _register_tenant_context_reapplication(session, organization_id)
         await set_tenant_context(session, organization_id)
         yield session
 
@@ -163,8 +217,16 @@ async def get_tenant_db_session(
     Setea `app.current_tenant_id` ANTES de la primera query del endpoint
     -- corre bajo el rol de sesion normal (`adminprop_app`, sujeto a RLS
     FORCE), a diferencia de `get_superadmin_db_session` (BYPASSRLS).
+
+    Issue #42: ademas registra `_register_tenant_context_reapplication`
+    para que el contexto se reemita en cualquier transaccion posterior a
+    un `session.commit()` intermedio del service (`SET LOCAL` no
+    sobrevive un commit) -- sin este registro, un service que hace
+    insert + commit + otra query en la misma request ve 0 filas por RLS
+    aunque el tenant sea el correcto.
     """
     session_factory = get_session_factory()
     async with session_factory() as session:
+        _register_tenant_context_reapplication(session, organization_id)
         await set_tenant_context(session, organization_id)
         yield session

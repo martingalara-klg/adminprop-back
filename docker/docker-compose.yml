@@ -51,7 +51,15 @@ services:
     environment:
       ENVIRONMENT: local
       LOG_LEVEL: INFO
-      DATABASE_URL: postgresql://adminprop:adminprop@postgres:5432/adminprop
+      # issue #42 -- runtime conecta como adminprop_app (RLS FORCE), nunca
+      # como el superusuario. La password matchea APP_ROLE_PASSWORD (default
+      # Settings.app_role_password) que la migracion 20260812_114322 usa
+      # para crear el rol.
+      DATABASE_URL: postgresql://adminprop_app:${APP_ROLE_PASSWORD:-adminprop_app_local_only}@postgres:5432/adminprop
+      # Alembic (`make migrate` -> `docker compose run --rm api alembic
+      # upgrade head`) sigue necesitando el superusuario: adminprop_app no
+      # tiene privilegios DDL. Ver db/migrations/env.py.
+      MIGRATIONS_DATABASE_URL: postgresql://adminprop:adminprop@postgres:5432/adminprop
       REDIS_URL: redis://redis:6379/0
     ports:
       - "8000:8000"
@@ -83,7 +91,9 @@ services:
     environment:
       ENVIRONMENT: local
       LOG_LEVEL: INFO
-      DATABASE_URL: postgresql://adminprop:adminprop@postgres:5432/adminprop
+      # issue #42 -- los workers Celery tampoco corren migraciones: solo
+      # necesitan el rol runtime adminprop_app (RLS FORCE), igual que api.
+      DATABASE_URL: postgresql://adminprop_app:${APP_ROLE_PASSWORD:-adminprop_app_local_only}@postgres:5432/adminprop
       REDIS_URL: redis://redis:6379/0
       # Resend (issue #4, docs/skills/external-integrations.md): unico
       # servicio externo del MVP. Tomado del .env local del host (nunca
@@ -106,7 +116,8 @@ services:
     environment:
       ENVIRONMENT: local
       LOG_LEVEL: INFO
-      DATABASE_URL: postgresql://adminprop:adminprop@postgres:5432/adminprop
+      # issue #42 -- rol runtime adminprop_app (RLS FORCE), no superusuario.
+      DATABASE_URL: postgresql://adminprop_app:${APP_ROLE_PASSWORD:-adminprop_app_local_only}@postgres:5432/adminprop
       REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
@@ -125,7 +136,8 @@ services:
     environment:
       ENVIRONMENT: local
       LOG_LEVEL: INFO
-      DATABASE_URL: postgresql://adminprop:adminprop@postgres:5432/adminprop
+      # issue #42 -- rol runtime adminprop_app (RLS FORCE), no superusuario.
+      DATABASE_URL: postgresql://adminprop_app:${APP_ROLE_PASSWORD:-adminprop_app_local_only}@postgres:5432/adminprop
       REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:

@@ -152,7 +152,14 @@ jobs:
       APP_ENV: test
       DEBUG: 'false'
       SECRET_KEY: test-secret-key-not-used-in-real-crypto
-      DATABASE_URL: postgresql+psycopg2://adminprop:adminprop@localhost:5432/adminprop_test
+      # issue #42 -- DATABASE_URL es la conexion de RUNTIME que usa la app
+      # (y por lo tanto la suite de integracion via get_session_factory()):
+      # debe ser adminprop_app (RLS FORCE), nunca el superusuario, o el
+      # aislamiento multi-tenant fisico (sdd_04 §2.3) no queda ejercitado.
+      DATABASE_URL: postgresql+psycopg2://adminprop_app:adminprop_app_local_only@localhost:5432/adminprop_test
+      # MIGRATIONS_DATABASE_URL es EXCLUSIVA del paso "Run Alembic
+      # migrations" de abajo: superusuario, unico rol con privilegios DDL.
+      MIGRATIONS_DATABASE_URL: postgresql+psycopg2://adminprop:adminprop@localhost:5432/adminprop_test
       DATABASE_POOL_SIZE: '5'
       REDIS_URL: redis://localhost:6379/0
       JWT_PRIVATE_KEY_PATH: ./keys/private.pem
