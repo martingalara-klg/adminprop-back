@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.1
-fecha: 2026-08-11
+version: 1.3
+fecha: 2026-08-14
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.1
+**Versión:** 1.3
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -58,7 +58,7 @@ El frontend discrimina por `error.code`, muestra `error.message`, asocia `error.
 `VALIDATION_ERROR` (400) · `INVALID_DATE_RANGE` (400) · `UNAUTHORIZED` (401) · `ACCOUNT_LOCKED` (403, con countdown en `details.retry_after_seconds`) · `FORBIDDEN` (403) · `ROLE_REQUIRED` (403) · `SUPERADMIN_REQUIRED` (403) · `MEMBERSHIP_INACTIVE` (403) · `NOT_FOUND` (404) · `CONFLICT` (409) · `ENTITY_HAS_DEPENDENCIES` (409) · `BUSINESS_RULE_VIOLATION` (422) · `INVALID_STATUS_TRANSITION` (422) · `RATE_LIMIT_EXCEEDED` (429, con header `Retry-After`) · `INTERNAL_ERROR` (500)
 
 **Auth y usuarios:**
-`INVITATION_NOT_FOUND` (404) · `INVITATION_EXPIRED` (410) · `INVITATION_ALREADY_ACCEPTED` (409) · `INVITATION_PENDING_EXISTS` (409) · `USER_ALREADY_MEMBER` (409) · `LAST_OWNER_REQUIRED` (422) · `ROLE_NOT_FOUND` (404) · `SYSTEM_ROLE_IMMUTABLE` (422)
+`INVITATION_NOT_FOUND` (404) · `INVITATION_EXPIRED` (410) · `INVITATION_ALREADY_ACCEPTED` (409) · `INVITATION_PENDING_EXISTS` (409) · `USER_ALREADY_MEMBER` (409) · `LAST_OWNER_REQUIRED` (422) · `ROLE_NOT_FOUND` (404) · `SYSTEM_ROLE_IMMUTABLE` (422) · `RESET_TOKEN_EXPIRED` (410, agregado issue #8 — `GET/POST /auth/reset-password/:token`; token existió pero venció su ventana de 1h. El caso "nunca existió / ya usado" usa el `NOT_FOUND` genérico de arriba)
 
 **Contratos:**
 `CONTRACT_OVERLAP` (409, con `details.conflicting_contract_id`) · `CONTRACT_NOT_ACTIVE` (422) · `ADJUSTMENT_PENDING_EXISTS` (409) · `ADJUSTMENT_ALREADY_APPLIED` (409) · `ADJUSTMENT_PCT_REQUIRED` (400)
@@ -256,6 +256,9 @@ POST   /notifications/read-all
 GET    /audit-logs                       (page + page_size; filtros: entity_type, entity_id, user_id, action, date range)
 GET    /audit-logs/:id
 ```
+
+- `meta` de la paginación page/page_size: `{ total, page, page_size }` (v1.3 — documenta lo implementado en el issue #32).
+- Cada entrada incluye `user_email` (derivado de `users` por conveniencia del visor, solo lectura — el "quién" de RF-05) además de `user_id`, `before_state`/`after_state`, `request_id` y `created_at`.
 
 ---
 

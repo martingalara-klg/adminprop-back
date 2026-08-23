@@ -1,0 +1,96 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "adminprop-backend"
+version = "0.1.0"
+description = "AdminProp — API de gestion de alquileres para administradoras de propiedades"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic-settings>=2.2",
+    "python-json-logger>=2.0.7",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "psycopg2-binary>=2.9",
+    "asyncpg>=0.29",
+    # issue #4 — Celery/Redis workers (notification_worker, documents_worker,
+    # Beat) + cliente HTTP para Resend (docs/skills/async-worker.md,
+    # docs/skills/external-integrations.md).
+    "celery[redis]>=5.3",
+    "httpx>=0.27",
+    # issue #6 — Auth: JWT RS256 (sdd_04 §2.2), bcrypt cost 12 (passwords),
+    # cliente Redis async para refresh tokens/lockout/rate-limit
+    # (docs/skills/api-endpoint.md "Rate limiting", tenant-isolation.md).
+    "pyjwt[crypto]>=2.8",
+    "bcrypt>=4.1",
+    "redis>=5.0",
+    # issue #24 — RF-07 (recibo PDF de cobro) + RF-08 (certificado de
+    # libre deuda): generacion SINCRONICA de PDF de una pagina
+    # (CLAUDE.md §3 "Documentos: ... WeasyPrint (PDF)"). Requiere
+    # dependencias de sistema (pango/cairo/gdk-pixbuf) declaradas en
+    # docker/Dockerfile.api.
+    "weasyprint>=62,<63",
+    # WeasyPrint 62.x declara `pydyf>=0.10.0` pero es incompatible con
+    # pydyf>=0.11 (`AttributeError: 'super' object has no attribute
+    # 'transform'` en `weasyprint/pdf/stream.py` -- API de pydyf cambio
+    # entre 0.10 y 0.11, confirmado corriendo `HTML(string=...).write_pdf()`
+    # real dentro del contenedor). Se fija `<0.11` hasta migrar a una
+    # version de WeasyPrint que declare el pin correcto.
+    "pydyf<0.11",
+    # issue #26 — Mantenimiento: FastAPI requiere python-multipart para
+    # parsear `UploadFile`/multipart-form-data (POST .../attachments).
+    "python-multipart>=0.0.9",
+    # issue #30 — RF-03 (spec_module_05_liquidaciones.md): export Excel de
+    # liquidaciones generado por `documents_worker` (CLAUDE.md §3
+    # "Documentos: openpyxl (Excel) + WeasyPrint (PDF)"). WeasyPrint ya
+    # esta declarado (issue #24) y se reutiliza para el PDF.
+    "openpyxl>=3.1,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "ruff>=0.4",
+    "pyyaml>=6.0",
+    # issue #24 — verificacion de contenido de los PDFs generados
+    # (extraccion de texto), sin comparacion byte a byte.
+    "pypdf>=4.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/adminprop"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.coverage.run]
+source = ["src/adminprop"]
+# SQLAlchemy async (asyncpg) usa greenlet para puentear sync/async --
+# sin esto, coverage.py no traza las lineas que corren dentro del
+# greenlet, subestimando la cobertura real de repository.py/service.py
+# (issue #6, descubierto al medir el modulo auth).
+concurrency = ["greenlet", "thread"]
+
+[tool.coverage.report]
+# CLAUDE.md §3: cobertura minima 95% (excluye boilerplate trivial)
+fail_under = 95
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# B008: FastAPI usa Depends(...) como valor default de parametro por
+# diseno (docs/skills/api-endpoint.md, module-structure.md) -- no es un
+# mutable-default-argument real (bugbear lo confunde con ese antipatron).
+# Primer modulo con Depends en runtime real (issue #6); se deja el
+# ignore documentado aca para que los modulos siguientes no lo repitan.
+ignore = ["B008"]

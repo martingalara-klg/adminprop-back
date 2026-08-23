@@ -6,7 +6,7 @@ Referencias:
 - Modelo de datos: `docs/sdd/infrastructure/spec_data_model.md` (se crea en el paso 3 del diseño SDD — este link resolverá cuando exista)
 - Arquitectura general: `docs/sdd/core/sdd_04_nonfunctional.md` (se crea en el paso 4 del diseño SDD — este link resolverá cuando exista)
 
-> **Nota de infraestructura:** el `docker-compose.yml` referenciado en este runbook **se crea en el primer issue de infraestructura local del roadmap**. Mientras no exista, los comandos de este documento son la especificación de lo que ese compose debe permitir (servicios `api`, `postgres`, `redis`, healthchecks, `make up`/`make migrate`/`make test`). No hay infra cloud en el MVP: todo corre local vía Docker Compose + CI de tests.
+> **Estado de la infraestructura:** `docker/docker-compose.yml` (issue #2) ya existe con los servicios `postgres`, `redis` y `api` operativos por default, más healthchecks y `make up`/`make migrate`/`make test`. Los workers Celery (`notification_worker`, `documents_worker`, `beat`) ya tienen código (issue #4: `src/adminprop/workers/`) y están declarados en el compose bajo el profile `workers` (desactivado por default, decisión de implementación del issue #2 para no acoplar el arranque básico a Celery) — se activan con `make up-workers` o `docker compose -f docker/docker-compose.yml --profile workers up`. No hay infra cloud en el MVP: todo corre local vía Docker Compose + CI de tests.
 
 ---
 
@@ -53,6 +53,7 @@ Editar `.env` con valores para desarrollo local. **Todos los campos con `change-
 | `RESEND_API_KEY` | https://resend.com/api-keys (gratis hasta 100 emails/día) |
 | `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` | Generar con paso 2.3 |
 | `SENTRY_DSN` | Dejar vacío en local — el SDK detecta y desactiva |
+| `ATTACHMENTS_DIR` | Opcional (issue #26) — storage local de adjuntos de mantenimiento. Default `/data/adminprop-storage`, ya montado como volumen Docker nombrado (`attachments_data`) en el servicio `api`; sobreescribir solo si necesitás otra ruta |
 
 Todos los secretos (API keys, `SECRET_KEY`, credenciales de servicios externos) se manejan en local como **variables de entorno locales (`.env`, no commiteado); migrar a un gestor de secretos cuando exista infra cloud**.
 
@@ -77,7 +78,9 @@ make up
 # docker compose -f docker/docker-compose.yml up --build -d
 ```
 
-> Ver nota de infraestructura al inicio de este documento: el `docker-compose.yml` todavía no existe en el repo — se crea en el primer issue de infraestructura local. Estos comandos describen el comportamiento esperado una vez que exista.
+Esto levanta `postgres`, `redis` y `api`. Los workers Celery no se levantan
+con este comando (profile `workers` desactivado por default, ver nota de
+infraestructura arriba) — usar `make up-workers` para incluirlos.
 
 Espera ~30 segundos a que postgres + redis estén healthy:
 
@@ -95,7 +98,7 @@ make logs service=postgres   # solo postgres
 
 ### 2.5 Verificar extensiones de PostgreSQL
 
-El `docker/postgres/init.sql` (a crearse junto con el `docker-compose.yml`) instala `pgcrypto` automáticamente al crearse el container. Verificar:
+El `docker/postgres/init.sql` instala `pgcrypto` y `btree_gist` automáticamente al crearse el container (sólo corre una vez, contra un volumen de datos vacío). Verificar:
 
 ```bash
 docker compose -f docker/docker-compose.yml exec postgres \
@@ -104,10 +107,11 @@ docker compose -f docker/docker-compose.yml exec postgres \
 
 Esperado:
 ```
-   Name    | Version |   Schema   |         Description
------------+---------+------------+------------------------------
- pgcrypto  | ...     | public     | cryptographic functions
- plpgsql   | 1.0     | pg_catalog | PL/pgSQL procedural language
+    Name    | Version |   Schema   |                  Description
+------------+---------+------------+------------------------------------------------
+ btree_gist | 1.7     | public     | support for indexing common datatypes in GiST
+ pgcrypto   | 1.3     | public     | cryptographic functions
+ plpgsql    | 1.0     | pg_catalog | PL/pgSQL procedural language
 ```
 
 ### 2.6 Cómo correr la migración localmente
@@ -132,15 +136,16 @@ Convenciones de migración (ver `docs/skills/database-migration.md`):
 
 ### 2.7 Verificar que el backend responde
 
-```bash
-curl http://localhost:8000/health/liveness
-# {"status":"ok"}
+Un solo endpoint de health, con checks de DB y Redis (sdd_04 §4.7 — no hay
+`/health/liveness` ni `/health/readiness` separados en este proyecto):
 
-curl http://localhost:8000/health/readiness
-# {"status":"ok","checks":{"database":{"status":"ok",...},"redis":{...}}}
+```bash
+curl http://localhost:8000/health
+# {"data":{"status":"ok","checks":{"database":"ok","redis":"ok"}}}
 ```
 
-Si `/health/readiness` aún no existe en el código, el primer issue de infraestructura local es agregarlo.
+Si algún check falla, la respuesta es `503` con `"status":"degraded"` y el
+check correspondiente en `"unreachable"`.
 
 ### 2.8 Correr la suite de tests
 
@@ -175,7 +180,8 @@ make migrate
 
 | Comando | Hace |
 |---|---|
-| `make up` | Levanta toda la infra local (api + workers + postgres + redis) |
+| `make up` | Levanta `postgres` + `redis` + `api` (build incluido) |
+| `make up-workers` | Además levanta los workers Celery bajo el profile `workers` (`notification_worker`, `documents_worker`, `beat` — issue #4) |
 | `make down` | Apaga todos los containers |
 | `make logs` | Logs en vivo de todos los servicios |
 | `make logs service=api` | Logs solo de la API |
@@ -236,6 +242,7 @@ En el MVP no hay infraestructura cloud (ver nota al inicio del documento): no ex
 | `Address already in use` en puerto 8000/5432 | Otro proceso usando el puerto | `lsof -i :8000` y matar el proceso, o cambiar puerto en `docker-compose.yml` |
 | `RESEND_API_KEY not set` al correr tests que envían email | Tests intentan llamar Resend real | Los tests deben usar mocks/fixtures deterministas; verificar `tests/conftest.py` |
 | `JWT_PRIVATE_KEY_PATH` not found | Faltó paso 2.3 | Generar las claves: `openssl genrsa ...` |
+| `OSError`/`ffi.error` al generar un PDF (recibo o libre deuda, issue #24) | Imagen `api` vieja, sin las libs de sistema de WeasyPrint (`docker/Dockerfile.api`) | `docker compose -f docker/docker-compose.yml build api` (rebuild obligatorio tras el issue #24, que agregó `weasyprint`/`pydyf` a `pyproject.toml` y las libs `libpango`/`libcairo`/`libgdk-pixbuf` al Dockerfile) |
 
 ---
 

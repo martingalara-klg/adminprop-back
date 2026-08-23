@@ -1,0 +1,33 @@
+# docker/Dockerfile.api — imagen de la API FastAPI (issue #2).
+# Nombre alineado con .github/workflows/ci.yml (job docker-build), que ya
+# esperaba docker/Dockerfile.api / docker/Dockerfile.worker antes de que
+# este issue creara el compose.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# issue #24 — dependencias de sistema de WeasyPrint (RF-07/RF-08: recibo
+# de cobro + certificado de libre deuda, PDF sincronico). Lista minima
+# para WeasyPrint 62.x en Debian slim (doc oficial "Install" — Debian/
+# Ubuntu): Pango + cairo (via libpangocairo) para el layout de texto,
+# gdk-pixbuf para imagenes, libffi-dev para cffi (dependencia de
+# cairocffi) y shared-mime-info para la deteccion de tipos de recursos.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf-2.0-0 \
+        libffi-dev \
+        shared-mime-info \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md alembic.ini ./
+COPY src ./src
+COPY tests ./tests
+
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir -e ".[dev]"
+
+EXPOSE 8000
+
+CMD ["uvicorn", "adminprop.main:app", "--host", "0.0.0.0", "--port", "8000"]

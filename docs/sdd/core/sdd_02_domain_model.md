@@ -2,12 +2,12 @@
 name: AdminProp — Modelo de Dominio
 description: Entidades del dominio de gestión de alquileres, invariantes (RN-C, RN-P, RN-L, RN-A, RN-D), relaciones y glosario unificado
 type: project
-version: 1.1
-fecha: 2026-08-11
+version: 1.2
+fecha: 2026-08-20
 ---
 # AdminProp — Modelo de Dominio
 
-**Versión:** 1.1
+**Versión:** 1.2
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -393,13 +393,13 @@ Aviso in-app + email a un usuario por un evento del sistema.
 |---|---|---|
 | id | UUID | Identificador único |
 | user_id | UUID | Destinatario |
-| event_type | enum | `adjustment_pending` \| `contract_expiring` \| `quote_submitted` \| `work_order_created` \| `work_order_closed` |
+| event_type | enum | `adjustment_pending` \| `contract_expiring` \| `quote_submitted` \| `quote_approved` \| `work_order_created` \| `work_order_closed` |
 | payload | JSON | Datos del evento (contrato, propiedad, pedido, etc.) |
 | read_at | timestamp | Null = no leída |
 | email_sent_at | timestamp | Cuándo salió el email (null si falló/pendiente) |
 
 **Invariantes:**
-- El evento se enruta según el rol: `work_order_created` → maintenance; `quote_submitted`, `work_order_closed`, `adjustment_pending`, `contract_expiring` → owner y admin.
+- El evento se enruta según el rol: `work_order_created`, `quote_approved` → maintenance; `quote_submitted`, `work_order_closed`, `adjustment_pending`, `contract_expiring` → owner y admin.
 
 ---
 

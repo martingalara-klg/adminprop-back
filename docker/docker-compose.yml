@@ -1,0 +1,154 @@
+name: adminprop-back
+
+# Referencias:
+# - CLAUDE.md §3 "Stack de backend" — Postgres 16, Redis 7, Celery 5.
+# - docs/runbooks/RUNBOOK-LOCAL-001-backend.md — comandos make up/migrate/test.
+# - docs/sdd/core/sdd_04_nonfunctional.md §3.1 — ambiente local: Postgres 16 +
+#   Redis 7 + API + workers.
+#
+# Decisión de implementación (issue #2, completado por el issue #4): los
+# workers Celery (notification_worker, documents_worker, beat — CLAUDE.md
+# §3 y sdd_04 §1.3) ya existen en el código (src/adminprop/workers/). Se
+# mantienen acá bajo el profile "workers" (desactivado por default) para
+# que `docker compose up` (sin --profile) levante sólo lo operativo por
+# default (postgres, redis, api) — activarlos es una decisión explícita.
+# Se activan con:
+#   docker compose -f docker/docker-compose.yml --profile workers up
+#   (o `make up-workers`)
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: adminprop
+      POSTGRES_PASSWORD: adminprop
+      POSTGRES_DB: adminprop
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adminprop -d adminprop"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: INFO
+      # issue #42 -- runtime conecta como adminprop_app (RLS FORCE), nunca
+      # como el superusuario. La password matchea APP_ROLE_PASSWORD (default
+      # Settings.app_role_password) que la migracion 20260812_114322 usa
+      # para crear el rol.
+      DATABASE_URL: postgresql://adminprop_app:${APP_ROLE_PASSWORD:-adminprop_app_local_only}@postgres:5432/adminprop
+      # Alembic (`make migrate` -> `docker compose run --rm api alembic
+      # upgrade head`) sigue necesitando el superusuario: adminprop_app no
+      # tiene privilegios DDL. Ver db/migrations/env.py.
+      MIGRATIONS_DATABASE_URL: postgresql://adminprop:adminprop@postgres:5432/adminprop
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../src:/app/src
+      - ../tests:/app/tests
+      # issue #26 -- storage local de adjuntos (mantenimiento):
+      # shared/storage/local.py escribe bajo Settings.attachments_dir
+      # (default /data/adminprop-storage). Volumen nombrado para que los
+      # archivos sobrevivan a un `docker compose restart` del contenedor
+      # api, igual criterio que `postgres_data`/`redis_data`.
+      - attachments_data:/data/adminprop-storage
+    command: ["uvicorn", "adminprop.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # --- Workers Celery (issue #4) ---------------------------------------------
+  # Desactivados por default vía profile "workers" (decisión de
+  # implementación del issue #2, ver nota de arriba) — activar con
+  # `make up-workers` o `docker compose ... --profile workers up`.
+  notification_worker:
+    profiles: ["workers"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: INFO
+      # issue #42 -- los workers Celery tampoco corren migraciones: solo
+      # necesitan el rol runtime adminprop_app (RLS FORCE), igual que api.
+      DATABASE_URL: postgresql://adminprop_app:${APP_ROLE_PASSWORD:-adminprop_app_local_only}@postgres:5432/adminprop
+      REDIS_URL: redis://redis:6379/0
+      # Resend (issue #4, docs/skills/external-integrations.md): unico
+      # servicio externo del MVP. Tomado del .env local del host (nunca
+      # commiteado); el default cubre desarrollo local sin key real.
+      RESEND_API_KEY: ${RESEND_API_KEY:-re_local_dev_placeholder}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../src:/app/src
+    command: ["celery", "-A", "adminprop.workers.celery_app", "worker", "-Q", "notifications", "--loglevel=info"]
+
+  documents_worker:
+    profiles: ["workers"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: INFO
+      # issue #42 -- rol runtime adminprop_app (RLS FORCE), no superusuario.
+      DATABASE_URL: postgresql://adminprop_app:${APP_ROLE_PASSWORD:-adminprop_app_local_only}@postgres:5432/adminprop
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../src:/app/src
+    command: ["celery", "-A", "adminprop.workers.celery_app", "worker", "-Q", "documents", "--loglevel=info"]
+
+  beat:
+    profiles: ["workers"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    environment:
+      ENVIRONMENT: local
+      LOG_LEVEL: INFO
+      # issue #42 -- rol runtime adminprop_app (RLS FORCE), no superusuario.
+      DATABASE_URL: postgresql://adminprop_app:${APP_ROLE_PASSWORD:-adminprop_app_local_only}@postgres:5432/adminprop
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ../src:/app/src
+    command: ["celery", "-A", "adminprop.workers.celery_app", "beat", "--loglevel=info"]
+
+volumes:
+  postgres_data:
+  redis_data:
+  attachments_data:
