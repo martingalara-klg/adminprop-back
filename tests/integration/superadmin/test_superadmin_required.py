@@ -22,6 +22,7 @@ async def _seed_org_and_user(*, organization_id: uuid.UUID, user_id: uuid.UUID) 
     siembran filas minimas que coincidan con los claims."""
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text("INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, :name)"),
             {

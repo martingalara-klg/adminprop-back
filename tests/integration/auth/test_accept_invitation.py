@@ -18,8 +18,11 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _organization_status(organization_id) -> str:
+    # issue #42: adminprop_app ya no bypassea RLS -- la lectura cross-tenant
+    # necesita SET LOCAL ROLE adminprop_superadmin explicito.
     session_factory = get_session_factory()
     async with session_factory() as session:
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text("SELECT status FROM organizations WHERE id = :id"),
             {"id": str(organization_id)},

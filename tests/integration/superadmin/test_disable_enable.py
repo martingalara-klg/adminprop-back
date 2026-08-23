@@ -37,6 +37,7 @@ async def _seed_active_owner(organization_id: str, *, password: str = "Password1
     email = f"member-{user_id.hex[:12]}@example.com"
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO users (id, email, password_hash, full_name, is_super_admin) "

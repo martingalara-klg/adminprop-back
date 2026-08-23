@@ -48,6 +48,7 @@ async def _seed_organization(
     )
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO organizations (id, slug, name, status, settings) "
@@ -104,6 +105,7 @@ async def _seed_contract(
     contract_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO landlords (id, organization_id, name, commission_pct) "
@@ -154,6 +156,7 @@ async def _seed_contract(
 async def _contract_row(organization_id: uuid.UUID, contract_id: uuid.UUID) -> dict:
     session_factory = get_session_factory()
     async with session_factory() as session:
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text(
                 "SELECT status, expiring_notified_at FROM contracts "
@@ -167,6 +170,7 @@ async def _contract_row(organization_id: uuid.UUID, contract_id: uuid.UUID) -> d
 async def _property_status(organization_id: uuid.UUID, property_id: uuid.UUID) -> str:
     session_factory = get_session_factory()
     async with session_factory() as session:
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text("SELECT status FROM properties WHERE organization_id = :org_id AND id = :id"),
             {"org_id": str(organization_id), "id": str(property_id)},
@@ -190,6 +194,7 @@ def _calls_for_org(calls: list[tuple], organization_id: uuid.UUID) -> list[tuple
 async def _notification_count(organization_id: uuid.UUID, event_type: str) -> int:
     session_factory = get_session_factory()
     async with session_factory() as session:
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text(
                 "SELECT count(*) FROM notifications "

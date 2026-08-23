@@ -41,6 +41,7 @@ async def _seed_organization(*, status: str = "active") -> uuid.UUID:
     role_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO organizations (id, slug, name, status) "
@@ -92,6 +93,7 @@ async def _seed_contract(
     contract_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO landlords (id, organization_id, name, commission_pct) "
@@ -147,6 +149,7 @@ async def _seed_contract(
 async def _pending_adjustments(organization_id: uuid.UUID, contract_id: uuid.UUID) -> list[dict]:
     session_factory = get_session_factory()
     async with session_factory() as session:
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text(
                 "SELECT id, due_period, status, previous_amount FROM contract_adjustments "
@@ -160,6 +163,7 @@ async def _pending_adjustments(organization_id: uuid.UUID, contract_id: uuid.UUI
 async def _notification_count(organization_id: uuid.UUID, event_type: str) -> int:
     session_factory = get_session_factory()
     async with session_factory() as session:
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text(
                 "SELECT count(*) FROM notifications "
@@ -283,6 +287,7 @@ class TestCA0304DetectDueAdjustments:
         )
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text(
                     "INSERT INTO contract_adjustments "

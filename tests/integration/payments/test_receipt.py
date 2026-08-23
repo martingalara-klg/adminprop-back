@@ -22,6 +22,7 @@ pytestmark = pytest.mark.asyncio
 async def _set_billing_header(organization_id, *, name: str, cuit: str, contact: str) -> None:
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text("SELECT settings FROM organizations WHERE id = :id"),
             {"id": str(organization_id)},
@@ -92,6 +93,7 @@ async def _seed_payment(
     if exchange_rate is not None:
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text("UPDATE payments SET exchange_rate = :rate WHERE id = :id"),
                 {"rate": exchange_rate, "id": str(payment_id)},
@@ -99,6 +101,7 @@ async def _seed_payment(
     if voided:
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text("UPDATE payments SET voided_at = now(), voided_by = :by WHERE id = :id"),
                 {"by": str(owner["id"]), "id": str(payment_id)},

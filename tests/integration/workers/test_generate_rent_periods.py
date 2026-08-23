@@ -31,6 +31,7 @@ async def _seed_organization(*, status: str = "active") -> uuid.UUID:
     org_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO organizations (id, slug, name, status) "
@@ -60,6 +61,7 @@ async def _seed_contract(
     contract_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO landlords (id, organization_id, name, commission_pct) "
@@ -114,6 +116,7 @@ async def _seed_pending_adjustment(
 ) -> None:
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO contract_adjustments "
@@ -132,6 +135,7 @@ async def _seed_pending_adjustment(
 async def _rent_periods(organization_id: uuid.UUID, contract_id: uuid.UUID) -> list[dict]:
     session_factory = get_session_factory()
     async with session_factory() as session:
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text(
                 "SELECT id, period, amount_due, currency, status FROM rent_periods "

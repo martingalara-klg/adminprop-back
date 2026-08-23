@@ -87,12 +87,16 @@ class TestRefreshMembership:
             "/v1/auth/login", json={"email": member["email"], "password": member["password"]}
         )
 
+        # issue #42: adminprop_app ya no bypassea RLS -- la escritura
+        # cross-tenant necesita SET LOCAL ROLE adminprop_superadmin
+        # explicito.
         import sqlalchemy as sa
 
         from adminprop.db.session import get_session_factory
 
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text(
                     "UPDATE organization_members SET status = 'inactive' WHERE user_id = :user_id"
@@ -130,6 +134,7 @@ class TestRefreshMembership:
 
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text("UPDATE users SET is_super_admin = false WHERE id = :user_id"),
                 {"user_id": str(user["id"])},

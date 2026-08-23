@@ -13,11 +13,19 @@ SDD: core/sdd_02_domain_model.md §3 RN-D01
 """
 
 import uuid
+from collections.abc import AsyncGenerator
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from adminprop.db.session import get_session_factory, set_tenant_context, tenant_scoped_session
+from adminprop.config import get_settings
+from adminprop.db.session import (
+    get_session_factory,
+    set_tenant_context,
+    tenant_scoped_session,
+    to_async_dsn,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -27,9 +35,27 @@ ORG_B = uuid.uuid4()
 
 
 @pytest.fixture
-async def probe_table():
+async def _superuser_session_factory() -> AsyncGenerator[async_sessionmaker]:
+    """Issue #42: `get_session_factory()` ahora conecta como `adminprop_app`,
+    que solo tiene `USAGE` (no `CREATE`) sobre el schema `public` -- ni
+    `adminprop_superadmin` (BYPASSRLS, pero tampoco tiene `CREATE` en el
+    schema) puede crear la tabla "probe" descartable de este modulo. Esta
+    fixture crea un engine efimero con el superusuario de Postgres
+    (`Settings.migrations_database_url`, el mismo rol que usa Alembic) SOLO
+    para el DDL de `probe_table` de abajo -- las aserciones de los tests
+    siguen usando `get_session_factory()` (adminprop_app real) sin cambios.
+    """
+    engine = create_async_engine(to_async_dsn(get_settings().migrations_database_url))
+    try:
+        yield async_sessionmaker(bind=engine, expire_on_commit=False)
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture
+async def probe_table(_superuser_session_factory: async_sessionmaker):
     """Tabla RLS descartable — no forma parte del modelo de datos del SDD."""
-    session_factory = get_session_factory()
+    session_factory = _superuser_session_factory
     async with session_factory() as session, session.begin():
         await session.execute(
             sa.text(

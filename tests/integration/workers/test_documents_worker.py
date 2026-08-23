@@ -217,6 +217,7 @@ class TestCa0502UsdConversionEndToEnd:
 
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text(
                     "SELECT original_amount, original_currency, amount_ars "
@@ -287,6 +288,7 @@ class TestCa0502UsdConversionEndToEnd:
 
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text(
                     "SELECT original_amount, original_currency, amount_ars "

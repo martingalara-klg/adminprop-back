@@ -103,6 +103,8 @@ async def rows() -> AsyncGenerator[_Rows]:
     user_id = uuid.uuid4()
 
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, 'Org Mantenimiento')"
@@ -134,6 +136,8 @@ async def rows() -> AsyncGenerator[_Rows]:
     yield _Rows(organization_id=org_id, property_id=property_id, user_id=user_id)
 
     async with session_factory() as session, session.begin():
+        # issue #42: teardown cruza el bootstrap de la organizacion -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text("DELETE FROM attachments WHERE organization_id = :org_id"),
             {"org_id": str(org_id)},
@@ -183,6 +187,8 @@ async def _insert_work_order(
     work_order_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO work_orders "
@@ -212,6 +218,8 @@ async def _insert_quote(
     quote_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO work_order_quotes "
@@ -239,6 +247,8 @@ async def _insert_attachment(
     attachment_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO attachments "
@@ -507,6 +517,8 @@ class TestCA2501OneApprovedQuotePerWorkOrder:
         session_factory = get_session_factory()
         with pytest.raises(IntegrityError):
             async with session_factory() as session, session.begin():
+                # issue #42: no se testea tenant isolation aca -- bypass RLS.
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text("UPDATE work_order_quotes SET status = 'approved' WHERE id = :id"),
                     {"id": str(second_quote_id)},
@@ -528,6 +540,8 @@ class TestCA2501OneApprovedQuotePerWorkOrder:
         second_quote_id = await _insert_quote(rows, work_order_id=work_order_id, status="submitted")
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            # issue #42: no se testea tenant isolation aca -- bypass RLS.
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text("UPDATE work_order_quotes SET status = 'discarded' WHERE id = :id"),
                 {"id": str(first_quote_id)},
@@ -589,6 +603,8 @@ class TestWorkOrdersChecks:
         work_order_id = uuid.uuid4()
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            # issue #42: no se testea tenant isolation aca -- bypass RLS.
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text(
                     "INSERT INTO work_orders "
@@ -604,6 +620,7 @@ class TestWorkOrdersChecks:
                 },
             )
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text("SELECT status FROM work_orders WHERE id = :id"),
                 {"id": str(work_order_id)},
@@ -633,6 +650,8 @@ class TestWorkOrderQuotesChecks:
         quote_id = uuid.uuid4()
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            # issue #42: no se testea tenant isolation aca -- bypass RLS.
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text(
                     "INSERT INTO work_order_quotes "
@@ -647,6 +666,7 @@ class TestWorkOrderQuotesChecks:
                 },
             )
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text("SELECT status FROM work_order_quotes WHERE id = :id"),
                 {"id": str(quote_id)},
@@ -663,11 +683,14 @@ async def test_allows_setting_approved_quote_id_on_work_order(rows):
     quote_id = await _insert_quote(rows, work_order_id=work_order_id, status="approved")
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text("UPDATE work_orders SET approved_quote_id = :quote_id WHERE id = :id"),
             {"quote_id": str(quote_id), "id": str(work_order_id)},
         )
     async with session_factory() as session:
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text("SELECT approved_quote_id FROM work_orders WHERE id = :id"),
             {"id": str(work_order_id)},
@@ -681,11 +704,14 @@ async def test_allows_soft_deleting_a_work_order_via_deleted_at(rows):
     work_order_id = await _insert_work_order(rows)
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text("UPDATE work_orders SET deleted_at = now() WHERE id = :id"),
             {"id": str(work_order_id)},
         )
     async with session_factory() as session:
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text("SELECT deleted_at FROM work_orders WHERE id = :id"),
             {"id": str(work_order_id)},
@@ -699,11 +725,14 @@ async def test_allows_soft_deleting_an_attachment_via_deleted_at(rows):
     attachment_id = await _insert_attachment(rows, entity_type="work_order")
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text("UPDATE attachments SET deleted_at = now() WHERE id = :id"),
             {"id": str(attachment_id)},
         )
     async with session_factory() as session:
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text("SELECT deleted_at FROM attachments WHERE id = :id"),
             {"id": str(attachment_id)},

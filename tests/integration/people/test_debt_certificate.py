@@ -22,6 +22,7 @@ pytestmark = pytest.mark.asyncio
 async def _set_billing_header(organization_id, *, name: str) -> None:
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text("SELECT settings FROM organizations WHERE id = :id"),
             {"id": str(organization_id)},

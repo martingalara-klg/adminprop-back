@@ -17,8 +17,11 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _audit_rows(organization_id, action: str) -> list[dict]:
+    # issue #42: adminprop_app ya no bypassea RLS -- la lectura cross-tenant
+    # necesita SET LOCAL ROLE adminprop_superadmin explicito.
     session_factory = get_session_factory()
     async with session_factory() as session:
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text(
                 "SELECT entity_id, user_id, before_state, after_state FROM audit_logs "
