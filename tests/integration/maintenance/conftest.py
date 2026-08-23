@@ -121,6 +121,7 @@ def seed(rsa_keypair):
             email = email or _unique_email()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO users (id, email, password_hash, full_name, is_super_admin) "
@@ -144,6 +145,7 @@ def seed(rsa_keypair):
             name = name or f"Org {org_id.hex[:8]}"
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO organizations (id, slug, name, status) "
@@ -170,6 +172,7 @@ def seed(rsa_keypair):
             permissions = permissions if permissions is not None else ["work-order:read"]
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO roles (id, organization_id, name, permissions) "
@@ -194,6 +197,7 @@ def seed(rsa_keypair):
         ) -> None:
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO organization_members "
@@ -219,6 +223,7 @@ def seed(rsa_keypair):
             settings = dict(DEFAULT_ORGANIZATION_SETTINGS)
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "UPDATE organizations SET settings = :settings WHERE id = :id"
@@ -271,6 +276,7 @@ def seed(rsa_keypair):
             landlord_id = uuid.uuid4()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO landlords (id, organization_id, name, commission_pct) "
@@ -291,6 +297,7 @@ def seed(rsa_keypair):
             property_id = uuid.uuid4()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO properties "
@@ -329,6 +336,7 @@ def seed(rsa_keypair):
             work_order_id = uuid.uuid4()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO work_orders "
@@ -361,6 +369,7 @@ def seed(rsa_keypair):
             settlement_id = uuid.uuid4()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO landlords (id, organization_id, name, commission_pct) "
@@ -395,6 +404,7 @@ def seed(rsa_keypair):
             quote_id = uuid.uuid4()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO work_order_quotes "
@@ -422,6 +432,7 @@ def seed(rsa_keypair):
             mano, igual que en el flujo real."""
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text("UPDATE work_orders SET approved_quote_id = :quote_id WHERE id = :id"),
                     {"quote_id": str(quote_id), "id": str(work_order_id)},
@@ -430,6 +441,7 @@ def seed(rsa_keypair):
         async def get_work_order(self, work_order_id: uuid.UUID) -> dict:
             session_factory = get_session_factory()
             async with session_factory() as session:
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 result = await session.execute(
                     sa.text(
                         "SELECT status, final_cost, approved_quote_id FROM work_orders "
@@ -443,6 +455,7 @@ def seed(rsa_keypair):
         async def get_quote(self, quote_id: uuid.UUID) -> dict:
             session_factory = get_session_factory()
             async with session_factory() as session:
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 result = await session.execute(
                     sa.text("SELECT status FROM work_order_quotes WHERE id = :id"),
                     {"id": str(quote_id)},
@@ -455,6 +468,7 @@ def seed(rsa_keypair):
         ) -> list[dict]:
             session_factory = get_session_factory()
             async with session_factory() as session:
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 result = await session.execute(
                     sa.text(
                         "SELECT user_id, payload FROM notifications "
@@ -468,6 +482,7 @@ def seed(rsa_keypair):
         async def audit_rows(self, organization_id: uuid.UUID, action: str) -> list[dict]:
             session_factory = get_session_factory()
             async with session_factory() as session:
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 result = await session.execute(
                     sa.text(
                         "SELECT entity_id, user_id, before_state, after_state FROM audit_logs "

@@ -41,8 +41,11 @@ async def _set_property_status(property_id, status: str) -> None:
     """Simula el efecto de `ContractService.activate` sobre la propiedad
     cuando el contrato `active` fue sembrado directo en DB (sin pasar por
     el endpoint) -- necesario para ejercitar `terminate` de forma aislada."""
+    # issue #42: adminprop_app ya no bypassea RLS -- la escritura cross-tenant
+    # necesita SET LOCAL ROLE adminprop_superadmin explicito.
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text("UPDATE properties SET status = :status WHERE id = :id"),
             {"id": str(property_id), "status": status},
@@ -535,8 +538,11 @@ class TestCA0308AndCA0104TerminateReturnsPropertyToAvailable:
 
         today = datetime.now(UTC).date()
         current_month = date(today.year, today.month, 1)
+        # issue #42: verificacion cruda fuera del flujo HTTP -- bypass
+        # explicito (no es RLS lo que se esta probando aca).
         session_factory = get_session_factory()
-        async with session_factory() as session:
+        async with session_factory() as session, session.begin():
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             rent_period = await RentPeriodRepository(session).get_by_contract_and_period(
                 uuid.UUID(contract_id), owner["organization_id"], current_month
             )

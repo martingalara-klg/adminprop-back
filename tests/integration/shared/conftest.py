@@ -89,6 +89,7 @@ def seed(rsa_keypair):
             role_id = uuid.uuid4()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, :name)"
@@ -155,13 +156,14 @@ def seed(rsa_keypair):
 
 @pytest.fixture()
 def audit_logs_reader():
-    """Lee filas de `audit_logs` directamente (bajo el rol de conexion del
-    pool -- superuser en test, no sujeto a RLS) para verificar que el
-    INSERT ocurrio con los campos correctos."""
+    """Lee filas de `audit_logs` directamente (via `SET LOCAL ROLE
+    adminprop_superadmin`, que tiene BYPASSRLS -- issue #42) para verificar
+    que el INSERT ocurrio con los campos correctos."""
 
     async def _fetch(organization_id: uuid.UUID) -> list[dict]:
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text(
                     "SELECT action, entity_type, entity_id, user_id, before_state, "

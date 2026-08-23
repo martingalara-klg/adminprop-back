@@ -34,15 +34,15 @@ _TENANT_SCOPED_TABLES = ("roles", "organization_members", "organization_invitati
 async def test_ca_5_01_alembic_upgrade_head_deja_la_base_en_la_revision_actual():
     """CA-5-01: `alembic upgrade head` deja la base en la revision de esta migracion.
 
-    Issue #31 agrego `20260821_100000_add_quote_approved_to_notifications.py`
-    encima de `20260820_090000_create_capa6_liquidaciones.py` (issue #27) --
-    el head se actualiza a esa revision.
+    Issue #42 agrego `20260823_090000_grant_superadmin_role_to_app.py`
+    encima de `20260821_100000_add_quote_approved_to_notifications.py`
+    (issue #31) -- el head se actualiza a esa revision.
     """
     engine = get_engine()
     async with engine.connect() as conn:
         result = await conn.execute(sa.text("SELECT version_num FROM alembic_version"))
         version = result.scalar_one()
-    assert version == "20260821_100000"
+    assert version == "20260823_090000"
 
 
 async def test_ca_5_01_las_cinco_tablas_de_capa0_existen():

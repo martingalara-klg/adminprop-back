@@ -62,6 +62,7 @@ async def _seed_org_with_owner_and_notification() -> tuple[uuid.UUID, uuid.UUID]
     role_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text("INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, :name)"),
             {"id": str(org_id), "slug": f"org-{org_id.hex[:8]}", "name": "Org outbox"},
@@ -102,6 +103,7 @@ async def _seed_org_with_owner_and_notification() -> tuple[uuid.UUID, uuid.UUID]
 async def _email_sent_at(organization_id: uuid.UUID, notification_id: uuid.UUID):
     session_factory = get_session_factory()
     async with session_factory() as session:
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text("SELECT email_sent_at FROM notifications WHERE id = :id"),
             {"id": str(notification_id)},

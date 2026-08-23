@@ -45,6 +45,9 @@ async def two_orgs_with_settlement_rows_each() -> AsyncGenerator[None]:
     line_item_a, line_item_b = uuid.uuid4(), uuid.uuid4()
 
     async with session_factory() as session, session.begin():
+        # issue #42: seed cruza dos organizaciones en una sola transaccion --
+        # bypass RLS explicito, no se testea aislamiento en este bloque.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO organizations (id, slug, name) "
@@ -174,6 +177,8 @@ async def two_orgs_with_settlement_rows_each() -> AsyncGenerator[None]:
         )
     yield
     async with session_factory() as session, session.begin():
+        # issue #42: teardown cruza dos organizaciones -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text("DELETE FROM settlement_line_items WHERE organization_id IN (:org_a, :org_b)"),
             {"org_a": str(ORG_A), "org_b": str(ORG_B)},

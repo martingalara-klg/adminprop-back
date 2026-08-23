@@ -11,7 +11,20 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     service_name: str = "adminprop-api"
 
-    database_url: str = "postgresql://adminprop:adminprop@localhost:5432/adminprop"
+    # issue #42 -- runtime (pool de la API + workers Celery) conecta como
+    # `adminprop_app` (NOSUPERUSER, NOBYPASSRLS, sujeto a RLS FORCE): sin
+    # esto el superusuario de Postgres bypasseaba RLS y el aislamiento
+    # fisico multi-tenant (sdd_04 §2.3, RN-D01) nunca estaba efectivamente
+    # activo, solo la defensa app-level (filtro organization_id explicito).
+    database_url: str = (
+        "postgresql://adminprop_app:adminprop_app_local_only@localhost:5432/adminprop"
+    )
+    # Conexion de superusuario, EXCLUSIVA para Alembic (`db/migrations/env.py`).
+    # Las migraciones necesitan DDL (CREATE TABLE/ROLE, ALTER DEFAULT
+    # PRIVILEGES) que `adminprop_app` no tiene ni debe tener -- separarla de
+    # `database_url` es lo que permite que el runtime conecte con el rol
+    # RLS sin dejar de poder migrar el schema.
+    migrations_database_url: str = "postgresql://adminprop:adminprop@localhost:5432/adminprop"
     redis_url: str = "redis://localhost:6379/0"
 
     # Passwords de los roles PostgreSQL RLS (issue #3, sdd_04 §2.3).

@@ -54,6 +54,8 @@ async def test_ca_12_01_landlords_bank_info_es_ilegible_consultando_la_columna_c
     session_factory = get_session_factory()
 
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text("INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, :name)"),
             {
@@ -72,6 +74,7 @@ async def test_ca_12_01_landlords_bank_info_es_ilegible_consultando_la_columna_c
         )
 
     async with session_factory() as session:
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         result = await session.execute(
             sa.text("SELECT bank_info FROM landlords WHERE organization_id = :org_id"),
             {"org_id": str(organization_id)},
@@ -86,6 +89,8 @@ async def test_ca_12_01_landlords_bank_info_es_ilegible_consultando_la_columna_c
     assert recovered == plaintext
 
     async with session_factory() as session, session.begin():
+        # issue #42: teardown cruza el bootstrap de la organizacion -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text("DELETE FROM landlords WHERE organization_id = :org_id"),
             {"org_id": str(organization_id)},

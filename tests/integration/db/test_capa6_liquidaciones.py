@@ -117,6 +117,8 @@ async def rows() -> AsyncGenerator[_Rows]:
     user_id = uuid.uuid4()
 
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, 'Org Liquidaciones')"
@@ -150,6 +152,8 @@ async def rows() -> AsyncGenerator[_Rows]:
     )
 
     async with session_factory() as session, session.begin():
+        # issue #42: teardown cruza el bootstrap de la organizacion -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text("DELETE FROM settlement_line_items WHERE organization_id = :org_id"),
             {"org_id": str(org_id)},
@@ -203,6 +207,8 @@ async def _insert_recurring_charge(
     recurring_charge_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO recurring_charges "
@@ -230,6 +236,8 @@ async def _insert_charge_entry(
     entry_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO charge_entries "
@@ -258,6 +266,8 @@ async def _insert_settlement(
     settlement_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO settlements "
@@ -289,6 +299,8 @@ async def _insert_line_item(
     line_item_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO settlement_line_items "
@@ -314,6 +326,8 @@ async def _insert_work_order(rows: _Rows) -> uuid.UUID:
     work_order_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO work_orders "
@@ -632,6 +646,8 @@ class TestCA2703WorkOrdersSettledInSettlement:
         settlement_id = await _insert_settlement(rows)
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            # issue #42: no se testea tenant isolation aca -- bypass RLS.
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text(
                     "UPDATE work_orders SET settled_in_settlement_id = :settlement_id "
@@ -640,6 +656,7 @@ class TestCA2703WorkOrdersSettledInSettlement:
                 {"settlement_id": str(settlement_id), "id": str(work_order_id)},
             )
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text("SELECT settled_in_settlement_id FROM work_orders WHERE id = :id"),
                 {"id": str(work_order_id)},
@@ -651,6 +668,7 @@ class TestCA2703WorkOrdersSettledInSettlement:
         work_order_id = await _insert_work_order(rows)
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text("SELECT settled_in_settlement_id FROM work_orders WHERE id = :id"),
                 {"id": str(work_order_id)},
@@ -663,6 +681,8 @@ class TestCA2703WorkOrdersSettledInSettlement:
         session_factory = get_session_factory()
         with pytest.raises(IntegrityError):
             async with session_factory() as session, session.begin():
+                # issue #42: no se testea tenant isolation aca -- bypass RLS.
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "UPDATE work_orders SET settled_in_settlement_id = :settlement_id "
@@ -690,6 +710,7 @@ class TestRecurringChargesChecks:
         recurring_charge_id = await _insert_recurring_charge(rows)
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text("SELECT is_active FROM recurring_charges WHERE id = :id"),
                 {"id": str(recurring_charge_id)},
@@ -702,11 +723,14 @@ class TestRecurringChargesChecks:
         recurring_charge_id = await _insert_recurring_charge(rows)
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            # issue #42: no se testea tenant isolation aca -- bypass RLS.
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text("UPDATE recurring_charges SET deleted_at = now() WHERE id = :id"),
                 {"id": str(recurring_charge_id)},
             )
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text("SELECT deleted_at FROM recurring_charges WHERE id = :id"),
                 {"id": str(recurring_charge_id)},
@@ -752,6 +776,8 @@ class TestSettlementsChecks:
         settlement_id = uuid.uuid4()
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            # issue #42: no se testea tenant isolation aca -- bypass RLS.
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text(
                     "INSERT INTO settlements "
@@ -767,6 +793,7 @@ class TestSettlementsChecks:
                 },
             )
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text("SELECT status FROM settlements WHERE id = :id"),
                 {"id": str(settlement_id)},
@@ -779,6 +806,8 @@ class TestSettlementsChecks:
         session_factory = get_session_factory()
         with pytest.raises(IntegrityError):
             async with session_factory() as session, session.begin():
+                # issue #42: no se testea tenant isolation aca -- bypass RLS.
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO settlements "
@@ -799,6 +828,7 @@ class TestSettlementsChecks:
         settlement_id = await _insert_settlement(rows)
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text("SELECT exchange_rate FROM settlements WHERE id = :id"),
                 {"id": str(settlement_id)},

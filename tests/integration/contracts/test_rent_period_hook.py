@@ -23,7 +23,7 @@ from decimal import Decimal
 import pytest
 import sqlalchemy as sa
 
-from adminprop.db.session import get_session_factory
+from adminprop.db.session import get_session_factory, set_tenant_context
 from adminprop.modules.contracts.rent_period_hook import (
     contract_has_pending_adjustment_for_period,
     maybe_generate_current_month_rent_period,
@@ -75,6 +75,7 @@ class TestRnP01ContractHasPendingAdjustmentForPeriod:
 
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await set_tenant_context(session, owner["organization_id"])
             result = await contract_has_pending_adjustment_for_period(
                 session,
                 contract_id=contract_id,
@@ -105,6 +106,7 @@ class TestRnP01ContractHasPendingAdjustmentForPeriod:
 
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await set_tenant_context(session, owner["organization_id"])
             result = await contract_has_pending_adjustment_for_period(
                 session,
                 contract_id=contract_id,
@@ -132,6 +134,7 @@ class TestRnP01ContractHasPendingAdjustmentForPeriod:
 
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await set_tenant_context(session, owner["organization_id"])
             result = await contract_has_pending_adjustment_for_period(
                 session,
                 contract_id=contract_id,
@@ -153,6 +156,7 @@ class TestRnP01ContractHasPendingAdjustmentForPeriod:
 
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await set_tenant_context(session, owner["organization_id"])
             result = await contract_has_pending_adjustment_for_period(
                 session,
                 contract_id=contract_id,
@@ -189,6 +193,7 @@ class TestRnP01ContractHasPendingAdjustmentForPeriod:
 
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await set_tenant_context(session, owner["organization_id"])
             result = await contract_has_pending_adjustment_for_period(
                 session,
                 contract_id=contract_a,
@@ -216,6 +221,7 @@ class TestCA0401MaybeGenerateCurrentMonthRentPeriod:
 
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            await set_tenant_context(session, owner["organization_id"])
             new_id = await maybe_generate_current_month_rent_period(
                 session,
                 contract_id=contract_id,
@@ -228,6 +234,7 @@ class TestCA0401MaybeGenerateCurrentMonthRentPeriod:
         assert new_id is not None
 
         async with session_factory() as session:
+            await set_tenant_context(session, owner["organization_id"])
             row = await RentPeriodRepository(session).get_by_contract_and_period(
                 contract_id, owner["organization_id"], date(2026, 8, 1)
             )
@@ -249,6 +256,7 @@ class TestCA0401MaybeGenerateCurrentMonthRentPeriod:
 
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            await set_tenant_context(session, owner["organization_id"])
             result = await maybe_generate_current_month_rent_period(
                 session,
                 contract_id=contract_id,
@@ -274,6 +282,7 @@ class TestCA0401MaybeGenerateCurrentMonthRentPeriod:
         session_factory = get_session_factory()
         for _ in range(2):
             async with session_factory() as session, session.begin():
+                await set_tenant_context(session, owner["organization_id"])
                 await maybe_generate_current_month_rent_period(
                     session,
                     contract_id=contract_id,
@@ -284,7 +293,11 @@ class TestCA0401MaybeGenerateCurrentMonthRentPeriod:
                     currency="ARS",
                 )
 
+        # issue #42: adminprop_app ya no bypassea RLS -- la lectura
+        # cross-tenant necesita SET LOCAL ROLE adminprop_superadmin
+        # explicito.
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text("SELECT count(*) FROM rent_periods WHERE contract_id = :cid"),
                 {"cid": str(contract_id)},
@@ -312,6 +325,7 @@ class TestCA0401MaybeGenerateCurrentMonthRentPeriod:
 
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            await set_tenant_context(session, owner["organization_id"])
             result = await maybe_generate_current_month_rent_period(
                 session,
                 contract_id=contract_id,
@@ -324,6 +338,7 @@ class TestCA0401MaybeGenerateCurrentMonthRentPeriod:
         assert result is None
 
         async with session_factory() as session:
+            await set_tenant_context(session, owner["organization_id"])
             row = await RentPeriodRepository(session).get_by_contract_and_period(
                 contract_id, owner["organization_id"], date(2026, 8, 1)
             )
@@ -345,6 +360,7 @@ class TestCA0402MaybeGenerateRentPeriodForAdjustment:
 
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            await set_tenant_context(session, owner["organization_id"])
             new_id = await maybe_generate_rent_period_for_adjustment(
                 session,
                 contract_id=contract_id,
@@ -356,6 +372,7 @@ class TestCA0402MaybeGenerateRentPeriodForAdjustment:
         assert new_id is not None
 
         async with session_factory() as session:
+            await set_tenant_context(session, owner["organization_id"])
             row = await RentPeriodRepository(session).get_by_contract_and_period(
                 contract_id, owner["organization_id"], date(2026, 4, 1)
             )
@@ -376,6 +393,7 @@ class TestCA0402MaybeGenerateRentPeriodForAdjustment:
 
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            await set_tenant_context(session, owner["organization_id"])
             await maybe_generate_rent_period_for_adjustment(
                 session,
                 contract_id=contract_id,
@@ -386,6 +404,7 @@ class TestCA0402MaybeGenerateRentPeriodForAdjustment:
             )
 
         async with session_factory() as session, session.begin():
+            await set_tenant_context(session, owner["organization_id"])
             second = await maybe_generate_rent_period_for_adjustment(
                 session,
                 contract_id=contract_id,
@@ -397,6 +416,7 @@ class TestCA0402MaybeGenerateRentPeriodForAdjustment:
         assert second is None
 
         async with session_factory() as session:
+            await set_tenant_context(session, owner["organization_id"])
             row = await RentPeriodRepository(session).get_by_contract_and_period(
                 contract_id, owner["organization_id"], date(2026, 4, 1)
             )

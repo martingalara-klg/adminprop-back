@@ -90,9 +90,13 @@ async def super_admin_headers(rsa_keypair) -> dict[str, str]:
     `user_id=actor_user_id`, y `audit_logs.user_id` tiene
     `REFERENCES users(id)`.
     """
+    # issue #42: adminprop_app ya no bypassea RLS -- el seed/lectura de
+    # datos cross-tenant necesita SET LOCAL ROLE adminprop_superadmin
+    # explicito.
     user_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO users (id, email, password_hash, full_name, is_super_admin) "
@@ -138,6 +142,7 @@ def seed():
             email = email or _unique_email()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO users (id, email, password_hash, full_name, is_super_admin) "
@@ -161,6 +166,7 @@ def seed():
             name = name or f"Org {org_id.hex[:8]}"
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO organizations (id, slug, name, status) "
@@ -187,6 +193,7 @@ def seed():
             permissions = permissions if permissions is not None else ["contract:manage"]
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO roles (id, organization_id, name, permissions) "
@@ -211,6 +218,7 @@ def seed():
         ) -> None:
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO organization_members "
@@ -244,6 +252,7 @@ def seed():
             expires_at = datetime.now(UTC) + timedelta(hours=expires_in_hours)
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text(
                         "INSERT INTO organization_invitations "

@@ -95,6 +95,8 @@ async def rows() -> AsyncGenerator[_Rows]:
     renter_id = uuid.uuid4()
 
     async with session_factory() as session, session.begin():
+        # issue #42: seed plano, sin tenant context -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, 'Org Contratos')"
@@ -136,6 +138,8 @@ async def rows() -> AsyncGenerator[_Rows]:
     )
 
     async with session_factory() as session, session.begin():
+        # issue #42: teardown cruza el bootstrap de la organizacion -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text("DELETE FROM contract_adjustments WHERE organization_id = :org_id"),
             {"org_id": str(org_id)},
@@ -179,6 +183,8 @@ async def _insert_contract(
     contract_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO contracts "
@@ -218,6 +224,8 @@ async def _insert_adjustment(
     adjustment_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO contract_adjustments "
@@ -558,6 +566,8 @@ class TestCA1603OnlyOnePendingAdjustmentPerContract:
 
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            # issue #42: no se testea tenant isolation aca -- bypass RLS.
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text("UPDATE contract_adjustments SET status = 'applied' WHERE id = :id"),
                 {"id": str(first)},

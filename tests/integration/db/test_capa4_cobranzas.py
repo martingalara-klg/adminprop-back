@@ -92,6 +92,9 @@ async def rows() -> AsyncGenerator[_Rows]:
     user_id = uuid.uuid4()
 
     async with session_factory() as session, session.begin():
+        # issue #42: bootstrap cruza organizations/landlords (grants
+        # restringidos para adminprop_app) -- bypass RLS/grants.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, 'Org Cobranzas')"
@@ -173,6 +176,8 @@ async def rows() -> AsyncGenerator[_Rows]:
     )
 
     async with session_factory() as session, session.begin():
+        # issue #42: teardown cruza el bootstrap de la organizacion -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "DELETE FROM payments WHERE rent_period_id IN "
@@ -223,6 +228,8 @@ async def _insert_rent_period(
     rent_period_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO rent_periods "
@@ -259,6 +266,8 @@ async def _insert_payment(
     payment_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        # issue #42: no se testea tenant isolation aca -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO payments "
@@ -539,6 +548,8 @@ class TestCA2002PaidTotalCheck:
         session_factory = get_session_factory()
         with pytest.raises(IntegrityError):
             async with session_factory() as session, session.begin():
+                # issue #42: no se testea tenant isolation aca -- bypass RLS.
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
                 await session.execute(
                     sa.text("UPDATE rent_periods SET paid_total = 150000.00 WHERE id = :id"),
                     {"id": str(rent_period_id)},
@@ -602,6 +613,8 @@ class TestPaymentsChecks:
         payment_id = await _insert_payment(rows, rent_period_id=rent_period_id)
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            # issue #42: no se testea tenant isolation aca -- bypass RLS.
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text(
                     "UPDATE payments SET voided_at = now(), voided_by = :user_id WHERE id = :id"
@@ -609,6 +622,7 @@ class TestPaymentsChecks:
                 {"id": str(payment_id), "user_id": str(rows.user_id)},
             )
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text("SELECT voided_at, voided_by FROM payments WHERE id = :id"),
                 {"id": str(payment_id)},

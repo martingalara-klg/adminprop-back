@@ -163,6 +163,7 @@ class TestHasActiveDependenciesExtensibilityDocumented:
         async with session_factory() as session, session.begin():
             import sqlalchemy as sa
 
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text(
                     "INSERT INTO contracts (organization_id, property_id, renter_id, currency, "
@@ -179,6 +180,12 @@ class TestHasActiveDependenciesExtensibilityDocumented:
 
         session_factory = get_session_factory()
         async with session_factory() as session:
+            # issue #42: llamada directa a repositorio (sin HTTP/middleware
+            # de tenant) -- setear el contexto explicitamente, igual que lo
+            # haria `get_tenant_db_session` en produccion.
+            from adminprop.db.session import set_tenant_context
+
+            await set_tenant_context(session, org["organization_id"])
             repo = PropertyRepository(session)
             result = await repo.has_active_dependencies(property_id, org["organization_id"])
 

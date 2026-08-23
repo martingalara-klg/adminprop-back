@@ -105,6 +105,10 @@ class TestAppendOnlyEnforcedAtPermissionLevel:
         org_id = uuid.uuid4()
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            # issue #42: seed cruza el bootstrap de la organizacion (sin
+            # tenant context todavia) -- bypass RLS explicito, no se testea
+            # aislamiento en este bloque.
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text("INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, :name)"),
                 {"id": str(org_id), "slug": f"org-{org_id.hex[:8]}", "name": "Org append-only"},
@@ -129,6 +133,8 @@ class TestAppendOnlyEnforcedAtPermissionLevel:
         org_id = uuid.uuid4()
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            # issue #42: seed plano, sin tenant context -- bypass RLS.
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text("INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, :name)"),
                 {"id": str(org_id), "slug": f"org-{org_id.hex[:8]}", "name": "Org append-only"},
@@ -156,6 +162,8 @@ class TestAppendOnlyEnforcedAtPermissionLevel:
         org_id = uuid.uuid4()
         session_factory = get_session_factory()
         async with session_factory() as session, session.begin():
+            # issue #42: seed plano, sin tenant context -- bypass RLS.
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             await session.execute(
                 sa.text("INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, :name)"),
                 {"id": str(org_id), "slug": f"org-{org_id.hex[:8]}", "name": "Org append-only"},

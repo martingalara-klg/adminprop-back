@@ -38,6 +38,9 @@ async def two_orgs_with_one_property_and_service_account_each() -> AsyncGenerato
     property_b = uuid.uuid4()
 
     async with session_factory() as session, session.begin():
+        # issue #42: seed cruza dos organizaciones en una sola transaccion --
+        # bypass RLS explicito, no se testea aislamiento en este bloque.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO organizations (id, slug, name) "
@@ -93,6 +96,8 @@ async def two_orgs_with_one_property_and_service_account_each() -> AsyncGenerato
         )
     yield
     async with session_factory() as session, session.begin():
+        # issue #42: teardown cruza dos organizaciones -- bypass RLS.
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "DELETE FROM property_service_accounts WHERE organization_id IN (:org_a, :org_b)"

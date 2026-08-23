@@ -90,6 +90,7 @@ async def super_admin_headers(rsa_keypair) -> dict[str, str]:
     user_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text(
                 "INSERT INTO users (id, email, password_hash, full_name, is_super_admin) "
@@ -126,6 +127,7 @@ async def owner_headers(rsa_keypair) -> dict[str, str]:
     user_id = uuid.uuid4()
     session_factory = get_session_factory()
     async with session_factory() as session, session.begin():
+        await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
         await session.execute(
             sa.text("INSERT INTO organizations (id, slug, name) VALUES (:id, :slug, :name)"),
             {
@@ -178,6 +180,7 @@ def db_roles():
     async def _fetch(organization_id: str) -> list[dict]:
         session_factory = get_session_factory()
         async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             result = await session.execute(
                 sa.text(
                     "SELECT name, permissions, is_system_role FROM roles "

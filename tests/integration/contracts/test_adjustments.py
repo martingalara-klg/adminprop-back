@@ -249,8 +249,14 @@ class TestCA0305ApplyAdjustment:
         )
 
         # Antes de aplicar: el rent_period de ese mes no existe (RN-P01).
+        # issue #42: verificacion cruda fuera del flujo HTTP -- sin tenant
+        # context seteado, RLS devolveria 0 filas siempre (falso negativo).
+        # Bypass explicito (no es lo que se esta probando aca).
+        import sqlalchemy as sa
+
         session_factory = get_session_factory()
-        async with session_factory() as session:
+        async with session_factory() as session, session.begin():
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             before = await RentPeriodRepository(session).get_by_contract_and_period(
                 contract_id, owner["organization_id"], date.fromisoformat(due_period)
             )
@@ -263,7 +269,8 @@ class TestCA0305ApplyAdjustment:
         )
         assert response.status_code == 200
 
-        async with session_factory() as session:
+        async with session_factory() as session, session.begin():
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
             after = await RentPeriodRepository(session).get_by_contract_and_period(
                 contract_id, owner["organization_id"], date.fromisoformat(due_period)
             )

@@ -1,10 +1,17 @@
 """Entry point de Alembic.
 
 `sqlalchemy.url` NO se lee de `alembic.ini`: se toma de
-`adminprop.config.get_settings().database_url` (que a su vez lee
-`DATABASE_URL` de entorno/`.env`), para no duplicar la configuracion de
-conexion entre local (`docker/docker-compose.yml`), CI
+`adminprop.config.get_settings().migrations_database_url` (que a su vez
+lee `MIGRATIONS_DATABASE_URL` de entorno/`.env`), para no duplicar la
+configuracion de conexion entre local (`docker/docker-compose.yml`), CI
 (`.github/workflows/ci.yml`) y produccion.
+
+Issue #42: `migrations_database_url` es una variable DISTINTA de
+`database_url` (la que usa el runtime via `db/session.py`). El runtime
+(API + workers) conecta como `adminprop_app` (NOSUPERUSER, sujeto a RLS)
+-- ese rol no tiene privilegios de DDL (CREATE TABLE/ROLE, ALTER DEFAULT
+PRIVILEGES). Alembic sigue necesitando el superusuario de Postgres para
+poder migrar el schema, de ahi la separacion.
 
 `target_metadata` apunta a `Base.metadata` (issue #3: sin modelos ORM
 todavia) para que Alembic pueda comparar el estado si algun dia se usa
@@ -30,7 +37,7 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    return get_settings().database_url
+    return get_settings().migrations_database_url
 
 
 def run_migrations_offline() -> None:
