@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.5
+version: 1.6
 fecha: 2026-08-24
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.5
+**Versión:** 1.6
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -101,14 +101,15 @@ El chequeo es **por permiso atómico** (`Depends(requires_permission("<recurso>:
 ## 1. Autenticación (`/auth/*`)
 
 ```
-POST   /auth/login                       → 200 { data: { status: "authenticated", user, organizations[] } }
+POST   /auth/login                       → 200 { data: { status: "authenticated", user, organizations[], permissions[], is_super_admin } }
 POST   /auth/logout                      → 204 (invalida refresh server-side, limpia cookies)
 POST   /auth/refresh                     → 200 (rota refresh token; cookie nueva)
 GET    /auth/invitation/:token           → 200 { data: { email, organization_name, role_name } }
-POST   /auth/accept-invitation           → 201 (nombre + password; setea cookies)
+POST   /auth/accept-invitation           → 201 (nombre + password; setea cookies) { data: { status, user, organization, permissions[], is_super_admin } }
 POST   /auth/forgot-password             → 200 SIEMPRE (anti-enumeration)
 GET    /auth/reset-password/:token       → 200 | 404 | 410
 POST   /auth/reset-password              → 200
+GET    /auth/me                          → 200 { data: { user, organization, role, permissions[], is_super_admin } } | 401
 ```
 
 **Comportamientos obligatorios:**
@@ -117,6 +118,18 @@ POST   /auth/reset-password              → 200
 - Lockout: 5 intentos fallidos en 10 min → `ACCOUNT_LOCKED` por 30 min.
 - Si el usuario pertenece a múltiples orgs, el login incluye la selección de organización (el JWT se emite para UNA org).
 - Password: ≥ 10 caracteres, ≥ 1 mayúscula, ≥ 1 número.
+
+**`permissions[]` / `is_super_admin` en `login` y `accept-invitation`** (v1.6, issue #84 — el front no puede leer el JWT porque vive en cookie HttpOnly, decisión #20):
+- La respuesta expone, para la organización del JWT efectivamente emitido, los mismos `permissions[]` (catálogo cerrado de §Catálogo de Permisos) e `is_super_admin` que porta ese JWT — leídos de la misma fuente que arma el JWT (rol de la membresía), nunca recalculados con lógica propia del endpoint.
+- `login` con `status: "authenticated"`: `permissions[]` = permisos del rol de la organización elegida; `is_super_admin` = el flag del usuario (`true` solo en el login de Super Admin, que no lleva `organizations[]`).
+- `login` con `status: "organization_selection_required"` (multi-org sin `organization_id` en el body — ningún JWT se emite todavía): `permissions` e `is_super_admin` van **`null`** — el cliente reintenta el login con la organización elegida y recién ahí recibe el valor real.
+- `accept-invitation` (issue #8, siempre emite JWT en el mismo request): `permissions[]` = permisos del rol de la invitación aceptada; `is_super_admin` siempre `false` (este flujo nunca activa cuentas de Super Admin).
+
+**`GET /auth/me`** (nuevo, v1.6, issue #84): devuelve la sesión vigente para rehidratar el front al recargar la página. Autenticado por cookie igual que el resto de `/auth/*` protegidos (`get_current_access_token_payload`) — sin body, sin params.
+- 200 con JWT de organización válido y membresía todavía activa: `{ data: { user, organization: { id, name }, role, permissions[], is_super_admin: false } }`. `permissions[]`/`role` se leen en vivo de la membresía actual (misma consulta que resuelve permisos en `login`/`refresh`), no del contenido cacheado del JWT — si el rol cambió de permisos después de emitido el JWT, `/auth/me` ya refleja el rol vigente.
+- 200 con JWT de Super Admin (`is_super_admin=true`, sin `org`): `{ data: { user, organization: null, role: null, permissions: [], is_super_admin: true } }`.
+- Sin cookie / JWT inválido o expirado → `401 UNAUTHORIZED` (estándar, igual que cualquier endpoint protegido).
+- JWT de organización válido pero la membresía ya no está activa (o la organización fue deshabilitada) → `403 MEMBERSHIP_INACTIVE` (misma regla que valida la membresía en `login`).
 
 ## 2. Super Admin (`/superadmin/*`) — JWT con `is_super_admin=true`
 
