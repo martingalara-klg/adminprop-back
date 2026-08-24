@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.4
+version: 1.5
 fecha: 2026-08-24
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.4
+**Versión:** 1.5
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -80,7 +80,9 @@ El frontend discrimina por `error.code`, muestra `error.message`, asocia `error.
 
 Permisos atómicos (`recurso:acción`) portados en `permissions[]` del JWT:
 
-`landlord:read` `landlord:manage` · `renter:read` `renter:manage` · `property:read` `property:manage` · `contract:read` `contract:manage` · `adjustment:apply` · `rent-period:read` · `payment:create` `payment:void` · `charge:manage` · `settlement:read` `settlement:generate` `settlement:issue` · `work-order:read` `work-order:create` `work-order:quote` `work-order:approve` `work-order:close` `work-order:cancel` · `attachment:manage` · `user:manage` `role:read` `organization:configure` · `audit:read` · `notification:read`
+`landlord:read` `landlord:manage` `landlord:set-commission` · `renter:read` `renter:manage` · `property:read` `property:manage` · `contract:read` `contract:manage` · `adjustment:apply` · `rent-period:read` · `payment:create` `payment:void` · `charge:manage` · `settlement:read` `settlement:generate` `settlement:issue` · `work-order:read` `work-order:create` `work-order:quote` `work-order:approve` `work-order:close` `work-order:cancel` · `attachment:manage` · `user:manage` `role:read` `organization:configure` · `audit:read` · `notification:read`
+
+> `landlord:set-commission` (agregado v1.5, issue #51): permiso atómico exclusivo de `owner` para cambiar `commission_pct` de un propietario — reemplaza el chequeo previo por nombre de rol (`payload.role`). `admin` conserva `landlord:manage` (ABM completo salvo este campo).
 
 ## Resumen de Autorización por Recurso
 
@@ -167,6 +169,7 @@ DELETE /landlords/:id                    GET    /landlords/:id/settlements   (hi
 ```
 
 - Alta requiere `commission_pct`. Cambio de `commission_pct` → auditado, rige a futuro (RN-L05).
+- `PATCH /landlords/:id` con `commission_pct` en el body requiere además el permiso `landlord:set-commission` (solo `owner`) — sin él, `403 FORBIDDEN` aunque el actor tenga `landlord:manage` (CA-02-02).
 - `DELETE` con propiedades activas → `ENTITY_HAS_DEPENDENCIES`.
 
 ## 6. Inquilinos (`/renters`)
