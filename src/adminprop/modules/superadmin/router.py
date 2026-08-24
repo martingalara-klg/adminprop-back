@@ -1,20 +1,18 @@
 """Endpoints /v1/superadmin/organizations/* (issue #7).
 
 SDD: core/sdd_03_api_contracts.md §2 "Super Admin". Implements: CA-00-01,
-CA-00-02, CA-00-05, CA-00-06.
+CA-00-02, CA-00-05, CA-00-06, CA-44-01.
 
-Nota de alcance (declarada en el PR): `sdd_03` §2 tambien lista
-`PATCH /superadmin/organizations/:id`, sin especificar que campos son
-editables ni sus validaciones -- ninguno de los CA de este issue lo
-requiere (crear org, invitar owner, reenviar, disable/enable, dashboard).
-Se deja fuera de este PR para no inventar un contrato no especificado;
-se implementa cuando un issue lo necesite con su propio spec.
+Issue #44: `PATCH /superadmin/organizations/:id` fue agregado al SDD y
+se implemento aca -- acepta `name`/`timezone` (ambos opcionales, al
+menos uno requerido); `slug` sigue inmutable post-creacion y `status`
+sigue cambiando solo via disable/enable.
 
 `sdd_03` no especifica el status code de exito de cada endpoint de esta
 seccion (a diferencia de la seccion "Autenticacion", que si lo hace) --
 se usa la convencion general de `docs/skills/api-endpoint.md`: 201 para
 recursos creados (organizacion, invitacion), 200 para lecturas y
-transiciones de estado (disable/enable).
+transiciones de estado (disable/enable/update).
 """
 
 from __future__ import annotations
@@ -34,6 +32,7 @@ from adminprop.modules.superadmin.schemas import (
     OrganizationResponse,
     OrganizationStatusChangeRequest,
     OrganizationSummary,
+    OrganizationUpdate,
 )
 from adminprop.modules.superadmin.service import OrganizationService, get_organization_service
 from adminprop.shared.auth.dependencies import requires_super_admin
@@ -120,6 +119,27 @@ async def get_organization(
     org = await service.get(organization_id)
     if org is None:
         raise NotFoundException()
+    return OrganizationResponse(data=_to_detail(org))
+
+
+@router.patch("/{organization_id}", response_model=OrganizationResponse)
+async def update_organization(
+    organization_id: UUID,
+    dto: OrganizationUpdate,
+    payload: JWTPayload = Depends(requires_super_admin),
+    service: OrganizationService = Depends(get_organization_service),
+) -> OrganizationResponse:
+    """Issue #44 + sdd_03 §2: name/timezone opcionales (al menos uno --
+    `OrganizationUpdate._at_least_one_field`). `slug` inmutable y `status`
+    fuera de alcance (solo via disable/enable). Cambio auditado
+    (`org.updated`) con before/after de los campos efectivamente
+    modificados."""
+    org = await service.update(
+        organization_id,
+        name=dto.name,
+        timezone_name=dto.timezone,
+        actor_user_id=payload.sub,
+    )
     return OrganizationResponse(data=_to_detail(org))
 
 

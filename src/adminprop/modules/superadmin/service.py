@@ -261,6 +261,65 @@ class OrganizationService:
             raise NotFoundException()
         return result
 
+    async def update(
+        self,
+        organization_id: UUID,
+        *,
+        name: str | None,
+        timezone_name: str | None,
+        actor_user_id: UUID,
+    ) -> OrganizationRow:
+        """PATCH /superadmin/organizations/:id (issue #44).
+
+        sdd_03 §2: `name`/`timezone` opcionales (al menos uno presente --
+        ya enforzado por `OrganizationUpdate._at_least_one_field`); `slug`
+        inmutable y `status` fuera de alcance (disable/enable). Solo los
+        campos efectivamente enviados se actualizan y se auditan.
+        """
+        org = await self._repo.get_organization_by_id(organization_id)
+        if org is None:
+            raise NotFoundException()
+
+        fields: dict[str, str] = {}
+        before: dict[str, str] = {}
+        after: dict[str, str] = {}
+        if name is not None and name != org.name:
+            fields["name"] = name
+            before["name"] = org.name
+            after["name"] = name
+        if timezone_name is not None and timezone_name != org.timezone:
+            fields["timezone"] = timezone_name
+            before["timezone"] = org.timezone
+            after["timezone"] = timezone_name
+
+        if not fields:
+            # Nada efectivamente cambio (valores identicos a los actuales)
+            # -- no hay evento de auditoria que registrar (RN-D03: audit
+            # log append-only, no se generan entradas vacias).
+            return org
+
+        updated = await self._repo.update_organization_fields(organization_id, fields)
+        if not updated:  # pragma: no cover -- defensivo, race entre el check y el UPDATE
+            raise NotFoundException()
+
+        # RN-05 (issue #10): toda operacion de Super Admin se audita, en
+        # la MISMA transaccion que el UPDATE de arriba.
+        await audit(
+            self._repo.session,
+            organization_id=organization_id,
+            action="org.updated",
+            entity_type="organization",
+            entity_id=organization_id,
+            before=before,
+            after=after,
+            user_id=actor_user_id,
+        )
+        await self._repo.commit()
+        result = await self._repo.get_organization_by_id(organization_id)
+        if result is None:  # pragma: no cover -- defensivo, se acaba de actualizar
+            raise NotFoundException()
+        return result
+
     async def enable(
         self, organization_id: UUID, reason: str, actor_user_id: UUID
     ) -> OrganizationRow:
