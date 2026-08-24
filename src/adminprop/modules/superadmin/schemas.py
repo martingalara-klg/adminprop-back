@@ -51,7 +51,7 @@ class OrganizationUpdate(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def _at_least_one_field(self) -> "OrganizationUpdate":
+    def _at_least_one_field(self) -> OrganizationUpdate:
         if self.name is None and self.timezone is None:
             raise ValueError("Debe enviarse al menos uno de: name, timezone.")
         return self
