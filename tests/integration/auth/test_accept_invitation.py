@@ -60,6 +60,10 @@ class TestCA0003AcceptInvitation:
         assert data["organization"]["role"] == "owner"
         assert response.headers.get_list("set-cookie") != []
         assert await _organization_status(org_id) == "active"
+        # issue #84: permissions[]/is_super_admin del JWT emitido en este
+        # mismo request -- mismos permisos que el rol de la invitacion.
+        assert data["permissions"] == ["user:manage"]
+        assert data["is_super_admin"] is False
 
     async def test_accept_invitation_with_unknown_token_returns_invitation_not_found(self, client):
         response = await client.post(
