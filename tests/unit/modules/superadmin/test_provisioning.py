@@ -46,9 +46,21 @@ class TestRoleProvisioningCatalog:
         assert set(OWNER_PERMISSIONS) == set(ALL_PERMISSIONS)
 
     def test_admin_excludes_user_management_role_read_and_org_config(self):
-        excluded = {"user:manage", "role:read", "organization:configure"}
+        excluded = {
+            "user:manage",
+            "role:read",
+            "organization:configure",
+            "landlord:set-commission",
+        }
         assert set(ADMIN_PERMISSIONS) == set(ALL_PERMISSIONS) - excluded
         assert excluded.isdisjoint(ADMIN_PERMISSIONS)
+
+    def test_admin_excludes_landlord_set_commission(self):
+        """Issue #51: cambio de `commission_pct` de un propietario es
+        exclusivo de `owner` -- sdd_03 v1.5 §"Catalogo de Permisos"."""
+        assert "landlord:set-commission" in ALL_PERMISSIONS
+        assert "landlord:set-commission" not in ADMIN_PERMISSIONS
+        assert "landlord:set-commission" in OWNER_PERMISSIONS
 
     def test_maintenance_is_scoped_to_work_orders_attachments_and_own_notifications(self):
         """Issue #31: agrega `notification:read` -- sdd_03 §"Resumen de

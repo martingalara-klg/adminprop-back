@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.3
-fecha: 2026-08-14
+version: 1.5
+fecha: 2026-08-24
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.3
+**Versión:** 1.5
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -80,7 +80,9 @@ El frontend discrimina por `error.code`, muestra `error.message`, asocia `error.
 
 Permisos atómicos (`recurso:acción`) portados en `permissions[]` del JWT:
 
-`landlord:read` `landlord:manage` · `renter:read` `renter:manage` · `property:read` `property:manage` · `contract:read` `contract:manage` · `adjustment:apply` · `rent-period:read` · `payment:create` `payment:void` · `charge:manage` · `settlement:read` `settlement:generate` `settlement:issue` · `work-order:read` `work-order:create` `work-order:quote` `work-order:approve` `work-order:close` `work-order:cancel` · `attachment:manage` · `user:manage` `role:read` `organization:configure` · `audit:read` · `notification:read`
+`landlord:read` `landlord:manage` `landlord:set-commission` · `renter:read` `renter:manage` · `property:read` `property:manage` · `contract:read` `contract:manage` · `adjustment:apply` · `rent-period:read` · `payment:create` `payment:void` · `charge:manage` · `settlement:read` `settlement:generate` `settlement:issue` · `work-order:read` `work-order:create` `work-order:quote` `work-order:approve` `work-order:close` `work-order:cancel` · `attachment:manage` · `user:manage` `role:read` `organization:configure` · `audit:read` · `notification:read`
+
+> `landlord:set-commission` (agregado v1.5, issue #51): permiso atómico exclusivo de `owner` para cambiar `commission_pct` de un propietario — reemplaza el chequeo previo por nombre de rol (`payload.role`). `admin` conserva `landlord:manage` (ABM completo salvo este campo).
 
 ## Resumen de Autorización por Recurso
 
@@ -122,12 +124,23 @@ POST   /auth/reset-password              → 200
 GET    /superadmin/organizations
 POST   /superadmin/organizations                      (crea org en pending_owner + siembra roles/settings)
 GET    /superadmin/organizations/:id
-PATCH  /superadmin/organizations/:id
+PATCH  /superadmin/organizations/:id                   (name?, timezone? — ver detalle abajo)
 POST   /superadmin/organizations/:id/invite-owner
 POST   /superadmin/organizations/:id/resend-invitation
 POST   /superadmin/organizations/:id/disable
 POST   /superadmin/organizations/:id/enable
 ```
+
+**`PATCH /superadmin/organizations/:id`** (issue #44 — campo definido, no existía en v1.3):
+
+- Body acepta **exactamente** dos campos, ambos opcionales: `name` (string, `2..120` — misma validación que `POST /superadmin/organizations`) y `timezone` (string, nombre de zona IANA válido). **Al menos uno de los dos debe estar presente** — body vacío o con ambos ausentes → `400 VALIDATION_ERROR`.
+- `slug` es **inmutable** post-creación — no forma parte de este body. Un PATCH que incluya `slug` (o cualquier otro campo no listado, ej. `status`, `settings`) → `400 VALIDATION_ERROR` (Pydantic `extra="forbid"`).
+- `status` sólo cambia vía `POST .../disable` y `POST .../enable` — nunca por este PATCH.
+- `settings` pertenece al owner de la organización (`PUT /organization/settings`, módulo administración) — nunca por este PATCH.
+- Validación de `timezone`: debe ser un nombre de zona IANA reconocido por la base `tzdata` del sistema (`zoneinfo.available_timezones()` en Python, o equivalente). Un valor no reconocido (ej. `"No/Existe"`) → `400 VALIDATION_ERROR` con `field: "timezone"`.
+- Éxito → `200` con el mismo shape de `OrganizationDetail` que `GET /superadmin/organizations/:id`.
+- Organización inexistente (o soft-deleted) → `404 NOT_FOUND`.
+- Cambio auditado (`org.updated`, ver "Códigos de Error Globales" y `docs/skills/tenant-isolation.md` "Super Admin: rol DB privilegiado") con `before`/`after` de únicamente los campos efectivamente modificados.
 
 ## 3. Usuarios y Roles — permiso `user:manage` (owner)
 
@@ -156,6 +169,7 @@ DELETE /landlords/:id                    GET    /landlords/:id/settlements   (hi
 ```
 
 - Alta requiere `commission_pct`. Cambio de `commission_pct` → auditado, rige a futuro (RN-L05).
+- `PATCH /landlords/:id` con `commission_pct` en el body requiere además el permiso `landlord:set-commission` (solo `owner`) — sin él, `403 FORBIDDEN` aunque el actor tenga `landlord:manage` (CA-02-02).
 - `DELETE` con propiedades activas → `ENTITY_HAS_DEPENDENCIES`.
 
 ## 6. Inquilinos (`/renters`)

@@ -26,7 +26,14 @@ from adminprop.shared.errors.codes import (
     NotFoundException,
 )
 
-_OWNER_ROLE_NAME = "owner"
+# sdd_03 v1.5 §"Catalogo de Permisos" (issue #51): permiso atomico
+# dedicado -- reemplaza el chequeo previo por nombre de rol
+# (`payload.role != "owner"`). El check se hace aca (no via
+# `Depends(requires_permission(...))` en el router) porque solo aplica
+# CONDICIONALMENTE, cuando `commission_pct` viene en el PATCH -- el resto
+# de los campos del mismo endpoint solo requiere `landlord:manage`
+# (ya exigido por la dependency del router).
+_SET_COMMISSION_PERMISSION = "landlord:set-commission"
 
 
 class LandlordService:
@@ -89,22 +96,27 @@ class LandlordService:
         commission_pct: Decimal | None,
         notes: str | None,
         actor_user_id: UUID,
-        actor_role: str | None,
+        actor_permissions: frozenset[str],
         fields_set: set[str],
     ) -> LandlordFields | None:
         """RF-01: PATCH parcial.
 
         CA-02-02: `commission_pct` (si vino en el request, `"commission_pct"
-        in fields_set`) SOLO lo puede tocar el `owner` -- un `admin` que lo
-        incluya recibe 403 FORBIDDEN, sin importar el valor (mismo % o
-        distinto: "recibe 403 FORBIDDEN al intentar cambiar", literal del
-        CA). Todos los demas campos ("datos de contacto") son editables
-        por owner y admin por igual.
+        in fields_set`) SOLO lo puede tocar quien tenga el permiso atomico
+        `landlord:set-commission` (sdd_03 v1.5, issue #51 -- reemplaza el
+        chequeo previo por nombre de rol, `CLAUDE.md` §6: "chequeo por
+        permiso atomico, nunca por nombre de rol"). En el seed de roles
+        (`superadmin/provisioning.py`) solo `owner` lo tiene; un `admin`
+        que incluya el campo recibe 403 FORBIDDEN, sin importar el valor
+        (mismo % o distinto: "recibe 403 FORBIDDEN al intentar cambiar",
+        literal del CA). Todos los demas campos ("datos de contacto") son
+        editables por cualquier actor con `landlord:manage` (ya exigido
+        por la dependency del router).
 
         RN-D04/RN-L05: el cambio de `commission_pct` queda auditado con
         valor anterior/nuevo, en la MISMA transaccion que el UPDATE.
         """
-        if "commission_pct" in fields_set and actor_role != _OWNER_ROLE_NAME:
+        if "commission_pct" in fields_set and _SET_COMMISSION_PERMISSION not in actor_permissions:
             raise ForbiddenException(
                 message="Solo el owner puede cambiar el porcentaje de comision.",
                 field="commission_pct",
