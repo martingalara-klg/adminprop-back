@@ -24,9 +24,7 @@ def _unique_name(base: str) -> str:
     return f"{base} {uuid.uuid4().hex[:8]}"
 
 
-async def _create_org(
-    client, super_admin_headers, name: str, timezone: str | None = None
-) -> str:
+async def _create_org(client, super_admin_headers, name: str, timezone: str | None = None) -> str:
     body = {"name": name}
     if timezone is not None:
         body["timezone"] = timezone
