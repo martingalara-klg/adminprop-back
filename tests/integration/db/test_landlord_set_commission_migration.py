@@ -80,9 +80,7 @@ async def _get_permissions(conn: AsyncConnection, role_id: uuid.UUID) -> list[st
     `str` o ya decodificado como `list` (visto empiricamente variar
     entre ejecuciones con `sa.text` + `SELECT permissions` directo)."""
     result = await conn.execute(
-        sa.text(
-            "SELECT jsonb_array_elements_text(permissions) FROM roles WHERE id = :id"
-        ),
+        sa.text("SELECT jsonb_array_elements_text(permissions) FROM roles WHERE id = :id"),
         {"id": str(role_id)},
     )
     return [row[0] for row in result]

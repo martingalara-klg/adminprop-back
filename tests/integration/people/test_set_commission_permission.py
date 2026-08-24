@@ -97,9 +97,7 @@ class TestCAR5003PermissionNotRoleName:
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
 
-        get_response = await client.get(
-            f"/v1/landlords/{landlord_id}", headers=member["headers"]
-        )
+        get_response = await client.get(f"/v1/landlords/{landlord_id}", headers=member["headers"])
         assert Decimal(get_response.json()["data"]["commission_pct"]) == Decimal("10.00")
 
     async def test_ca_r50_03_custom_role_can_edit_contact_data_without_commission_permission(
@@ -109,9 +107,7 @@ class TestCAR5003PermissionNotRoleName:
         `landlord:manage`, el resto de los campos ("datos de contacto")
         se siguen editando sin restriccion -- el permiso nuevo es
         estrictamente ADITIVO sobre `landlord:manage`, no lo reemplaza."""
-        _org_id, member = await _seed_custom_role_member(
-            seed, permissions=["landlord:manage"]
-        )
+        _org_id, member = await _seed_custom_role_member(seed, permissions=["landlord:manage"])
         created = await client.post(
             "/v1/landlords",
             json={"name": "Propietario", "commission_pct": "10.00"},
@@ -143,9 +139,7 @@ class TestCAR5001And02OwnerRoleSeededWithPermission:
         assert "landlord:set-commission" not in permissions_by_role["admin"]
         assert "landlord:set-commission" not in permissions_by_role["maintenance"]
 
-    async def test_ca_r50_01_and_02_seeded_owner_member_can_set_commission_e2e(
-        self, client, seed
-    ):
+    async def test_ca_r50_01_and_02_seeded_owner_member_can_set_commission_e2e(self, client, seed):
         """Extremo a extremo con el seed REAL de una organizacion nueva
         (`create_organization_with_system_roles`, el mismo camino que
         `OrganizationProvisioningService`): el owner recien sembrado ya
