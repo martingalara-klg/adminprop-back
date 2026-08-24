@@ -8,10 +8,12 @@ from __future__ import annotations
 import re
 from datetime import datetime
 from uuid import UUID
+from zoneinfo import available_timezones
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_VALID_TIMEZONES = available_timezones()
 
 
 class OrganizationCreate(BaseModel):
@@ -21,6 +23,38 @@ class OrganizationCreate(BaseModel):
 
     name: str = Field(..., min_length=2, max_length=120)
     timezone: str = Field(default="America/Argentina/Cordoba", min_length=1, max_length=64)
+
+
+class OrganizationUpdate(BaseModel):
+    """Body de PATCH /v1/superadmin/organizations/:id. Issue #44.
+
+    SDD: core/sdd_03_api_contracts.md §2. Ambos campos opcionales, pero
+    al menos uno debe estar presente (`_at_least_one_field`). `slug` es
+    inmutable post-creacion y `status` solo cambia via disable/enable --
+    ninguno de los dos forma parte de este body; `extra="forbid"` hace
+    que incluirlos (o cualquier otro campo no declarado) devuelva
+    `400 VALIDATION_ERROR` en vez de ignorarlos silenciosamente.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=2, max_length=120)
+    timezone: str | None = Field(default=None, min_length=1, max_length=64)
+
+    @field_validator("timezone")
+    @classmethod
+    def _valid_iana_timezone(cls, value: str | None) -> str | None:
+        """Nombre de zona IANA reconocido por la base tzdata del sistema
+        (sdd_03 §2 "Validacion de timezone")."""
+        if value is not None and value not in _VALID_TIMEZONES:
+            raise ValueError("timezone invalido: debe ser un nombre de zona IANA reconocido.")
+        return value
+
+    @model_validator(mode="after")
+    def _at_least_one_field(self) -> "OrganizationUpdate":
+        if self.name is None and self.timezone is None:
+            raise ValueError("Debe enviarse al menos uno de: name, timezone.")
+        return self
 
 
 class OrganizationSummary(BaseModel):

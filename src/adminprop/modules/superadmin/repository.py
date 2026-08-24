@@ -253,6 +253,33 @@ class SuperAdminRepository:
         row = result.mappings().first()
         return _row_to_organization(row) if row is not None else None
 
+    async def update_organization_fields(
+        self, organization_id: UUID, fields: dict[str, str]
+    ) -> bool:
+        """PATCH /superadmin/organizations/:id (issue #44).
+
+        `fields` es un dict con las columnas efectivamente enviadas por el
+        cliente (`name` y/o `timezone` -- construido en
+        `service.py::update()` a partir de `OrganizationUpdate`
+        excluyendo `unset`). Retorna False si la organizacion no existe
+        (o esta soft-deleted), igual criterio que
+        `update_organization_status`.
+        """
+        set_clause = ", ".join(f"{column} = :{column}" for column in fields)
+        stmt = text(
+            f"""
+            UPDATE organizations
+            SET {set_clause}, updated_at = now()
+            WHERE id = :organization_id AND deleted_at IS NULL
+            RETURNING id
+            """
+        )
+        params: dict[str, object] = {"organization_id": str(organization_id), **fields}
+        result = await self._session.execute(stmt, params)
+        # Issue #10: el commit lo hace `service.py.update()` DESPUES de
+        # auditar `org.updated` en esta misma transaccion.
+        return result.first() is not None
+
     async def update_organization_status(self, organization_id: UUID, status: str) -> bool:
         """RF-05: disable/enable. Retorna False si la organizacion no existe."""
         stmt = text(
