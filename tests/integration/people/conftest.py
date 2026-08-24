@@ -242,7 +242,15 @@ def seed(rsa_keypair):
             status: str = "active",
             password: str = "Password1234",
             email: str | None = None,
+            permissions: list[str] | None = None,
         ) -> dict:
+            """`permissions` es opcional: por default se busca en
+            `ROLE_DEFINITIONS` por `role_name` (roles de sistema). Pasarlo
+            explicitamente permite sembrar un rol CUSTOM con un catalogo de
+            permisos arbitrario (issue #51, CA-R50-03: probar que el
+            chequeo es por permiso atomico -- no por nombre de rol -- con
+            un rol que NO se llama "owner" pero tiene `landlord:set-commission`,
+            y viceversa)."""
             user = await self.create_user(password=password, email=email)
             await self.create_membership(
                 user_id=user["id"],
@@ -250,7 +258,10 @@ def seed(rsa_keypair):
                 role_id=role_id,
                 status=status,
             )
-            permissions = next((list(p) for name, p in ROLE_DEFINITIONS if name == role_name), [])
+            if permissions is None:
+                permissions = next(
+                    (list(p) for name, p in ROLE_DEFINITIONS if name == role_name), []
+                )
             headers = _auth_headers(
                 user_id=user["id"],
                 organization_id=organization_id,
