@@ -23,6 +23,9 @@ from adminprop.modules.auth.schemas import (
     LoginRequest,
     LoginResponse,
     LoginResponseData,
+    MeOrganization,
+    MeResponse,
+    MeResponseData,
     OrganizationSummary,
     RefreshResponse,
     RefreshResponseData,
@@ -38,6 +41,7 @@ from adminprop.modules.auth.service import (
     AuthService,
     LoginResult,
     PasswordResetService,
+    SessionResult,
     get_account_activation_service,
     get_auth_service,
     get_password_reset_service,
@@ -47,6 +51,8 @@ from adminprop.shared.auth.cookies import (
     clear_auth_cookies,
     set_auth_cookies,
 )
+from adminprop.shared.auth.dependencies import get_current_access_token_payload
+from adminprop.shared.auth.jwt import JWTPayload
 from adminprop.shared.logging.json_logger import request_id_var
 from adminprop.shared.rate_limit.token_bucket import rate_limit_by_ip
 
@@ -75,6 +81,10 @@ def _to_login_response(result: LoginResult) -> LoginResponse:
                 )
                 for m in result.organizations
             ],
+            # issue #84: mismos valores que el JWT emitido -- None mientras
+            # `status == "organization_selection_required"` (ver LoginResult).
+            permissions=result.permissions,
+            is_super_admin=result.is_super_admin,
         )
     )
 
@@ -219,6 +229,9 @@ async def accept_invitation(
                 name=result.organization.name,
                 role=result.organization.role,
             ),
+            # issue #84: mismos valores que el JWT emitido en este request.
+            permissions=result.permissions,
+            is_super_admin=result.is_super_admin,
         )
     )
 
@@ -281,3 +294,45 @@ async def reset_password(
     """
     await service.reset_password(dto.token, dto.password)
     return ResetPasswordResponse(data=ResetPasswordResponseData())
+
+
+# ─── issue #84 — GET /auth/me (rehidratar sesion) ──────────────────────────
+
+
+def _to_me_response(result: SessionResult) -> MeResponse:
+    return MeResponse(
+        data=MeResponseData(
+            user=UserSummary.model_validate(result.user),
+            organization=(
+                MeOrganization(id=result.organization_id, name=result.organization_name)
+                if result.organization_id is not None
+                else None
+            ),
+            role=result.role,
+            permissions=result.permissions,
+            is_super_admin=result.is_super_admin,
+        )
+    )
+
+
+@router.get(
+    "/me",
+    status_code=status.HTTP_200_OK,
+    response_model=MeResponse,
+)
+async def get_me(
+    payload: JWTPayload = Depends(get_current_access_token_payload),
+    service: AuthService = Depends(get_auth_service),
+) -> MeResponse:
+    """SDD: sdd_03 §1 v1.6 "GET /auth/me -> 200 { data: { user,
+    organization, role, permissions[], is_super_admin } } | 401" (issue
+    #84 -- el front no puede leer el JWT porque vive en cookie HttpOnly,
+    decision #20).
+
+    Autenticado por cookie igual que el resto de `/auth/*` protegidos: sin
+    cookie/JWT invalido -> 401 UNAUTHORIZED (via
+    `get_current_access_token_payload`). Membresia desactivada despues de
+    emitido el JWT -> 403 MEMBERSHIP_INACTIVE (via `AuthService.get_current_session`).
+    """
+    result = await service.get_current_session(payload)
+    return _to_me_response(result)
