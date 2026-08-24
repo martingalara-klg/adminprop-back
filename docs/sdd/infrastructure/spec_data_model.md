@@ -580,7 +580,7 @@ FKs entre capas: siempre de capa posterior a capa anterior, salvo `work_orders.s
 
 1. **Roles de sistema** (3 filas en `roles`, `is_system_role=true`):
    - `owner`: todos los permisos.
-   - `admin`: todo excepto `user:manage`, `role:manage`, `organization:configure`.
+   - `admin`: todo excepto `user:manage`, `role:manage`, `organization:configure`, `landlord:set-commission` (issue #51: cambio de `commission_pct` de un propietario es exclusivo de `owner`).
    - `maintenance`: solo `work-order:read`, `work-order:quote`, `work-order:close`, `attachment:manage` (scoped a work orders).
 2. **Settings default** en `organizations.settings`: `grace_day: 10`, `contract_expiry_notice_days: 60`.
 

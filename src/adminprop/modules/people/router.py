@@ -181,11 +181,13 @@ async def update_landlord(
     service: LandlordService = Depends(get_landlord_service),
 ) -> LandlordResponse:
     """RF-01 + CA-02-02/CA-02-03: `admin` edita datos de contacto libremente;
-    si incluye `commission_pct` recibe 403 FORBIDDEN (solo `owner`). El
-    cambio de `commission_pct` (cuando lo hace el owner) queda auditado
-    con valor anterior/nuevo y rige unicamente para liquidaciones futuras
-    (RN-L05 -- no hay liquidaciones ya generadas que recalcular en este
-    modulo todavia)."""
+    si incluye `commission_pct` recibe 403 FORBIDDEN sin el permiso atomico
+    `landlord:set-commission` (sdd_03 v1.5, issue #51 -- solo `owner` lo
+    tiene en el seed de roles; ya NO se compara `payload.role`). El
+    cambio de `commission_pct` (cuando el actor tiene el permiso) queda
+    auditado con valor anterior/nuevo y rige unicamente para liquidaciones
+    futuras (RN-L05 -- no hay liquidaciones ya generadas que recalcular en
+    este modulo todavia)."""
     updated = await service.update(
         landlord_id,
         organization_id,
@@ -197,7 +199,7 @@ async def update_landlord(
         commission_pct=dto.commission_pct,
         notes=dto.notes,
         actor_user_id=payload.sub,
-        actor_role=payload.role,
+        actor_permissions=frozenset(payload.permissions),
         fields_set=dto.model_fields_set,
     )
     return LandlordResponse(data=_to_landlord_detail(updated))
