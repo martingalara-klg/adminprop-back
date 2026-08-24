@@ -18,8 +18,8 @@ Este archivo es el **mapa de navegación** de toda la documentación SDD del pro
 |---|---|---|---|---|---|---|
 | `project_adminprop` | Contexto general del proyecto | (raíz) | Activo | 1.0 | ✅ | ✅ |
 | `sdd_01_prd` | Product Requirements Document (UC-01..UC-20, R-XX, S-XX) | core | Activo | 1.1 | ✅ | ✅ |
-| `sdd_02_domain_model` | Modelo de dominio + invariantes (RN-C/P/L/A/D) | core | Activo | 1.1 | ✅ | ✅ (lectura) |
-| `sdd_03_api_contracts` | Contratos REST de la API | core | Activo | 1.1 | ✅ | ✅ **compartido — vinculante** |
+| `sdd_02_domain_model` | Modelo de dominio + invariantes (RN-C/P/L/A/D) | core | Activo | 1.2 | ✅ | ✅ (lectura) |
+| `sdd_03_api_contracts` | Contratos REST de la API | core | Activo | 1.4 | ✅ | ✅ **compartido — vinculante** |
 | `sdd_04_nonfunctional` | Requisitos no funcionales | core | Activo | 1.0 | ✅ | ✅ (parcial: §2) |
 | `spec_module_00_superadmin` | Módulo 0 — Super Admin & onboarding | core | Activo | 1.0 | ✅ | ✅ (rutas /superadmin) |
 | `spec_module_01_propiedades` | Módulo 1 — Propiedades y cuentas de servicio | features | Activo | 1.0 | ✅ | ✅ |
@@ -30,7 +30,7 @@ Este archivo es el **mapa de navegación** de toda la documentación SDD del pro
 | `spec_module_06_mantenimiento` | Módulo 6 — Mantenimiento y cotizaciones | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_module_07_administracion` | Módulo 7 — Usuarios, roles, configuración, auditoría | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_data_model` | Modelo de datos físico (22 tablas, RLS, migraciones) | infrastructure | Activo | 1.1 | ✅ | ⚪ |
-| `spec_notificaciones` | Notificaciones (transversal: in-app + email) | infrastructure | Activo | 1.0 | ✅ | ✅ (panel in-app) |
+| `spec_notificaciones` | Notificaciones (transversal: in-app + email) | infrastructure | Activo | 1.1 | ✅ | ✅ (panel in-app) |
 
 **Leyenda:** ✅ referencia primaria (leer antes de implementar) · ⚪ referencia secundaria · ❌ no aplica.
 
