@@ -335,9 +335,7 @@ class TestRentPeriodDetail:
         assert payments[0]["payment_date"] == "2026-06-05"
         assert payments[1]["payment_date"] == "2026-06-20"
 
-    async def test_detail_includes_voided_payment_with_voided_at_and_voided_by(
-        self, client, seed
-    ):
+    async def test_detail_includes_voided_payment_with_voided_at_and_voided_by(self, client, seed):
         """CA-04-07: "el cobro queda visible con marca de anulado" --
         verificable por API (issue #87)."""
         org, owner, _, _, _, contract_id = await _seed_contract(seed)
