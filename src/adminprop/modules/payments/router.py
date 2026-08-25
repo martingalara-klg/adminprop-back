@@ -25,8 +25,9 @@ from adminprop.modules.payments.schemas import (
     PaymentResponse,
     PaymentVoidRequest,
     PaymentVoidResponse,
+    RentPeriodDetail,
+    RentPeriodDetailResponse,
     RentPeriodListResponse,
-    RentPeriodResponse,
     RentPeriodSummary,
 )
 from adminprop.modules.payments.service import (
@@ -150,22 +151,23 @@ async def list_rent_periods(
 
 @router.get(
     "/{rent_period_id}",
-    response_model=RentPeriodResponse,
+    response_model=RentPeriodDetailResponse,
     dependencies=[Depends(requires_permission("rent-period:read"))],
 )
 async def get_rent_period(
     rent_period_id: UUID,
     organization_id: UUID = Depends(get_current_tenant),
     service: RentPeriodPanelService = Depends(get_rent_period_panel_service),
-) -> RentPeriodResponse:
-    """sdd_03 §9 + RF-02: detalle de un periodo del panel."""
-    entry = await service.get_panel_entry(
+) -> RentPeriodDetailResponse:
+    """sdd_03 §9 (v1.7) + RF-02: detalle de un periodo del panel +
+    `payments[]` -- issue #87. Cobros anulados incluidos (CA-04-07)."""
+    entry = await service.get_panel_entry_detail(
         rent_period_id, organization_id, today=datetime.now(tz=UTC).date()
     )
     if entry is None:
         # RN-D01: 404, no 403 -- no distingue "no existe" de "otra org".
         raise NotFoundException()
-    return RentPeriodResponse(data=RentPeriodSummary.model_validate(entry))
+    return RentPeriodDetailResponse(data=RentPeriodDetail.model_validate(entry))
 
 
 # ─── /v1/payments/:id/void -- RF-05 (issue #23) ────────────────────────
