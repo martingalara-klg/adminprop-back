@@ -345,6 +345,25 @@ class PaymentRepository:
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def list_by_rent_period(
+        self, rent_period_id: UUID, organization_id: UUID
+    ) -> list[Payment]:
+        """issue #87: `GET /rent-periods/:id` -- `payments[]` del periodo,
+        ordenados por `payment_date` (empate por `created_at`, orden de
+        carga). Filtro EXPLICITO de `organization_id` (RN-D01) ademas del
+        RLS. Incluye cobros anulados (`voided_at`/`voided_by` poblados) --
+        CA-04-07: "el cobro queda visible con marca de anulado"."""
+        stmt = (
+            select(Payment)
+            .where(
+                Payment.rent_period_id == rent_period_id,
+                Payment.organization_id == organization_id,
+            )
+            .order_by(Payment.payment_date.asc(), Payment.created_at.asc())
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def void(
         self, payment_id: UUID, organization_id: UUID, *, voided_by: UUID
     ) -> Payment | None:

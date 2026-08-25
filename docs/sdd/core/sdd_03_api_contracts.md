@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.6
-fecha: 2026-08-24
+version: 1.7
+fecha: 2026-08-25
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.6
+**Versión:** 1.7
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -234,6 +234,7 @@ GET    /debt                             (?landlord_id=&renter_id=&min_days= —
 
 - `POST payments` valida: `amount` > 0 y ≤ saldo (`PAYMENT_EXCEEDS_CONTRACT_BALANCE`), `exchange_rate` si moneda difiere (`EXCHANGE_RATE_REQUIRED`), y registra `suggested_interest` / `charged_interest` / `forgiven_interest`.
 - La generación mensual de rent_periods es un job de Celery Beat (1° de cada mes, `sdd_04` §1.3), no un endpoint.
+- `GET /rent-periods/:id` (v1.7, issue #87) además de los campos del panel (§RF-02) incluye `payments[]` — el historial de cobros del período, ordenado por `payment_date` ascendente. Cada item trae `id`, `payment_date`, `method`, `payment_currency`, `amount`, `exchange_rate`, `destination`, `suggested_interest`, `charged_interest`, `forgiven_interest`, `notes`, `voided_at`, `voided_by`, `created_at`. **Los cobros anulados se incluyen** (con `voided_at`/`voided_by` poblados) — es la vía por la que CA-04-07 ("el cobro queda visible con marca de anulado") se verifica por API, no solo a nivel DB. El **motivo** de la anulación no viaja acá — vive en `audit_logs` (acción `payment.voided`, decisión #23) y se consulta vía `GET /audit-logs?entity_type=payment&entity_id=<id>` (visor de auditoría, permiso `audit:read`). `GET /rent-periods` (panel/listado, §RF-02) **no cambia** — sigue sin `payments[]`, liviano para el panel mensual.
 
 ## 10. Cargos del mes (`/recurring-charges`, `/charge-entries`)
 
