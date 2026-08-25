@@ -242,6 +242,25 @@ class TestRentPeriodPanelList:
         seen_ids = {page_1.json()["data"][0]["id"], page_2.json()["data"][0]["id"]}
         assert seen_ids == {str(first_id), str(second_id)}
 
+    async def test_panel_list_rows_do_not_include_payments(self, client, seed):
+        """issue #87: `GET /rent-periods` (panel/listado) NO cambia -- solo
+        `GET /rent-periods/:id` embebe `payments[]`."""
+        org, owner, _, _, _, contract_id = await _seed_contract(seed)
+        rent_period_id = await seed.create_rent_period_row(
+            organization_id=org["organization_id"], contract_id=contract_id
+        )
+        await seed.create_payment_row(
+            organization_id=org["organization_id"],
+            rent_period_id=rent_period_id,
+            created_by=owner["id"],
+        )
+
+        response = await client.get("/v1/rent-periods", headers=owner["headers"])
+
+        assert response.status_code == 200
+        row = next(item for item in response.json()["data"] if item["id"] == str(rent_period_id))
+        assert "payments" not in row
+
 
 class TestRentPeriodDetail:
     """RF-02: `GET /rent-periods/:id`."""
@@ -269,3 +288,84 @@ class TestRentPeriodDetail:
 
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "NOT_FOUND"
+
+    async def test_detail_with_no_payments_returns_empty_list(self, client, seed):
+        """issue #87: periodo sin cobros -> `payments: []`."""
+        org, owner, _, _, _, contract_id = await _seed_contract(seed)
+        rent_period_id = await seed.create_rent_period_row(
+            organization_id=org["organization_id"], contract_id=contract_id
+        )
+
+        response = await client.get(f"/v1/rent-periods/{rent_period_id}", headers=owner["headers"])
+
+        assert response.status_code == 200
+        assert response.json()["data"]["payments"] == []
+
+    async def test_detail_returns_multiple_payments_ordered_by_payment_date(self, client, seed):
+        """issue #87: `payments[]` ordenados por `payment_date` ascendente."""
+        org, owner, _, _, _, contract_id = await _seed_contract(seed)
+        rent_period_id = await seed.create_rent_period_row(
+            organization_id=org["organization_id"],
+            contract_id=contract_id,
+            amount_due="3000.00",
+            status="partial",
+        )
+        # Insertados fuera de orden a proposito -- la respuesta debe
+        # quedar ordenada por payment_date, no por orden de insercion.
+        later_id = await seed.create_payment_row(
+            organization_id=org["organization_id"],
+            rent_period_id=rent_period_id,
+            created_by=owner["id"],
+            payment_date="2026-06-20",
+            amount="1000.00",
+        )
+        earlier_id = await seed.create_payment_row(
+            organization_id=org["organization_id"],
+            rent_period_id=rent_period_id,
+            created_by=owner["id"],
+            payment_date="2026-06-05",
+            amount="500.00",
+        )
+
+        response = await client.get(f"/v1/rent-periods/{rent_period_id}", headers=owner["headers"])
+
+        assert response.status_code == 200
+        payments = response.json()["data"]["payments"]
+        assert [p["id"] for p in payments] == [str(earlier_id), str(later_id)]
+        assert payments[0]["payment_date"] == "2026-06-05"
+        assert payments[1]["payment_date"] == "2026-06-20"
+
+    async def test_detail_includes_voided_payment_with_voided_at_and_voided_by(
+        self, client, seed
+    ):
+        """CA-04-07: "el cobro queda visible con marca de anulado" --
+        verificable por API (issue #87)."""
+        org, owner, _, _, _, contract_id = await _seed_contract(seed)
+        rent_period_id = await seed.create_rent_period_row(
+            organization_id=org["organization_id"],
+            contract_id=contract_id,
+            amount_due="1000.00",
+            paid_total="1000.00",
+            status="paid",
+        )
+        payment_id = await seed.create_payment_row(
+            organization_id=org["organization_id"],
+            rent_period_id=rent_period_id,
+            created_by=owner["id"],
+            amount="1000.00",
+        )
+        void_response = await client.post(
+            f"/v1/payments/{payment_id}/void",
+            json={"reason": "Cobro duplicado por error de carga"},
+            headers=owner["headers"],
+        )
+        assert void_response.status_code == 200
+
+        response = await client.get(f"/v1/rent-periods/{rent_period_id}", headers=owner["headers"])
+
+        assert response.status_code == 200
+        payments = response.json()["data"]["payments"]
+        assert len(payments) == 1
+        assert payments[0]["id"] == str(payment_id)
+        assert payments[0]["voided_at"] is not None
+        assert payments[0]["voided_by"] == str(owner["id"])
