@@ -1,15 +1,15 @@
 ---
 name: AdminProp — Requisitos No Funcionales
-description: Performance, workers y retries, caché, seguridad (JWT, anti-enumeration, RLS, cifrado, rate limits, headers), observabilidad y compliance
+description: Performance, workers y retries, caché, seguridad (JWT, anti-enumeration, RLS, cifrado, CORS, rate limits, headers), observabilidad y compliance
 type: project
-version: 1.0
-fecha: 2026-08-05
+version: 1.1
+fecha: 2026-08-26
 ---
 # AdminProp — Requisitos No Funcionales (RNF)
 
-**Versión:** 1.0
+**Versión:** 1.1
 **Estado:** Borrador para revisión
-**Fecha:** 2026-08-05
+**Fecha:** 2026-08-05 (última actualización: 2026-08-26 — §2.4a CORS, issue #90)
 
 ---
 
@@ -104,6 +104,12 @@ Los `staleTime` de TanStack Query en el frontend se alinean con estos TTLs.
 - **CSRF:** cubierto por `SameSite=Lax` + `Secure` + HttpOnly. Sin token CSRF custom.
 - **Scrubbing en logs:** nunca aparecen `password`, `password_hash`, tokens, cookies, `bank_info`.
 
+### 2.4a CORS
+
+- **Default: sin middleware CORS.** Mientras front y API no tengan dominios reales, el front esquiva la restricción same-origin con el proxy de Vite en dev (§10 `CLAUDE.md` "Pendientes"). `CORS_ALLOWED_ORIGINS` vacío/no definido ⇒ `CORSMiddleware` no se registra ⇒ comportamiento actual intacto (issue #90).
+- **Con orígenes configurados** (`CORS_ALLOWED_ORIGINS`, lista separada por comas): `allow_credentials=True` (las cookies de sesión viajan en el request), `allow_origins` = la lista EXACTA de orígenes de la variable de entorno — **nunca `*`**, incompatible con `allow_credentials=True` y con la postura de seguridad del proyecto. Métodos y headers según lo que la API expone realmente (incluye el header `X-Request-Id`; expone `Content-Disposition` para las descargas de blobs — recibos PDF, exports de liquidaciones).
+- **CORS solo no habilita front y API en dominios cruzados.** Las cookies de sesión son `SameSite=Lax` (decisión #43, §2.4 arriba): el navegador no las envía en un request cross-site aunque CORS lo permita — CORS gobierna qué respuestas puede *leer* el JS del navegador, no si la cookie viaja. El despliegue recomendado sigue siendo servir front y API bajo el MISMO origen (proxy en el servidor del front, igual que hace Vite en dev). `CORS_ALLOWED_ORIGINS` queda reservado para orígenes adicionales explícitos (ej: un cliente API externo) y para cuando exista infra cloud con dominios reales (decisión #111).
+
 ### 2.5 Rate limiting (Redis token bucket)
 
 | Endpoint | Límite | Respuesta al exceder |
@@ -116,7 +122,7 @@ Los `staleTime` de TanStack Query en el frontend se alinean con estos TTLs.
 
 ### 2.7 Security headers
 
-`Content-Security-Policy: default-src 'self'` (extensible) · `X-Content-Type-Options: nosniff` · `X-Frame-Options: DENY` · `Referrer-Policy: strict-origin-when-cross-origin` · `Strict-Transport-Security` (con TLS). CORS: solo los origins del frontend (config por ambiente).
+`Content-Security-Policy: default-src 'self'` (extensible) · `X-Content-Type-Options: nosniff` · `X-Frame-Options: DENY` · `Referrer-Policy: strict-origin-when-cross-origin` · `Strict-Transport-Security` (con TLS). CORS: ver §2.4a — deshabilitado por default, orígenes exactos del frontend vía `CORS_ALLOWED_ORIGINS` cuando aplique (nunca `*`).
 
 ### 2.8 Compliance — Ley 25.326
 

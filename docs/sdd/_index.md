@@ -20,7 +20,7 @@ Este archivo es el **mapa de navegación** de toda la documentación SDD del pro
 | `sdd_01_prd` | Product Requirements Document (UC-01..UC-20, R-XX, S-XX) | core | Activo | 1.1 | ✅ | ✅ |
 | `sdd_02_domain_model` | Modelo de dominio + invariantes (RN-C/P/L/A/D) | core | Activo | 1.2 | ✅ | ✅ (lectura) |
 | `sdd_03_api_contracts` | Contratos REST de la API | core | Activo | 1.7 | ✅ | ✅ **compartido — vinculante** |
-| `sdd_04_nonfunctional` | Requisitos no funcionales | core | Activo | 1.0 | ✅ | ✅ (parcial: §2) |
+| `sdd_04_nonfunctional` | Requisitos no funcionales | core | Activo | 1.1 | ✅ | ✅ (parcial: §2) |
 | `spec_module_00_superadmin` | Módulo 0 — Super Admin & onboarding | core | Activo | 1.0 | ✅ | ✅ (rutas /superadmin) |
 | `spec_module_01_propiedades` | Módulo 1 — Propiedades y cuentas de servicio | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_module_02_personas` | Módulo 2 — Propietarios e inquilinos | features | Activo | 1.0 | ✅ | ✅ |
@@ -133,6 +133,7 @@ Numeración heredada del sistema de referencia donde los skills la citan (#2..#6
 | 116 | **Permiso atómico `landlord:set-commission`** agregado al catálogo (solo `owner`), reemplazando el chequeo por nombre de rol (`payload.role`) que el PR #50 (issue #13) había introducido por ausencia de un permiso dedicado | `sdd_03` v1.5, decisión 2026-08-24, issue #51 | ✅ Tomada |
 | 117 | **`login`/`accept-invitation` exponen `permissions[]` e `is_super_admin`** (mismos valores que el JWT emitido) y se agrega `GET /auth/me` para rehidratar la sesión — el front no puede leer el JWT porque vive en cookie HttpOnly (decisión #20) | `sdd_03` v1.6, decisión 2026-08-24, issue #84 | ✅ Tomada |
 | 118 | **`GET /rent-periods/:id` embebe `payments[]`** (no endpoint nuevo) — cobros anulados incluidos (CA-04-07 verificable por API); el motivo de anulación no viaja acá, se consulta vía `audit_logs`/visor de auditoría. `GET /rent-periods` (panel) no cambia, sigue liviano | `sdd_03` v1.7, decisión 2026-08-25, issue #87 | ✅ Tomada |
+| 119 | **CORS deshabilitado por default** (`CORS_ALLOWED_ORIGINS` vacío ⇒ sin `CORSMiddleware`); con orígenes configurados, siempre exactos + `allow_credentials=True` (nunca `*`). No sustituye mismo-origen: las cookies `SameSite=Lax` (#43) no viajan cross-site aunque CORS lo permita — el despliegue recomendado sigue siendo front+API bajo el mismo origen | `sdd_04` v1.1 §2.4a, decisión 2026-08-26, issue #90 | ✅ Tomada |
 
 ### Decisiones aún pendientes
 
