@@ -33,6 +33,7 @@ from adminprop.shared.attachments.repository import AttachmentRepository
 from adminprop.shared.audit.service import audit
 from adminprop.shared.errors.retryable import NonRetryableError, RetryableError
 from adminprop.shared.storage.local import save_attachment
+from adminprop.shared.worker_runtime import run_worker_coroutine
 from adminprop.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,16 @@ def generate_settlement(
             "service": "documents_worker",
         },
     )
-    asyncio.run(_generate_settlement_async(UUID(settlement_id), UUID(organization_id), request_id))
+    # issue #93: `run_worker_coroutine` dispone el engine/cliente Redis
+    # cacheados por proceso al terminar -- sin esto, la SEGUNDA tarea que
+    # este mismo proceso worker procese revienta con `Future attached to
+    # a different loop`/`Event loop is closed` (ver
+    # `shared/worker_runtime.py`).
+    asyncio.run(
+        run_worker_coroutine(
+            _generate_settlement_async(UUID(settlement_id), UUID(organization_id), request_id)
+        )
+    )
 
 
 async def _generate_settlement_async(
@@ -301,13 +311,16 @@ def regenerate_settlement(
             "service": "documents_worker",
         },
     )
+    # issue #93: ver comentario equivalente en `generate_settlement`.
     asyncio.run(
-        _regenerate_settlement_async(
-            UUID(settlement_id),
-            UUID(organization_id),
-            request_id,
-            Decimal(exchange_rate) if exchange_rate is not None else None,
-            UUID(actor_user_id),
+        run_worker_coroutine(
+            _regenerate_settlement_async(
+                UUID(settlement_id),
+                UUID(organization_id),
+                request_id,
+                Decimal(exchange_rate) if exchange_rate is not None else None,
+                UUID(actor_user_id),
+            )
         )
     )
 
