@@ -38,6 +38,7 @@ def _run_fresh_python(code: str) -> subprocess.CompletedProcess[str]:
         capture_output=True,
         text=True,
         timeout=60,
+        check=False,  # el returncode se afirma explicitamente en cada test
     )
 
 
