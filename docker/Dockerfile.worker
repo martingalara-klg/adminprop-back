@@ -7,6 +7,21 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# issue #89 -- mismo bloque que docker/Dockerfile.api (issue #24):
+# `documents_worker` importa transitivamente WeasyPrint
+# (`settlements.exports` -> `shared/pdf/renderer.py` -> `weasyprint`), asi
+# que esta imagen necesita las mismas libs de sistema. Sin esto el worker
+# muere con `OSError: cannot load library 'gobject-2.0-0'` antes incluso
+# de llegar al import de las tareas de Celery.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf-2.0-0 \
+        libffi-dev \
+        shared-mime-info \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY tests ./tests

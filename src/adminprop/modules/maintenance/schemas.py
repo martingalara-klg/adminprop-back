@@ -170,8 +170,9 @@ class WorkOrderCancelRequest(BaseModel):
 class PropertyWorkOrderHistoryEntry(BaseModel):
     """GET /v1/properties/:id/work-orders -- RF-06: "fecha, descripcion,
     estado, pagador, costo final y -- si aplica -- en que liquidacion se
-    desconto". `settled_in_settlement_id` siempre `None` hoy: la columna
-    todavia no existe (Capa 6, issue #27) -- ver
+    desconto". `settled_in_settlement_id` se puebla al liquidarse la
+    reparacion agency de la orden (issue #29, Modulo 5) -- `None` solo
+    mientras la orden no fue liquidada; ver
     `modules/maintenance/settlement_hook.py`."""
 
     model_config = ConfigDict(from_attributes=True)

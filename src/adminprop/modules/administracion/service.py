@@ -40,7 +40,20 @@ from adminprop.shared.errors.codes import (
     SystemRoleImmutableException,
     UserAlreadyMemberException,
 )
-from adminprop.workers.notification_worker import send_transactional_email
+
+# `send_transactional_email` NO se importa a nivel de modulo (issue #89):
+# `administracion` es importado transitivamente por
+# `workers/notification_worker.py` (via `payments.service ->
+# administracion.repository -> administracion/__init__.py ->
+# administracion/router.py -> administracion/service.py`), y ese mismo
+# modulo de workers es el que define `send_transactional_email` -- un
+# import a nivel de modulo aca cierra un ciclo que revienta CUALQUIER
+# `celery -A adminprop.workers.celery_app worker|beat` con ImportError
+# ("partially initialized module"), invisible para la suite porque los
+# tests invocan las tareas en modo directo sin bootear un worker nunca.
+# Mismo patron de import diferido que ya usan `settlements/service.py`
+# (`documents_worker`) y `shared/notifications/service.py`
+# (`notification_worker.send_notification_email`) por la misma razon.
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +182,13 @@ class UserService:
     def _send_invitation_email(self, *, to: str, raw_token: str, request_id: str) -> None:
         """RF-01: mismo flujo de activacion de cuenta que el Modulo 0 --
         el email sale via `notification_worker` (Resend), encolado, nunca
-        bloquea la respuesta HTTP (docs/skills/async-worker.md)."""
+        bloquea la respuesta HTTP (docs/skills/async-worker.md).
+
+        Import diferido (issue #89): romper el ciclo de import con
+        `workers/notification_worker.py` -- ver comentario junto a los
+        imports del modulo."""
+        from adminprop.workers.notification_worker import send_transactional_email
+
         link = f"{self._settings.frontend_base_url}/accept-invitation?token={raw_token}"
         ttl_hours = self._settings.invitation_ttl_hours
         send_transactional_email.delay(

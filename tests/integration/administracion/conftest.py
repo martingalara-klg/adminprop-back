@@ -26,7 +26,6 @@ from httpx import ASGITransport, AsyncClient
 from adminprop.config import get_settings
 from adminprop.db.session import get_engine, get_session_factory
 from adminprop.main import create_app
-from adminprop.modules.administracion import service as administracion_service
 from adminprop.modules.superadmin.provisioning import (
     DEFAULT_ORGANIZATION_SETTINGS,
     ROLE_DEFINITIONS,
@@ -89,13 +88,22 @@ async def client(rsa_keypair) -> AsyncGenerator[AsyncClient]:
 @pytest.fixture()
 def sent_emails(monkeypatch) -> list[dict]:
     """RF-01: intercepta el encolado de la invitacion -- nunca Resend real
-    en tests (docs/skills/testing.md)."""
+    en tests (docs/skills/testing.md).
+
+    Parchea `notification_worker.send_transactional_email` (la fuente),
+    no `administracion.service.send_transactional_email` -- issue #89
+    convirtio ese ultimo en un import diferido DENTRO de
+    `_send_invitation_email` para romper el ciclo de import de Celery, asi
+    que ya no existe como atributo del modulo `administracion.service` al
+    momento en que corre este fixture."""
+    from adminprop.workers import notification_worker
+
     calls: list[dict] = []
 
     def _fake_delay(**kwargs: object) -> None:
         calls.append(kwargs)
 
-    monkeypatch.setattr(administracion_service.send_transactional_email, "delay", _fake_delay)
+    monkeypatch.setattr(notification_worker.send_transactional_email, "delay", _fake_delay)
     return calls
 
 

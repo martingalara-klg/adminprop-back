@@ -19,7 +19,7 @@ Este archivo es el **mapa de navegación** de toda la documentación SDD del pro
 | `project_adminprop` | Contexto general del proyecto | (raíz) | Activo | 1.0 | ✅ | ✅ |
 | `sdd_01_prd` | Product Requirements Document (UC-01..UC-20, R-XX, S-XX) | core | Activo | 1.1 | ✅ | ✅ |
 | `sdd_02_domain_model` | Modelo de dominio + invariantes (RN-C/P/L/A/D) | core | Activo | 1.2 | ✅ | ✅ (lectura) |
-| `sdd_03_api_contracts` | Contratos REST de la API | core | Activo | 1.5 | ✅ | ✅ **compartido — vinculante** |
+| `sdd_03_api_contracts` | Contratos REST de la API | core | Activo | 1.7 | ✅ | ✅ **compartido — vinculante** |
 | `sdd_04_nonfunctional` | Requisitos no funcionales | core | Activo | 1.0 | ✅ | ✅ (parcial: §2) |
 | `spec_module_00_superadmin` | Módulo 0 — Super Admin & onboarding | core | Activo | 1.0 | ✅ | ✅ (rutas /superadmin) |
 | `spec_module_01_propiedades` | Módulo 1 — Propiedades y cuentas de servicio | features | Activo | 1.0 | ✅ | ✅ |
@@ -131,6 +131,8 @@ Numeración heredada del sistema de referencia donde los skills la citan (#2..#6
 | 114 | **Depósito de garantía: fuera del alcance del MVP** — no se registra ni trackea | `sdd_01` §4 Futuras, decisión 2026-08-11 | ✅ Tomada |
 | 115 | **Evento `quote_approved` agregado al MVP** (aviso al encargado al aprobarse su cotización — cierra la brecha CA-06-03 vs tabla de eventos detectada en el issue #26; se implementa en #31). **WhatsApp como canal: post-MVP** — MVP notifica por email + in-app | `spec_notificaciones` v1.1, `sdd_02` §2.16 v1.2, decisión 2026-08-20 | ✅ Tomada |
 | 116 | **Permiso atómico `landlord:set-commission`** agregado al catálogo (solo `owner`), reemplazando el chequeo por nombre de rol (`payload.role`) que el PR #50 (issue #13) había introducido por ausencia de un permiso dedicado | `sdd_03` v1.5, decisión 2026-08-24, issue #51 | ✅ Tomada |
+| 117 | **`login`/`accept-invitation` exponen `permissions[]` e `is_super_admin`** (mismos valores que el JWT emitido) y se agrega `GET /auth/me` para rehidratar la sesión — el front no puede leer el JWT porque vive en cookie HttpOnly (decisión #20) | `sdd_03` v1.6, decisión 2026-08-24, issue #84 | ✅ Tomada |
+| 118 | **`GET /rent-periods/:id` embebe `payments[]`** (no endpoint nuevo) — cobros anulados incluidos (CA-04-07 verificable por API); el motivo de anulación no viaja acá, se consulta vía `audit_logs`/visor de auditoría. `GET /rent-periods` (panel) no cambia, sigue liviano | `sdd_03` v1.7, decisión 2026-08-25, issue #87 | ✅ Tomada |
 
 ### Decisiones aún pendientes
 

@@ -24,7 +24,7 @@ from adminprop.modules.auth.repository import (
     get_auth_activation_repository,
     get_auth_repository,
 )
-from adminprop.shared.auth.jwt import create_access_token
+from adminprop.shared.auth.jwt import JWTPayload, create_access_token
 from adminprop.shared.auth.lockout import LoginLockout
 from adminprop.shared.auth.password_reset_store import (
     PasswordResetTokenStore,
@@ -61,6 +61,24 @@ class LoginResult:
     user: UserRecord | None
     organizations: list[MembershipRecord] = field(default_factory=list)
     tokens: AuthenticatedTokens | None = None
+    # issue #84: mismos valores que porta el JWT emitido (None mientras no
+    # se resolvio organizacion, ver `status == "organization_selection_required"`).
+    permissions: list[str] | None = None
+    is_super_admin: bool | None = None
+
+
+@dataclass(frozen=True)
+class SessionResult:
+    """`GET /auth/me` (issue #84): sesion vigente resuelta en vivo -- para
+    organizaciones, `permissions`/`role` vienen de la membresia actual
+    (misma consulta que `login`/`refresh`), no del JWT cacheado."""
+
+    user: UserRecord
+    organization_id: UUID | None
+    organization_name: str | None
+    role: str | None
+    permissions: list[str]
+    is_super_admin: bool
 
 
 class AuthService:
@@ -108,6 +126,8 @@ class AuthService:
             user=user,
             organizations=[],
             tokens=AuthenticatedTokens(access_token=access_token, refresh_token=issued.raw_token),
+            permissions=[],
+            is_super_admin=True,
         )
 
     async def _issue_org_session(
@@ -142,6 +162,8 @@ class AuthService:
             user=user,
             organizations=memberships,
             tokens=AuthenticatedTokens(access_token=access_token, refresh_token=issued.raw_token),
+            permissions=selected.permissions,
+            is_super_admin=False,
         )
 
     @staticmethod
@@ -197,6 +219,48 @@ class AuthService:
         )
         return AuthenticatedTokens(access_token=access_token, refresh_token=issued.raw_token)
 
+    async def get_current_session(self, payload: JWTPayload) -> SessionResult:
+        """`GET /auth/me` (issue #84): resuelve la sesion vigente a partir
+        del JWT ya validado por la dependency de la cookie -- reutiliza
+        `get_active_memberships` (misma consulta que arma `permissions[]`
+        en `login`/`refresh`), no cachea del JWT: si el rol cambio de
+        permisos despues de emitido, esta respuesta ya lo refleja.
+        """
+        user = await self._repo.get_user_by_id(payload.sub)
+        if user is None:
+            # Defensivo: JWT valido de un usuario borrado/inexistente.
+            raise UnauthorizedException()
+
+        if payload.is_super_admin:
+            return SessionResult(
+                user=user,
+                organization_id=None,
+                organization_name=None,
+                role=None,
+                permissions=[],
+                is_super_admin=True,
+            )
+
+        if payload.org_id is None:
+            # JWT de organizacion mal formado (sin `org` ni `is_super_admin`).
+            raise UnauthorizedException()
+
+        memberships = await self._repo.get_active_memberships(user.id)
+        membership = next((m for m in memberships if m.organization_id == payload.org_id), None)
+        if membership is None:
+            # Membresia desactivada (o la org fue deshabilitada) despues de
+            # emitido el JWT -- mismo criterio que valida `login`/`refresh`.
+            raise MembershipInactiveException()
+
+        return SessionResult(
+            user=user,
+            organization_id=membership.organization_id,
+            organization_name=membership.organization_name,
+            role=membership.role_name,
+            permissions=membership.permissions,
+            is_super_admin=False,
+        )
+
 
 def get_auth_service(
     repo: AuthRepository = Depends(get_auth_repository),
@@ -228,6 +292,12 @@ class AcceptInvitationResult:
     user: UserRecord
     organization: ActivatedOrganization
     tokens: AuthenticatedTokens
+    # issue #84: mismos permisos que porta el JWT emitido en este request
+    # (siempre presentes -- accept-invitation nunca deja la organizacion
+    # sin resolver). `is_super_admin` siempre False (este flujo nunca
+    # activa cuentas de Super Admin).
+    permissions: list[str]
+    is_super_admin: bool = False
 
 
 class AccountActivationService:
@@ -324,6 +394,8 @@ class AccountActivationService:
                 role=invitation.role_name,
             ),
             tokens=AuthenticatedTokens(access_token=access_token, refresh_token=issued.raw_token),
+            permissions=invitation.role_permissions,
+            is_super_admin=False,
         )
 
     @staticmethod

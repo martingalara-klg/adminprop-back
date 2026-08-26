@@ -155,6 +155,27 @@ class RentPeriodListResponse(BaseModel):
     meta: dict
 
 
+# ─── RF-02 (detalle del periodo con payments[]) -- issue #87 ───────────
+
+
+class RentPeriodDetail(RentPeriodSummary):
+    """Data de `GET /v1/rent-periods/:id` (v1.7) -- `RentPeriodSummary` +
+    `payments[]`: el historial de cobros del periodo, ordenado por
+    `payment_date`. Incluye cobros ANULADOS (`voided_at`/`voided_by`
+    poblados, via `PaymentDetail`) -- CA-04-07: "el cobro queda visible
+    con marca de anulado" pasa a ser verificable por API. El motivo de
+    anulacion no viaja aca -- vive en `audit_logs` (issue #23),
+    consultable via el visor de auditoria. `GET /v1/rent-periods`
+    (panel/listado) no cambia -- sigue devolviendo `RentPeriodSummary`
+    sin este campo."""
+
+    payments: list[PaymentDetail]
+
+
+class RentPeriodDetailResponse(BaseModel):
+    data: RentPeriodDetail
+
+
 # ─── RF-06/CA-02-05 (estado de deuda) -- issue #23 ─────────────────────
 
 

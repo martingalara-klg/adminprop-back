@@ -92,6 +92,10 @@ class TestLoginMultiOrganization:
         assert body["data"]["user"]["email"] == user["email"]
         assert len(body["data"]["organizations"]) == 2
         assert response.headers.get_list("set-cookie") == []
+        # issue #84: sin JWT emitido todavia no hay organizacion resuelta --
+        # permissions/is_super_admin van null (sdd_03 v1.6 §1).
+        assert body["data"]["permissions"] is None
+        assert body["data"]["is_super_admin"] is None
 
     async def test_login_with_multiple_orgs_and_explicit_selection_authenticates(
         self, client, seed
@@ -99,8 +103,8 @@ class TestLoginMultiOrganization:
         user = await seed.create_user()
         org_a = await seed.create_organization(name="Org A")
         org_b = await seed.create_organization(name="Org B")
-        role_a = await seed.create_role(org_a)
-        role_b = await seed.create_role(org_b)
+        role_a = await seed.create_role(org_a, permissions=["contract:manage"])
+        role_b = await seed.create_role(org_b, permissions=["property:manage", "renter:read"])
         await seed.create_membership(user_id=user["id"], organization_id=org_a, role_id=role_a)
         await seed.create_membership(user_id=user["id"], organization_id=org_b, role_id=role_b)
 
@@ -117,6 +121,10 @@ class TestLoginMultiOrganization:
         body = response.json()
         assert body["data"]["status"] == "authenticated"
         assert response.headers.get_list("set-cookie") != []
+        # issue #84: permissions[] corresponden a la org ELEGIDA (org_b),
+        # no a la primera membresia ni a org_a.
+        assert sorted(body["data"]["permissions"]) == ["property:manage", "renter:read"]
+        assert body["data"]["is_super_admin"] is False
 
 
 class TestLoginRequestValidation:

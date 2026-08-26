@@ -525,13 +525,30 @@ def _to_panel_entry(
     )
 
 
+@dataclass(frozen=True)
+class RentPeriodDetailEntry(RentPeriodPanelEntry):
+    """issue #87: `GET /rent-periods/:id` -- `RentPeriodPanelEntry` +
+    `payments[]` del periodo (ordenados por `payment_date`, incluye
+    anulados -- CA-04-07). `GET /rent-periods` (panel/listado) sigue
+    devolviendo `RentPeriodPanelEntry` sin este campo -- se mantiene
+    liviano."""
+
+    payments: list[Payment]
+
+
 class RentPeriodPanelService:
     """RF-02: panel de cobranzas del mes (`GET /rent-periods`,
     `GET /rent-periods/:id`)."""
 
-    def __init__(self, repo: RentPeriodRepository, admin_repo: AdministracionRepository) -> None:
+    def __init__(
+        self,
+        repo: RentPeriodRepository,
+        admin_repo: AdministracionRepository,
+        payment_repo: PaymentRepository,
+    ) -> None:
         self._repo = repo
         self._admin_repo = admin_repo
+        self._payment_repo = payment_repo
 
     async def _grace_day(self, organization_id: UUID) -> int:
         settings = await self._admin_repo.get_organization_settings(organization_id)
@@ -577,22 +594,30 @@ class RentPeriodPanelService:
         next_cursor = _encode_index_cursor(start + limit) if start + limit < len(entries) else None
         return page, next_cursor
 
-    async def get_panel_entry(
+    async def get_panel_entry_detail(
         self, rent_period_id: UUID, organization_id: UUID, *, today: date
-    ) -> RentPeriodPanelEntry | None:
-        """RF-02: `GET /rent-periods/:id`."""
+    ) -> RentPeriodDetailEntry | None:
+        """RF-02 + issue #87: `GET /rent-periods/:id` -- resuelve el
+        periodo del panel (mismo criterio que `get_panel_entry` original)
+        + `payments[]` del periodo (RN-D01: filtro explicito de
+        `organization_id` via `PaymentRepository.list_by_rent_period`,
+        ademas del RLS). 404 unico para "no existe" y "es de otro tenant"
+        -- `get_candidate` ya lo resuelve."""
         candidate = await self._repo.get_candidate(rent_period_id, organization_id)
         if candidate is None:
             return None
         grace_day = await self._grace_day(organization_id)
-        return _to_panel_entry(candidate, today=today, grace_day=grace_day)
+        base = _to_panel_entry(candidate, today=today, grace_day=grace_day)
+        payments = await self._payment_repo.list_by_rent_period(rent_period_id, organization_id)
+        return RentPeriodDetailEntry(**vars(base), payments=payments)
 
 
 def get_rent_period_panel_service(
     repo: RentPeriodRepository = Depends(get_rent_period_repository),
     admin_repo: AdministracionRepository = Depends(get_administracion_repository),
+    payment_repo: PaymentRepository = Depends(get_payment_repository),
 ) -> RentPeriodPanelService:
-    return RentPeriodPanelService(repo, admin_repo)
+    return RentPeriodPanelService(repo, admin_repo, payment_repo)
 
 
 class DebtService:
