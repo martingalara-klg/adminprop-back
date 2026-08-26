@@ -66,9 +66,7 @@ async def run_worker_coroutine(coro: Coroutine[object, object, _T]) -> _T:
             # Best-effort: un fallo cerrando el cliente Redis no debe
             # tapar el resultado/excepcion real de `coro`, que ya se
             # esta propagando (o ya se retorno) en este punto.
-            logger.warning(
-                "run_worker_coroutine: fallo cerrando el cliente Redis", exc_info=True
-            )
+            logger.warning("run_worker_coroutine: fallo cerrando el cliente Redis", exc_info=True)
         get_engine.cache_clear()
         get_session_factory.cache_clear()
         get_redis_client.cache_clear()
