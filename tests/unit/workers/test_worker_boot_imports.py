@@ -102,7 +102,8 @@ def test_issue_89_administracion_service_has_no_module_level_worker_import():
     module_level_worker_imports = [
         node
         for node in tree.body
-        if isinstance(node, ast.ImportFrom) and node.module == "adminprop.workers.notification_worker"
+        if isinstance(node, ast.ImportFrom)
+        and node.module == "adminprop.workers.notification_worker"
     ]
 
     assert module_level_worker_imports == []
