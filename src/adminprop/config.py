@@ -1,6 +1,8 @@
 from functools import lru_cache
+from typing import Annotated
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -111,6 +113,31 @@ class Settings(BaseSettings):
     # app_role_password/resend_api_key de arriba); migra a un gestor de
     # secretos cuando exista infra cloud (CLAUDE.md §3/§8).
     encryption_key: str = "local_dev_encryption_key_change_me"
+
+    # ─── issue #90 — CORS (dominios reales de front + API) ─────────────────
+    # sdd_04 §2.4a: deshabilitado por default (lista vacia) -- mientras
+    # front y API compartan origen local (proxy de Vite en dev), no hace
+    # falta declarar origenes; CORS_ALLOWED_ORIGINS sin definir mantiene
+    # el comportamiento actual intacto (CORSMiddleware no se registra en
+    # main.py). Con origenes configurados, main.py registra el
+    # middleware con allow_credentials=True y esta lista EXACTA (nunca
+    # "*", incompatible con credenciales). CORS solo no habilita
+    # dominios cruzados: las cookies son SameSite=Lax (decision #43) y
+    # no viajan cross-site aunque CORS lo permita -- el despliegue
+    # recomendado sigue siendo mismo origen (proxy en el server del
+    # front); esta variable queda para origenes adicionales explicitos.
+    # NoDecode: sin esto, pydantic-settings intenta json.loads() el valor
+    # de la env var para cualquier campo list[...] antes de que el
+    # field_validator de abajo lo vea, y "a,b" no es JSON valido ->
+    # SettingsError. NoDecode entrega el string crudo al validator.
+    cors_allowed_origins: Annotated[list[str], NoDecode] = []
+
+    @field_validator("cors_allowed_origins", mode="before")
+    @classmethod
+    def _split_cors_allowed_origins(cls, value: object) -> object:
+        if isinstance(value, str):
+            return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
 
     # ─── issue #26 — Mantenimiento: storage local de adjuntos ──────────────
     # docs/skills/tenant-isolation.md §"Storage de archivos con aislamiento

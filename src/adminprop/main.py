@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from adminprop.config import get_settings
 from adminprop.modules.administracion.router import (
@@ -42,6 +43,21 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title=settings.app_name)
     app.add_middleware(RequestContextMiddleware)
+    # issue #90, sdd_04 §2.4a -- CORS deshabilitado por default (lista
+    # vacia): agregar el middleware solo con origenes configurados evita
+    # tocar el comportamiento actual (dev local usa el proxy de Vite).
+    # Se registra despues de RequestContextMiddleware para quedar como
+    # capa MAS externa (Starlette envuelve en orden inverso de
+    # add_middleware) y asi cubrir preflight y respuestas de error.
+    if settings.cors_allowed_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_allowed_origins,  # nunca "*" -- incompatible con credenciales
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "X-Request-Id"],
+            expose_headers=["X-Request-Id", "Content-Disposition"],
+        )
     register_exception_handlers(app)
     app.include_router(health_router)
     app.include_router(auth_router)
