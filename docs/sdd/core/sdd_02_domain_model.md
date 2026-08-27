@@ -2,12 +2,12 @@
 name: AdminProp — Modelo de Dominio
 description: Entidades del dominio de gestión de alquileres, invariantes (RN-C, RN-P, RN-L, RN-A, RN-D), relaciones y glosario unificado
 type: project
-version: 1.2
-fecha: 2026-08-20
+version: 1.3
+fecha: 2026-08-27
 ---
 # AdminProp — Modelo de Dominio
 
-**Versión:** 1.2
+**Versión:** 1.3
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -121,6 +121,19 @@ Quien alquila una propiedad mediante un contrato. Es un registro, no un usuario 
 
 ---
 
+### 2.4a Barrio (Neighborhood)
+
+Catálogo parametrizable por organización para agrupar propiedades (issue #99, feedback de uso real 2026-08-27) — habilita agrupar por barrio en liquidaciones y vistas futuras.
+
+| Atributo | Tipo | Descripción |
+|---|---|---|
+| id | UUID | Identificador único |
+| name | texto | Nombre del barrio |
+
+**Invariantes:**
+- `name` único por organización, case-insensitive.
+- Un barrio con propiedades asociadas no se elimina; se desactiva (soft delete) — `409 ENTITY_HAS_DEPENDENCIES` si tiene propiedades activas.
+
 ### 2.5 Propiedad (Property)
 
 El inmueble administrado. Pertenece a un propietario.
@@ -129,6 +142,7 @@ El inmueble administrado. Pertenece a un propietario.
 |---|---|---|
 | id | UUID | Identificador único |
 | landlord_id | UUID | FK a Propietario — obligatorio |
+| neighborhood_id | UUID | FK a Barrio — **nullable en DB** (datos legacy preexistentes a issue #99), **obligatorio en la API** para create/update de propiedades de ahora en más |
 | address | texto | Dirección completa |
 | property_type | texto | Departamento, casa, local, cochera, otro (catálogo simple) |
 | status | enum | `available` \| `rented` \| `unavailable` |
@@ -137,6 +151,7 @@ El inmueble administrado. Pertenece a un propietario.
 **Invariantes:**
 - `status = rented` ⟺ existe un contrato `active` sobre la propiedad.
 - Una propiedad con historial (contratos, cobros, reparaciones) no se elimina físicamente; soft delete.
+- `neighborhood_id` es obligatorio en el alta/edición vía API (decisión del PO, issue #99); las propiedades creadas antes de esta feature pueden tener `neighborhood_id = NULL` y siguen siendo legibles — la obligatoriedad rige solo hacia adelante.
 
 ---
 
@@ -477,6 +492,7 @@ Organization 1─N Landlord
 Organization 1─N Renter
 
 Landlord 1─N Property
+Neighborhood 1─N Property
 Property 1─N PropertyServiceAccount
 Property 1─N RecurringCharge 1─N ChargeEntry
 Property 1─N WorkOrder 1─N WorkOrderQuote

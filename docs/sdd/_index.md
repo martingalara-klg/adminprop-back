@@ -29,7 +29,7 @@ Este archivo es el **mapa de navegación** de toda la documentación SDD del pro
 | `spec_module_05_liquidaciones` | Módulo 5 — Liquidaciones a propietarios | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_module_06_mantenimiento` | Módulo 6 — Mantenimiento y cotizaciones | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_module_07_administracion` | Módulo 7 — Usuarios, roles, configuración, auditoría | features | Activo | 1.0 | ✅ | ✅ |
-| `spec_data_model` | Modelo de datos físico (22 tablas, RLS, migraciones) | infrastructure | Activo | 1.1 | ✅ | ⚪ |
+| `spec_data_model` | Modelo de datos físico (23 tablas, RLS, migraciones) | infrastructure | Activo | 1.2 | ✅ | ⚪ |
 | `spec_notificaciones` | Notificaciones (transversal: in-app + email) | infrastructure | Activo | 1.1 | ✅ | ✅ (panel in-app) |
 
 **Leyenda:** ✅ referencia primaria (leer antes de implementar) · ⚪ referencia secundaria · ❌ no aplica.
@@ -134,6 +134,7 @@ Numeración heredada del sistema de referencia donde los skills la citan (#2..#6
 | 117 | **`login`/`accept-invitation` exponen `permissions[]` e `is_super_admin`** (mismos valores que el JWT emitido) y se agrega `GET /auth/me` para rehidratar la sesión — el front no puede leer el JWT porque vive en cookie HttpOnly (decisión #20) | `sdd_03` v1.6, decisión 2026-08-24, issue #84 | ✅ Tomada |
 | 118 | **`GET /rent-periods/:id` embebe `payments[]`** (no endpoint nuevo) — cobros anulados incluidos (CA-04-07 verificable por API); el motivo de anulación no viaja acá, se consulta vía `audit_logs`/visor de auditoría. `GET /rent-periods` (panel) no cambia, sigue liviano | `sdd_03` v1.7, decisión 2026-08-25, issue #87 | ✅ Tomada |
 | 119 | **CORS deshabilitado por default** (`CORS_ALLOWED_ORIGINS` vacío ⇒ sin `CORSMiddleware`); con orígenes configurados, siempre exactos + `allow_credentials=True` (nunca `*`). No sustituye mismo-origen: las cookies `SameSite=Lax` (#43) no viajan cross-site aunque CORS lo permita — el despliegue recomendado sigue siendo front+API bajo el mismo origen | `sdd_04` v1.1 §2.4a, decisión 2026-08-26, issue #90 | ✅ Tomada |
+| 120 | **Catálogo de barrios parametrizable por organización** (`neighborhoods`): `name` único por org case-insensitive, soft delete protegido por dependencias. `properties.neighborhood_id` **nullable en DB** (datos legacy preexistentes) pero **obligatorio en la API** para create/update de propiedades de ahora en más. ABM vía `property:manage`/`property:read` — sin permisos nuevos | `sdd_02` v1.3, `sdd_03` v1.8, `spec_data_model` v1.2, `spec_module_01` v1.1, decisión 2026-08-27, issue #99 | ✅ Tomada |
 
 ### Decisiones aún pendientes
 

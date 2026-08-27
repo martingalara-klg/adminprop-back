@@ -205,6 +205,40 @@ GET    /properties/:id/work-orders                      (historial de reparacion
 GET    /properties/:id/recurring-charges                POST   /properties/:id/recurring-charges
 ```
 
+- `GET /properties` acepta `?neighborhood_id=` como filtro adicional (issue #99).
+- `POST /properties` y `PATCH /properties/:id` requieren `neighborhood_id` (`VALIDATION_ERROR` si falta en el `POST`; en `PATCH` solo si el campo viene en el body — parcial). `neighborhood_id` inexistente o de otra organización → `404 NOT_FOUND` con `field: "neighborhood_id"` (mismo criterio que `landlord_id`, RN-D01).
+- `GET /properties` y `GET /properties/:id` embeben el barrio como `neighborhood: { id, name }` (o `null` para propiedades legacy sin barrio, preexistentes a issue #99).
+
+### 7.1 Barrios (`/neighborhoods`) — catálogo parametrizable por organización (issue #99)
+
+```
+GET    /neighborhoods                    (listado del catálogo de la org, sin paginación — catálogo acotado)
+POST   /neighborhoods                    (body: { name })
+PATCH  /neighborhoods/:id                (rename; body: { name })
+DELETE /neighborhoods/:id                (soft; 409 ENTITY_HAS_DEPENDENCIES si tiene propiedades)
+```
+
+- Permiso: lectura con `property:read`; alta/edición/baja con `property:manage` — **sin permisos nuevos** (decisión del PO, issue #99).
+- `POST`/`PATCH` validan `name` único por organización, case-insensitive → `409 CONFLICT` si ya existe.
+- `DELETE` con propiedades asociadas (no borradas) → `409 ENTITY_HAS_DEPENDENCIES` con `details.entity_type = "neighborhood"`.
+
+- `GET /properties` acepta `?neighborhood_id=` como filtro adicional (issue #99).
+- `POST /properties` y `PATCH /properties/:id` requieren `neighborhood_id` (`VALIDATION_ERROR` si falta en el `POST`; en `PATCH` solo si el campo viene en el body — parcial). `neighborhood_id` inexistente o de otra organización → `404 NOT_FOUND` con `field: "neighborhood_id"` (mismo criterio que `landlord_id`, RN-D01).
+- `GET /properties` y `GET /properties/:id` embeben el barrio como `neighborhood: { id, name }` (o `null` para propiedades legacy sin barrio, preexistentes a issue #99).
+
+### 7.1 Barrios (`/neighborhoods`) — catálogo parametrizable por organización (issue #99)
+
+```
+GET    /neighborhoods                    (listado del catálogo de la org, sin paginación — catálogo acotado)
+POST   /neighborhoods                    (body: { name })
+PATCH  /neighborhoods/:id                (rename; body: { name })
+DELETE /neighborhoods/:id                (soft; 409 ENTITY_HAS_DEPENDENCIES si tiene propiedades)
+```
+
+- Permiso: lectura con `property:read`; alta/edición/baja con `property:manage` — **sin permisos nuevos** (decisión del PO, issue #99).
+- `POST`/`PATCH` validan `name` único por organización, case-insensitive → `409 CONFLICT` si ya existe.
+- `DELETE` con propiedades asociadas (no borradas) → `409 ENTITY_HAS_DEPENDENCIES` con `details.entity_type = "neighborhood"`.
+
 ## 8. Contratos (`/contracts`)
 
 ```
