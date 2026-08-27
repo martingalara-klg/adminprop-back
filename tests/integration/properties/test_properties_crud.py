@@ -123,7 +123,7 @@ class TestCA0108NeighborhoodRequiredOnProperties:
     """CA-01-08 (issue #99): `neighborhood_id` obligatorio en create/update;
     propiedades legacy sin barrio siguen legibles."""
 
-    async def test_create_property_without_neighborhood_id_returns_400(self, client, seed):
+    async def test_ca_01_08_create_property_without_neighborhood_id_returns_400(self, client, seed):
         _org, owner = await _seed_org_with_owner(seed)
         landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
 
@@ -219,7 +219,7 @@ class TestPropertyListFilters:
         addresses = {item["address"] for item in response.json()["data"]}
         assert addresses == {"Direccion De A"}
 
-    async def test_filter_by_neighborhood_id(self, client, seed):
+    async def test_ca_01_09_filter_by_neighborhood_id(self, client, seed):
         """CA-01-09 (issue #99): `?neighborhood_id=` devuelve solo las
         propiedades de ese barrio."""
         _org, owner = await _seed_org_with_owner(seed)
