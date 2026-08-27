@@ -23,6 +23,7 @@ _PROPERTIES_COLUMNS = {
     "id",
     "organization_id",
     "landlord_id",
+    "neighborhood_id",
     "address",
     "property_type",
     "status",
