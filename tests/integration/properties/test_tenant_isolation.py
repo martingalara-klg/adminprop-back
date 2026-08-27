@@ -28,9 +28,16 @@ class TestPropertyCrossTenantIsolation:
         _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
         _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
         landlord_b = await seed.create_landlord_row(organization_id=owner_b["organization_id"])
+        neighborhood_b = await seed.create_neighborhood_row(
+            organization_id=owner_b["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "De Org B", "landlord_id": str(landlord_b)},
+            json={
+                "address": "De Org B",
+                "landlord_id": str(landlord_b),
+                "neighborhood_id": str(neighborhood_b),
+            },
             headers=owner_b["headers"],
         )
         property_b_id = created.json()["data"]["id"]
@@ -46,9 +53,16 @@ class TestPropertyCrossTenantIsolation:
         _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
         _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
         landlord_b = await seed.create_landlord_row(organization_id=owner_b["organization_id"])
+        neighborhood_b = await seed.create_neighborhood_row(
+            organization_id=owner_b["organization_id"]
+        )
         await client.post(
             "/v1/properties",
-            json={"address": "Solo en B", "landlord_id": str(landlord_b)},
+            json={
+                "address": "Solo en B",
+                "landlord_id": str(landlord_b),
+                "neighborhood_id": str(neighborhood_b),
+            },
             headers=owner_b["headers"],
         )
 
@@ -62,9 +76,16 @@ class TestPropertyCrossTenantIsolation:
         _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
         _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
         landlord_b = await seed.create_landlord_row(organization_id=owner_b["organization_id"])
+        neighborhood_b = await seed.create_neighborhood_row(
+            organization_id=owner_b["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "De Org B", "landlord_id": str(landlord_b)},
+            json={
+                "address": "De Org B",
+                "landlord_id": str(landlord_b),
+                "neighborhood_id": str(neighborhood_b),
+            },
             headers=owner_b["headers"],
         )
         property_b_id = created.json()["data"]["id"]
@@ -85,9 +106,16 @@ class TestPropertyCrossTenantIsolation:
         _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
         _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
         landlord_b = await seed.create_landlord_row(organization_id=owner_b["organization_id"])
+        neighborhood_b = await seed.create_neighborhood_row(
+            organization_id=owner_b["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "De Org B", "landlord_id": str(landlord_b)},
+            json={
+                "address": "De Org B",
+                "landlord_id": str(landlord_b),
+                "neighborhood_id": str(neighborhood_b),
+            },
             headers=owner_b["headers"],
         )
         property_b_id = created.json()["data"]["id"]
@@ -128,15 +156,48 @@ class TestPropertyCrossTenantIsolation:
         _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
         org_b, _owner_b = await _seed_org_with_owner(seed, name="Org B")
         landlord_b = await seed.create_landlord_row(organization_id=org_b["organization_id"])
+        neighborhood_a = await seed.create_neighborhood_row(
+            organization_id=owner_a["organization_id"]
+        )
 
         response = await client.post(
             "/v1/properties",
-            json={"address": "Intento cross-tenant", "landlord_id": str(landlord_b)},
+            json={
+                "address": "Intento cross-tenant",
+                "landlord_id": str(landlord_b),
+                "neighborhood_id": str(neighborhood_a),
+            },
             headers=owner_a["headers"],
         )
 
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "NOT_FOUND"
+
+    async def test_create_property_with_neighborhood_of_another_organization_returns_404(
+        self, client, seed
+    ):
+        """RN-D01 aplicada a `neighborhood_id` (issue #99): mismo criterio
+        que `landlord_id`."""
+        _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
+        org_b, _owner_b = await _seed_org_with_owner(seed, name="Org B")
+        landlord_a = await seed.create_landlord_row(organization_id=owner_a["organization_id"])
+        neighborhood_b = await seed.create_neighborhood_row(
+            organization_id=org_b["organization_id"]
+        )
+
+        response = await client.post(
+            "/v1/properties",
+            json={
+                "address": "Intento cross-tenant barrio",
+                "landlord_id": str(landlord_a),
+                "neighborhood_id": str(neighborhood_b),
+            },
+            headers=owner_a["headers"],
+        )
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "NOT_FOUND"
+        assert response.json()["error"]["field"] == "neighborhood_id"
 
 
 class TestServiceAccountCrossTenantIsolation:
@@ -146,9 +207,16 @@ class TestServiceAccountCrossTenantIsolation:
         _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
         _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
         landlord_b = await seed.create_landlord_row(organization_id=owner_b["organization_id"])
+        neighborhood_b = await seed.create_neighborhood_row(
+            organization_id=owner_b["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "De Org B con cuentas", "landlord_id": str(landlord_b)},
+            json={
+                "address": "De Org B con cuentas",
+                "landlord_id": str(landlord_b),
+                "neighborhood_id": str(neighborhood_b),
+            },
             headers=owner_b["headers"],
         )
         property_b_id = created.json()["data"]["id"]
@@ -164,9 +232,16 @@ class TestServiceAccountCrossTenantIsolation:
         _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
         _org_b, owner_b = await _seed_org_with_owner(seed, name="Org B")
         landlord_b = await seed.create_landlord_row(organization_id=owner_b["organization_id"])
+        neighborhood_b = await seed.create_neighborhood_row(
+            organization_id=owner_b["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "De Org B", "landlord_id": str(landlord_b)},
+            json={
+                "address": "De Org B",
+                "landlord_id": str(landlord_b),
+                "neighborhood_id": str(neighborhood_b),
+            },
             headers=owner_b["headers"],
         )
         property_b_id = created.json()["data"]["id"]
@@ -181,6 +256,49 @@ class TestServiceAccountCrossTenantIsolation:
             f"/v1/service-accounts/{account_id}",
             json={"account_number": "hacked"},
             headers=owner_a["headers"],
+        )
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "NOT_FOUND"
+
+
+class TestNeighborhoodCrossTenantIsolation:
+    """Issue #99: RN-D01 aplicada al catalogo de barrios."""
+
+    async def test_get_neighborhood_of_another_organization_is_not_listed(self, client, seed):
+        _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
+        org_b, _owner_b = await _seed_org_with_owner(seed, name="Org B")
+        await seed.create_neighborhood_row(
+            organization_id=org_b["organization_id"], name="Solo en B"
+        )
+
+        response = await client.get("/v1/neighborhoods", headers=owner_a["headers"])
+
+        assert response.status_code == 200
+        names = {item["name"] for item in response.json()["data"]}
+        assert "Solo en B" not in names
+
+    async def test_patch_neighborhood_of_another_organization_returns_404(self, client, seed):
+        _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
+        org_b, _owner_b = await _seed_org_with_owner(seed, name="Org B")
+        neighborhood_b = await seed.create_neighborhood_row(organization_id=org_b["organization_id"])
+
+        response = await client.patch(
+            f"/v1/neighborhoods/{neighborhood_b}",
+            json={"name": "hacked"},
+            headers=owner_a["headers"],
+        )
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "NOT_FOUND"
+
+    async def test_delete_neighborhood_of_another_organization_returns_404(self, client, seed):
+        _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
+        org_b, _owner_b = await _seed_org_with_owner(seed, name="Org B")
+        neighborhood_b = await seed.create_neighborhood_row(organization_id=org_b["organization_id"])
+
+        response = await client.delete(
+            f"/v1/neighborhoods/{neighborhood_b}", headers=owner_a["headers"]
         )
 
         assert response.status_code == 404
