@@ -41,6 +41,10 @@ class Property(Base):
     )
     organization_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     landlord_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    # Issue #99: nullable en DB (datos legacy preexistentes) -- sin
+    # `ForeignKey(...)` a nivel de mapper, mismo criterio que `landlord_id`
+    # (el FK real ya lo crea la migracion `20260827_100000`).
+    neighborhood_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     address: Mapped[str] = mapped_column(Text, nullable=False)
     property_type: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
@@ -61,6 +65,30 @@ class Property(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
 
     __table_args__ = (Index("ix_properties_organization_id_orm", "organization_id"),)
+
+
+class Neighborhood(Base):
+    """spec_data_model.md §Capa 2 "neighborhoods" -- catalogo de barrios
+    parametrizable por organizacion (issue #99). Mapea las columnas
+    creadas por `20260827_100000_create_neighborhoods_and_alter_properties.py`.
+    """
+
+    __tablename__ = "neighborhoods"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+
+    __table_args__ = (Index("ix_neighborhoods_organization_id_orm", "organization_id"),)
 
 
 class PropertyServiceAccount(Base):

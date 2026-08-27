@@ -43,10 +43,17 @@ class TestCA0106MaintenanceForbiddenOnProperties:
     async def test_ca_01_06_maintenance_cannot_create_property(self, client, seed):
         _org, owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
         landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
 
         response = await client.post(
             "/v1/properties",
-            json={"address": "No deberia crearse", "landlord_id": str(landlord_id)},
+            json={
+                "address": "No deberia crearse",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
             headers=maintenance["headers"],
         )
 
@@ -64,9 +71,16 @@ class TestCA0106MaintenanceForbiddenOnProperties:
     async def test_ca_01_06_maintenance_cannot_view_property_ficha(self, client, seed):
         _org, owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
         landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "Ficha protegida", "landlord_id": str(landlord_id)},
+            json={
+                "address": "Ficha protegida",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
             headers=owner["headers"],
         )
         property_id = created.json()["data"]["id"]
@@ -79,9 +93,16 @@ class TestCA0106MaintenanceForbiddenOnProperties:
     async def test_ca_01_06_maintenance_cannot_patch_property(self, client, seed):
         _org, owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
         landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "No editable por maintenance", "landlord_id": str(landlord_id)},
+            json={
+                "address": "No editable por maintenance",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
             headers=owner["headers"],
         )
         property_id = created.json()["data"]["id"]
@@ -98,9 +119,16 @@ class TestCA0106MaintenanceForbiddenOnProperties:
     async def test_ca_01_06_maintenance_cannot_delete_property(self, client, seed):
         _org, owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
         landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "No borrable por maintenance", "landlord_id": str(landlord_id)},
+            json={
+                "address": "No borrable por maintenance",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
             headers=owner["headers"],
         )
         property_id = created.json()["data"]["id"]
@@ -131,9 +159,16 @@ class TestCA0106MaintenanceForbiddenOnServiceAccounts:
     async def test_ca_01_06_maintenance_cannot_list_service_accounts(self, client, seed):
         _org, owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
         landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "Con cuentas protegidas", "landlord_id": str(landlord_id)},
+            json={
+                "address": "Con cuentas protegidas",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
             headers=owner["headers"],
         )
         property_id = created.json()["data"]["id"]
@@ -148,9 +183,16 @@ class TestCA0106MaintenanceForbiddenOnServiceAccounts:
     async def test_ca_01_06_maintenance_cannot_create_service_account(self, client, seed):
         _org, owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
         landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "Sin cuentas nuevas", "landlord_id": str(landlord_id)},
+            json={
+                "address": "Sin cuentas nuevas",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
             headers=owner["headers"],
         )
         property_id = created.json()["data"]["id"]
@@ -159,6 +201,44 @@ class TestCA0106MaintenanceForbiddenOnServiceAccounts:
             f"/v1/properties/{property_id}/service-accounts",
             json={"service_type": "gas", "account_number": "GAS-1"},
             headers=maintenance["headers"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+class TestCA0106MaintenanceForbiddenOnNeighborhoods:
+    """Issue #99: `maintenance` tampoco tiene acceso al catalogo de
+    barrios -- mismo permiso `property:*` que el resto del modulo."""
+
+    async def test_ca_01_06_maintenance_cannot_list_neighborhoods(self, client, seed):
+        _org, _owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
+
+        response = await client.get("/v1/neighborhoods", headers=maintenance["headers"])
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "FORBIDDEN"
+
+    async def test_ca_01_06_maintenance_cannot_create_neighborhood(self, client, seed):
+        _org, _owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
+
+        response = await client.post(
+            "/v1/neighborhoods",
+            json={"name": "No deberia crearse"},
+            headers=maintenance["headers"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "FORBIDDEN"
+
+    async def test_ca_01_06_maintenance_cannot_delete_neighborhood(self, client, seed):
+        _org, owner, maintenance = await _seed_org_with_owner_and_maintenance(seed)
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
+
+        response = await client.delete(
+            f"/v1/neighborhoods/{neighborhood_id}", headers=maintenance["headers"]
         )
 
         assert response.status_code == 403

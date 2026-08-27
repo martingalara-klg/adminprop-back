@@ -19,12 +19,13 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import Depends
+from sqlalchemy import func as sa_func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adminprop.db.session import get_tenant_db_session
 from adminprop.modules.people.models import Landlord
-from adminprop.modules.properties.models import Property, PropertyServiceAccount
+from adminprop.modules.properties.models import Neighborhood, Property, PropertyServiceAccount
 
 # RF-04: estados manuales validos (`rented` es derivado, nunca aceptado
 # directamente del cliente -- ver `schemas.py.PropertyUpdate`).
@@ -44,13 +45,14 @@ def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
 
 @dataclass(frozen=True)
 class PropertyFilters:
-    """Filtros de RF-01 "Listado con filtros: propietario, estado, tipo;
-    busqueda por direccion"."""
+    """Filtros de RF-01 "Listado con filtros: propietario, estado, tipo,
+    barrio (issue #99); busqueda por direccion"."""
 
     landlord_id: UUID | None = None
     status: str | None = None
     property_type: str | None = None
     search: str | None = None
+    neighborhood_id: UUID | None = None
 
 
 class PropertyRepository:
@@ -80,11 +82,24 @@ class PropertyRepository:
         result = await self._session.execute(stmt)
         return result.first() is not None
 
+    async def neighborhood_exists(self, neighborhood_id: UUID, organization_id: UUID) -> bool:
+        """RN "neighborhood_id obligatorio en API": valida que el barrio
+        exista, pertenezca al MISMO tenant y no este dado de baja --
+        RN-D01 (cross-tenant se trata igual que "no existe")."""
+        stmt = select(Neighborhood.id).where(
+            Neighborhood.id == neighborhood_id,
+            Neighborhood.organization_id == organization_id,
+            Neighborhood.deleted_at.is_(None),
+        )
+        result = await self._session.execute(stmt)
+        return result.first() is not None
+
     async def create(
         self,
         *,
         organization_id: UUID,
         landlord_id: UUID,
+        neighborhood_id: UUID | None,
         address: str,
         property_type: str,
         notes: str | None,
@@ -92,6 +107,7 @@ class PropertyRepository:
         row = Property(
             organization_id=organization_id,
             landlord_id=landlord_id,
+            neighborhood_id=neighborhood_id,
             address=address,
             property_type=property_type,
             status="available",
@@ -138,6 +154,8 @@ class PropertyRepository:
         )
         if filters.landlord_id is not None:
             stmt = stmt.where(Property.landlord_id == filters.landlord_id)
+        if filters.neighborhood_id is not None:
+            stmt = stmt.where(Property.neighborhood_id == filters.neighborhood_id)
         if filters.status is not None:
             stmt = stmt.where(Property.status == filters.status)
         if filters.property_type is not None:
@@ -331,3 +349,100 @@ def get_property_service_account_repository(
     session: AsyncSession = Depends(get_tenant_db_session),
 ) -> PropertyServiceAccountRepository:
     return PropertyServiceAccountRepository(session)
+
+
+class NeighborhoodRepository:
+    """RF-05 (issue #99): ABM del catalogo de barrios por organizacion."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> AsyncSession:
+        return self._session
+
+    async def name_exists(
+        self, organization_id: UUID, name: str, *, exclude_id: UUID | None = None
+    ) -> bool:
+        """RF-05: "name unico por organizacion, case-insensitive"."""
+        stmt = select(Neighborhood.id).where(
+            Neighborhood.organization_id == organization_id,
+            Neighborhood.deleted_at.is_(None),
+            sa_func.lower(Neighborhood.name) == name.lower(),
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(Neighborhood.id != exclude_id)
+        result = await self._session.execute(stmt)
+        return result.first() is not None
+
+    async def create(self, *, organization_id: UUID, name: str) -> Neighborhood:
+        row = Neighborhood(organization_id=organization_id, name=name)
+        self._session.add(row)
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
+
+    async def get_by_id(self, neighborhood_id: UUID, organization_id: UUID) -> Neighborhood | None:
+        return await self._get_row(neighborhood_id, organization_id)
+
+    async def list(self, organization_id: UUID) -> list[Neighborhood]:
+        """RF-05: "listado del catalogo completo de la organizacion, sin
+        paginacion -- conjunto acotado"."""
+        stmt = (
+            select(Neighborhood)
+            .where(
+                Neighborhood.organization_id == organization_id,
+                Neighborhood.deleted_at.is_(None),
+            )
+            .order_by(Neighborhood.name.asc())
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def update(
+        self, neighborhood_id: UUID, organization_id: UUID, *, name: str
+    ) -> Neighborhood | None:
+        row = await self._get_row(neighborhood_id, organization_id)
+        if row is None:
+            return None
+        row.name = name
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
+
+    async def soft_delete(self, neighborhood_id: UUID, organization_id: UUID) -> bool:
+        row = await self._get_row(neighborhood_id, organization_id)
+        if row is None:  # pragma: no cover -- defensivo, service ya valido existencia
+            return False
+        row.deleted_at = datetime.now(UTC)
+        await self._session.flush()
+        return True
+
+    async def has_properties(self, neighborhood_id: UUID, organization_id: UUID) -> bool:
+        """CA-01-07: `409 ENTITY_HAS_DEPENDENCIES` si el barrio tiene
+        propiedades (no borradas) asociadas."""
+        stmt = select(Property.id).where(
+            Property.neighborhood_id == neighborhood_id,
+            Property.organization_id == organization_id,
+            Property.deleted_at.is_(None),
+        )
+        result = await self._session.execute(stmt)
+        return result.first() is not None
+
+    async def _get_row(self, neighborhood_id: UUID, organization_id: UUID) -> Neighborhood | None:
+        stmt = select(Neighborhood).where(
+            Neighborhood.id == neighborhood_id,
+            Neighborhood.organization_id == organization_id,
+            Neighborhood.deleted_at.is_(None),
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def commit(self) -> None:
+        await self._session.commit()
+
+
+def get_neighborhood_repository(
+    session: AsyncSession = Depends(get_tenant_db_session),
+) -> NeighborhoodRepository:
+    return NeighborhoodRepository(session)

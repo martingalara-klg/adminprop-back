@@ -15,9 +15,14 @@ pytestmark = pytest.mark.asyncio
 
 async def _seed_property(seed, client, owner):
     landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+    neighborhood_id = await seed.create_neighborhood_row(organization_id=owner["organization_id"])
     created = await client.post(
         "/v1/properties",
-        json={"address": "Propiedad con cuentas", "landlord_id": str(landlord_id)},
+        json={
+            "address": "Propiedad con cuentas",
+            "landlord_id": str(landlord_id),
+            "neighborhood_id": str(neighborhood_id),
+        },
         headers=owner["headers"],
     )
     return created.json()["data"]["id"]

@@ -1,13 +1,13 @@
 ---
 name: AdminProp — Especificación del Modelo de Datos
-description: Tablas físicas PostgreSQL (22 tablas en 8 capas), RLS, índices, orden de migración, seed data y convenciones de nomenclatura
+description: Tablas físicas PostgreSQL (23 tablas en 8 capas), RLS, índices, orden de migración, seed data y convenciones de nomenclatura
 type: project
-version: 1.1
-fecha: 2026-08-11
+version: 1.2
+fecha: 2026-08-27
 ---
 # AdminProp — Especificación del Modelo de Datos
 
-**Versión:** 1.1
+**Versión:** 1.2
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -175,6 +175,25 @@ Sin RLS (es la raíz); el acceso se controla por membresía. Solo `adminprop_sup
 
 ## Capa 2 — Propiedades
 
+### `neighborhoods`
+**Por qué existe:** catálogo parametrizable de barrios por organización (issue #99), para agrupar propiedades — habilita agrupar por barrio en liquidaciones y vistas futuras.
+
+| Columna | Tipo | Restricciones | Notas |
+|---|---|---|---|
+| id | UUID | PK | |
+| organization_id | UUID | NOT NULL, FK | RLS |
+| name | TEXT | NOT NULL | Nombre del barrio |
+| created_at / updated_at / deleted_at | TIMESTAMPTZ | | Soft delete |
+
+**Índices:**
+```sql
+CREATE INDEX idx_neighborhoods_organization_id ON neighborhoods (organization_id) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX uq_neighborhoods_org_name ON neighborhoods (organization_id, lower(name)) WHERE deleted_at IS NULL;
+```
+`name` único por organización, case-insensitive (`lower(name)`), solo entre filas no borradas — renombrar un barrio borrado a un nombre reutilizado no colisiona.
+
+---
+
 ### `properties`
 **Por qué existe:** el inmueble administrado.
 
@@ -183,12 +202,15 @@ Sin RLS (es la raíz); el acceso se controla por membresía. Solo `adminprop_sup
 | id | UUID | PK | |
 | organization_id | UUID | NOT NULL, FK | RLS |
 | landlord_id | UUID | NOT NULL, FK → landlords | |
+| neighborhood_id | UUID | NULL, FK → neighborhoods | **Nullable en DB** (datos legacy preexistentes a issue #99) — **obligatorio en la API** para create/update de ahora en más |
 | address | TEXT | NOT NULL | Dirección completa |
 | property_type | TEXT | NOT NULL DEFAULT `'departamento'` | Texto sugerido en UI: departamento, casa, local, cochera, otro |
 | status | TEXT | NOT NULL DEFAULT `'available'` CHECK IN (`available`,`rented`,`unavailable`) | `rented` ⟺ contrato activo |
 | notes | TEXT | | |
 | metadata | JSONB | DEFAULT `'{}'` | |
 | created_at / updated_at / deleted_at | TIMESTAMPTZ | | Soft delete |
+
+Índice adicional (issue #99): `CREATE INDEX idx_properties_neighborhood_id ON properties (neighborhood_id) WHERE deleted_at IS NULL;` — soporta el filtro `?neighborhood_id=` de `GET /properties`.
 
 ---
 
@@ -549,7 +571,7 @@ El orden canónico de capas — es también el orden del roadmap de issues (lo c
 |---|---|---|
 | 1 | **Capa 0 — Fundación** | `organizations`, `users`, `roles`, `organization_members`, `organization_invitations` |
 | 2 | **Capa 1 — Personas** | `landlords`, `renters` |
-| 3 | **Capa 2 — Propiedades** | `properties`, `property_service_accounts` |
+| 3 | **Capa 2 — Propiedades** | `neighborhoods`, `properties`, `property_service_accounts` |
 | 4 | **Capa 3 — Contratos** | `contracts`, `contract_adjustments` (+ extensión `btree_gist`) |
 | 5 | **Capa 4 — Cobranzas** | `rent_periods`, `payments` |
 | 6 | **Capa 5 — Mantenimiento** | `work_orders`, `work_order_quotes`, `attachments` |
@@ -564,7 +586,7 @@ FKs entre capas: siempre de capa posterior a capa anterior, salvo `work_orders.s
 
 ## Resumen de Entidades
 
-**22 tablas en 8 capas.** Tenant-scoped con RLS: 20. Globales sin RLS: 1 (`users`). Raíz: 1 (`organizations`).
+**23 tablas en 8 capas.** Tenant-scoped con RLS: 21. Globales sin RLS: 1 (`users`). Raíz: 1 (`organizations`).
 
 ---
 
@@ -606,7 +628,7 @@ FKs entre capas: siempre de capa posterior a capa anterior, salvo `work_orders.s
 
 | Entidad | Mecanismo | Nota |
 |---|---|---|
-| landlords, renters, properties, contracts, property_service_accounts, recurring_charges, work_orders, attachments | `deleted_at` | Nunca DELETE físico (RN-D02) |
+| landlords, renters, properties, neighborhoods, contracts, property_service_accounts, recurring_charges, work_orders, attachments | `deleted_at` | Nunca DELETE físico (RN-D02) |
 | payments | `voided_at` + `voided_by` | Anulación con autor, auditada (RN-D04) |
 | rent_periods, charge_entries, settlements, settlement_line_items | Sin delete | Se corrigen/regeneran, nunca se borran |
 | contract_adjustments `applied` | Inmutables | Corrección = nuevo ajuste con nota |
