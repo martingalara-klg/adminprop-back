@@ -113,12 +113,22 @@ class ContractService:
             )
 
         # RN-08/RN-C06 (issue #100): alta de contrato en curso. El par
-        # esta-o-no-esta ya lo valido `ContractCreate` a nivel Pydantic
-        # (`_validate_current_amount_pair`), igual que la normalizacion de
-        # `current_amount_since` al dia 1 de su mes y el chequeo `>=
-        # start_date` (CA-03-14, comparacion pura sin "hoy"). Aca solo
-        # falta el chequeo que SI necesita la fecha actual: `<= hoy`.
+        # esta-o-no-esta y la normalizacion al dia 1 de su mes ya los
+        # resolvio `ContractCreate` a nivel Pydantic
+        # (`_validate_current_amount_pair`). CA-03-14: ambos extremos del
+        # rango -- `>= start_date` y `<= hoy` -- son 400
+        # INVALID_DATE_RANGE (no VALIDATION_ERROR generico), asi que
+        # ambos se validan aca con el mismo `error.code`.
         if current_amount is not None and current_amount_since is not None:
+            if current_amount_since < start_date:
+                raise InvalidDateRangeException(
+                    field="current_amount_since",
+                    message="current_amount_since no puede ser anterior a start_date.",
+                    details={
+                        "current_amount_since": current_amount_since.isoformat(),
+                        "start_date": start_date.isoformat(),
+                    },
+                )
             today = datetime.now(UTC).date()
             if current_amount_since > today:
                 raise InvalidDateRangeException(

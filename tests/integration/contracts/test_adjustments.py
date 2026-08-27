@@ -408,3 +408,80 @@ class TestCA0305ApplyAdjustment:
 
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+class TestCA0310NextAdjustmentAnchoredOnCurrentAmountSince:
+    """CA-03-10 (issue #100, RN-08/RN-C06): el proximo ajuste por indice
+    de un contrato ARS dado de alta en curso se detecta contando desde
+    `current_amount_since` (el `due_period` del ajuste sintetico de carga
+    inicial), no desde `start_date` -- sin tocar la logica de
+    `detect_due_adjustments` (RN-C03: siempre ancla en el ultimo
+    `applied`)."""
+
+    async def test_ca_03_10_next_due_period_counted_from_current_amount_since(
+        self, client, seed, monkeypatch
+    ):
+        import sqlalchemy as sa
+
+        from adminprop.modules.contracts.adjustment_service import _add_months
+        from adminprop.workers import notification_worker
+        from adminprop.workers.notification_worker import _detect_due_adjustments_async
+
+        # Mismo criterio que tests/integration/workers/test_detect_due_adjustments.py:
+        # el outbox de email es responsabilidad separada, se mockea aca
+        # para no depender del broker Celery/Redis.
+        monkeypatch.setattr(notification_worker, "enqueue_pending_emails", lambda *a, **k: None)
+
+        _org, owner, _admin, _maintenance = await _seed_org_with_owner_and_admin(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+
+        today = date.today()
+        current_month = date(today.year, today.month, 1)
+        # RN-08/RN-C06: `start_date` bien anterior a `current_amount_since`
+        # -- si el ancla fuera `start_date` (comportamiento pre-issue
+        # #100), el proximo `due_period` seria otro distinto al esperado.
+        start_date = _add_months(current_month, -24)
+        current_amount_since = _add_months(current_month, -4)
+        expected_due_period = _add_months(current_amount_since, 3)
+
+        created = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": start_date.isoformat(),
+                "end_date": _add_months(current_month, 24).isoformat(),
+                "daily_late_fee_pct": "0.1",
+                "adjustment_frequency_months": 3,
+                "adjustment_index": "icl",
+                "current_amount": "150000.00",
+                "current_amount_since": current_amount_since.isoformat(),
+            },
+            headers=owner["headers"],
+        )
+        assert created.status_code == 201
+        contract_id = created.json()["data"]["id"]
+
+        activated = await client.post(
+            f"/v1/contracts/{contract_id}/activate", headers=owner["headers"]
+        )
+        assert activated.status_code == 200
+
+        await _detect_due_adjustments_async(request_id="req-ca-03-10")
+
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
+            result = await session.execute(
+                sa.text(
+                    "SELECT due_period, status FROM contract_adjustments "
+                    "WHERE contract_id = :contract_id AND status = 'pending'"
+                ),
+                {"contract_id": contract_id},
+            )
+            rows = [dict(row._mapping) for row in result]
+
+        assert len(rows) == 1
+        assert rows[0]["due_period"] == expected_due_period

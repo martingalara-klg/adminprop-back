@@ -73,14 +73,15 @@ class ContractCreate(BaseModel):
         if has_since:
             # RN-08/RN-C06: `current_amount_since` se normaliza al dia 1
             # de su mes (mismo criterio que `due_period` de
-            # ContractAdjustment, CHECK date_trunc de la migracion #16) --
-            # la comparacion contra `start_date` (CA-03-14) usa el valor
-            # YA normalizado.
+            # ContractAdjustment, CHECK date_trunc de la migracion #16).
+            # CA-03-14 (`>= start_date` y `<= hoy`, ambos 400
+            # INVALID_DATE_RANGE): se valida en `service.py.create`, no
+            # aca -- ese error.code especifico esta reservado para
+            # `AdminPropException` (mismo criterio que
+            # `ContractOverlapException`, que tampoco vive en Pydantic).
             self.current_amount_since = date(
                 self.current_amount_since.year, self.current_amount_since.month, 1
             )
-            if self.current_amount_since < self.start_date:
-                raise ValueError("current_amount_since no puede ser anterior a start_date.")
         return self
 
     @model_validator(mode="after")
