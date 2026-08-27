@@ -348,9 +348,7 @@ class TestCA0314CurrentAmountSinceDateRangeValidations:
     """CA-03-14: `current_amount_since` fuera de `[start_date, hoy]`
     (ya normalizado al dia 1 de su mes) devuelve 400 INVALID_DATE_RANGE."""
 
-    async def test_ca_03_14_current_amount_since_before_start_date_returns_400(
-        self, client, seed
-    ):
+    async def test_ca_03_14_current_amount_since_before_start_date_returns_400(self, client, seed):
         _org, owner = await _seed_org_with_owner(seed)
         property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
 

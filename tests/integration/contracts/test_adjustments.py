@@ -9,7 +9,7 @@ Implements: CA-03-04 (bandeja/deteccion, cubierta a nivel HTTP para la
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -435,7 +435,7 @@ class TestCA0310NextAdjustmentAnchoredOnCurrentAmountSince:
         _org, owner, _admin, _maintenance = await _seed_org_with_owner_and_admin(seed)
         property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
 
-        today = date.today()
+        today = datetime.now(UTC).date()
         current_month = date(today.year, today.month, 1)
         # RN-08/RN-C06: `start_date` bien anterior a `current_amount_since`
         # -- si el ancla fuera `start_date` (comportamiento pre-issue
