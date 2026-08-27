@@ -66,6 +66,21 @@ class NotFoundException(AdminPropException):
     message = "El recurso solicitado no existe."
 
 
+class InvalidDateRangeException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 400 INVALID_DATE_RANGE.
+
+    Issue #100 (spec_module_03_contratos.md RF-02, RN-08/RN-C06): primer
+    consumidor real de este codigo, ya declarado en el catalogo global
+    pero sin excepcion propia hasta ahora. Usado por
+    `ContractService.create` cuando `current_amount_since` (ya
+    normalizado al dia 1 de su mes) cae fuera de `[start_date, hoy]`.
+    """
+
+    status_code = 400
+    error_code = "INVALID_DATE_RANGE"
+    message = "El rango de fechas enviado no es valido."
+
+
 class RateLimitExceededException(AdminPropException):
     """sdd_03 -- 429 RATE_LIMIT_EXCEEDED, header `Retry-After` (sdd_04 §2.5)."""
 

@@ -45,15 +45,18 @@ adjustments_router = APIRouter(prefix="/v1/adjustments", tags=["contracts"])
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=ContractResponse,
-    dependencies=[Depends(requires_permission("contract:manage"))],
 )
 async def create_contract(
     dto: ContractCreate,
     organization_id: UUID = Depends(get_current_tenant),
+    payload: JWTPayload = Depends(requires_permission("contract:manage")),
     service: ContractService = Depends(get_contract_service),
 ) -> ContractResponse:
     """RF-02 + CA-03-01/02/03: crea un contrato -- nace en `draft` (RN-02).
-    `property_id`/`renter_id` validados contra el mismo tenant (RN-06/RN-D01)."""
+    `property_id`/`renter_id` validados contra el mismo tenant (RN-06/RN-D01).
+    RN-08/RN-C06 (issue #100): `current_amount`/`current_amount_since` --
+    `actor_user_id` (`payload.sub`) es quien queda como `applied_by` del
+    ajuste sintetico de carga inicial, si corresponde."""
     contract = await service.create(
         organization_id=organization_id,
         property_id=dto.property_id,
@@ -67,6 +70,9 @@ async def create_contract(
         adjustment_index=dto.adjustment_index,
         adjustment_index_notes=dto.adjustment_index_notes,
         notes=dto.notes,
+        current_amount=dto.current_amount,
+        current_amount_since=dto.current_amount_since,
+        actor_user_id=payload.sub,
     )
     return ContractResponse(data=contract)
 

@@ -2,12 +2,12 @@
 name: AdminProp — Modelo de Dominio
 description: Entidades del dominio de gestión de alquileres, invariantes (RN-C, RN-P, RN-L, RN-A, RN-D), relaciones y glosario unificado
 type: project
-version: 1.3
+version: 1.4
 fecha: 2026-08-27
 ---
 # AdminProp — Modelo de Dominio
 
-**Versión:** 1.3
+**Versión:** 1.4
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -203,12 +203,13 @@ El contrato de locación: vincula propiedad + inquilino con las condiciones pact
 - `current_amount` nunca se edita directamente: solo cambia al aplicar un Ajuste (ver RN-C04).
 - Un contrato `expired` o `terminated` no genera nuevos Períodos de Alquiler (ver RN-C05); sus deudas pendientes siguen cobrables.
 - `daily_late_fee_pct` ≥ 0.
+- Al alta, `current_amount` puede declararse distinto de `initial_amount` para un contrato ya en curso (issue #100, ver RN-C06): en ese caso nace en el monto vigente declarado, no en el inicial.
 
 ---
 
 ### 2.8 Ajuste de Contrato (ContractAdjustment)
 
-La actualización del monto de un contrato ARS. El sistema detecta cuándo toca (según la frecuencia), lo genera como pendiente y notifica; el operador ingresa el % calculado por fuera.
+La actualización del monto de un contrato. El caso principal (ARS): el sistema detecta cuándo toca el ajuste por índice (según la frecuencia), lo genera como pendiente y notifica; el operador ingresa el % calculado por fuera. Un segundo caso (issue #100, RN-C06, cualquier moneda): al dar de alta un contrato en curso con monto vigente declarado, el sistema registra directamente un ajuste **sintético** ya `applied` — sin `pct_applied` (no hubo % calculado) y con `notes` prefijado `"Carga inicial:"` — que deja trazado el salto inicial→vigente y sirve de ancla para la detección del próximo ajuste periódico (solo relevante para ARS).
 
 | Atributo | Tipo | Descripción |
 |---|---|---|
@@ -216,7 +217,7 @@ La actualización del monto de un contrato ARS. El sistema detecta cuándo toca 
 | contract_id | UUID | FK a Contrato |
 | due_period | año-mes | Período al que aplica el ajuste (ej: 2026-09) |
 | status | enum | `pending` \| `applied` |
-| pct_applied | decimal | % ingresado manualmente por el operador (null mientras `pending`) |
+| pct_applied | decimal | % ingresado manualmente por el operador (null mientras `pending`; null también en el ajuste sintético de carga inicial, RN-C06 — no hay % calculado) |
 | previous_amount | decimal | Monto vigente antes del ajuste |
 | new_amount | decimal | Monto resultante = previous × (1 + pct/100) |
 | applied_by / applied_at | UUID / timestamp | Quién y cuándo lo aplicó |
@@ -446,6 +447,7 @@ Registro append-only de las operaciones sensibles.
 - **RN-C03:** Ningún ajuste se aplica automáticamente: el sistema genera el ajuste pendiente y notifica; el nuevo monto solo existe tras el ingreso **manual** del % por un operador. El índice del contrato es informativo.
 - **RN-C04:** El monto vigente de un contrato (`current_amount`) solo cambia mediante un Ajuste registrado en el historial; nunca por edición directa.
 - **RN-C05:** Un contrato `expired` o `terminated` no genera nuevos períodos de alquiler; sus deudas existentes siguen cobrables.
+- **RN-C06** (issue #100, decisión #121): Alta de contrato en curso — declarar monto vigente. Al crear un contrato, `current_amount` + `current_amount_since` son opcionales pero solo se aceptan **juntos**; `current_amount_since` se normaliza al día 1 de su mes y debe ser `>= start_date` y `<= hoy`. Si vienen: `contracts.current_amount` nace en `current_amount` (no en `initial_amount`, que queda como referencia histórica informativa) y el sistema registra un `ContractAdjustment` sintético en estado `applied` con `due_period = current_amount_since`, `previous_amount = initial_amount`, `new_amount = current_amount`, `pct_applied = NULL` (no hay % que calcular — es un valor declarado, no una fórmula) y `notes` con el prefijo `"Carga inicial:"` que lo distingue de un ajuste aplicado manualmente (que siempre completa `pct_applied`). Aplica a **cualquier moneda** (ARS o USD): RN-C02 solo excluye a USD del mecanismo *periódico* de ajuste por índice, no de esta corrección puntual de carga inicial. Este ajuste sintético es el ancla que usa `detect_due_adjustments` (RN-C03, cuenta desde el `due_period` del último `applied`) sin necesidad de tocar esa lógica.
 
 ### RN-P — Pagos y Cobranzas
 

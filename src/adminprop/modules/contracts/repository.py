@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi import Depends
@@ -134,16 +135,20 @@ class ContractRepository:
         adjustment_index: str | None,
         adjustment_index_notes: str | None,
         notes: str | None,
+        current_amount: Decimal | None = None,
     ) -> Contract:
         # RN-02: todo contrato nace `draft`; `current_amount` arranca
-        # igual a `initial_amount` (RF-02, sdd_02 §2.7).
+        # igual a `initial_amount` (RF-02, sdd_02 §2.7) -- salvo alta de
+        # contrato en curso (RN-08/RN-C06, issue #100), donde el caller
+        # (`ContractService.create`) ya resolvio el monto vigente
+        # declarado y lo pasa explicito aca.
         row = Contract(
             organization_id=organization_id,
             property_id=property_id,
             renter_id=renter_id,
             currency=currency,
             initial_amount=initial_amount,
-            current_amount=initial_amount,
+            current_amount=current_amount if current_amount is not None else initial_amount,
             start_date=start_date,
             end_date=end_date,
             daily_late_fee_pct=daily_late_fee_pct,

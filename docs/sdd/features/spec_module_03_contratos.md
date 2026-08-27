@@ -2,12 +2,12 @@
 name: AdminProp — Módulo 3 — Contratos de Locación
 description: Contratos propiedad+inquilino con condiciones pactadas, ciclo de vida, ajustes por índice con ingreso manual del % y alertas de vencimiento
 type: project
-version: 1.0
-fecha: 2026-08-06
+version: 1.1
+fecha: 2026-08-27
 ---
 # Módulo 3 — Contratos de Locación
 
-**Versión:** 1.0 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-06
+**Versión:** 1.1 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-27
 
 ## Propósito
 
@@ -36,6 +36,7 @@ Listado con filtros: estado, propiedad, inquilino, propietario (vía propiedad),
 - Campos: propiedad, inquilino, moneda (`ARS`/`USD`), monto inicial, fecha de inicio y fin, **% de mora diaria**, y solo para ARS: **frecuencia de ajuste en meses** + **índice de referencia** (`icl` / `ipc_cordoba` / `otro` + nota) — el índice es **informativo** (S-03 del PRD).
 - El contrato nace en `draft`; los datos son editables hasta activarlo.
 - Validaciones al crear (y al activar): no solapamiento con otro contrato `active` de la misma propiedad (`409 CONTRACT_OVERLAP`, RN-01); contratos USD sin configuración de ajuste (RN-03).
+- **Alta de contrato en curso (issue #100, RN-08/RN-C06):** dos campos opcionales adicionales, `current_amount` + `current_amount_since`, para migrar contratos que ya vienen corriendo con aumentos ya ocurridos por fuera del sistema (ej: contrato firmado hace 8 meses). Solo se aceptan **juntos** (`400 VALIDATION_ERROR` si viene uno sin el otro); aplican a **ARS y USD** por igual. Si vienen, el contrato nace con `current_amount` en el monto vigente declarado (no en `initial_amount`, que queda como el monto histórico informativo) y el sistema registra un ajuste `applied` sintético de "carga inicial" (ver RF-04 y `sdd_02` §2.8) — sin tocar el flujo normal de ajustes manuales.
 
 ### RF-03 — Ciclo de vida
 
@@ -53,6 +54,7 @@ El flujo completo del ajuste (RN-C03 del dominio):
 3. **Aplicación manual:** el operador calcula el % por fuera (según el índice de referencia del contrato) y lo ingresa (`POST /adjustments/:id/apply` con `pct`): el sistema calcula `new_amount = previous × (1 + pct/100)`, actualiza el monto vigente del contrato y marca el ajuste `applied` (quién, cuándo).
 4. **Efecto en cobranzas:** el rent_period del mes de ajuste **no se genera** hasta que el ajuste esté aplicado (RN-P01); una vez aplicado, se genera con el monto nuevo.
 5. **Historial:** cada ajuste aplicado es inmutable; una corrección es un nuevo ajuste con nota (`sdd_02` §2.8).
+6. **Ajuste sintético de carga inicial (issue #100, RN-08/RN-C06):** al declarar `current_amount`/`current_amount_since` en el alta (RF-02), el sistema salta los pasos 1-2 (no hay detección ni aviso: el operador ya lo declaró) y registra directamente el `ContractAdjustment` en `applied`, con `due_period = current_amount_since`, `previous_amount = initial_amount`, `new_amount = current_amount`, `pct_applied = NULL` y `notes` prefijado `"Carga inicial:"`. Este ajuste queda como el ancla del paso 1 (`get_last_applied_adjustment_due_period`) para el próximo ajuste periódico ARS — el paso 1 no cambia su lógica, solo encuentra un `applied` más reciente.
 
 ### RF-05 — Alertas de vencimiento
 
@@ -68,12 +70,14 @@ El flujo completo del ajuste (RN-C03 del dominio):
 - **RN-05:** `daily_late_fee_pct` es obligatorio y ≥ 0 desde el alta (sin él no se puede sugerir mora).
 - **RN-06:** Propiedad e inquilino referenciados deben existir, no estar borrados y pertenecer a la organización (cross-tenant = 404, RN-D01).
 - **RN-07:** Un contrato `expired`/`terminated` no genera nuevos períodos; sus deudas siguen cobrables (= RN-C05).
+- **RN-08** (issue #100, = RN-C06): Alta de contrato en curso — `current_amount` + `current_amount_since` son opcionales pero solo válidos juntos; si vienen, `current_amount` reemplaza a `initial_amount` como monto de arranque del contrato y el sistema registra un ajuste sintético `applied` trazable (ver RF-02, RF-04 paso 6). Aplica a ARS y USD por igual — RN-03/RN-C02 solo excluye a USD del ajuste periódico automático por índice, no de esta declaración puntual.
 
 ## Validaciones
 
 - `initial_amount` > 0; `end_date` > `start_date`; duración máxima razonable (≤ 10 años).
 - `adjustment_frequency_months` entero > 0 (solo ARS); `adjustment_index` obligatorio si hay frecuencia; `adjustment_index_notes` obligatoria si el índice es `otro`.
 - `pct` del ajuste: decimal, puede ser negativo (deflación/renegociación) — confirmación explícita en UI si < 0; tope de sanidad ±500%.
+- `current_amount` > 0 (issue #100, RN-08); `current_amount_since` se normaliza al día 1 de su mes y debe ser `>= start_date` y `<= hoy` (`400 INVALID_DATE_RANGE`, `field: "current_amount_since"`); enviar solo uno de los dos campos es `400 VALIDATION_ERROR`.
 
 ## Criterios de Aceptación
 
@@ -85,6 +89,13 @@ El flujo completo del ajuste (RN-C03 del dominio):
 - [ ] **CA-03-06:** El monto vigente de un contrato activo no puede editarse por PATCH (`422 BUSINESS_RULE_VIOLATION` — RN-04); solo cambia vía ajuste.
 - [ ] **CA-03-07:** Un contrato que vence dentro del umbral configurado genera la notificación de vencimiento una sola vez, y aparece en el filtro `expiring_in_days`.
 - [ ] **CA-03-08:** Al terminar un contrato, la propiedad vuelve a `available` y sus períodos impagos siguen visibles en el estado de deuda.
+- [ ] **CA-03-09** (issue #100): Al activar un contrato dado de alta en curso (con `current_amount`/`current_amount_since`), el período del mes actual nace con el monto vigente declarado, no con `initial_amount`.
+- [ ] **CA-03-10** (issue #100): El próximo ajuste por índice de un contrato ARS dado de alta en curso se detecta contando desde `current_amount_since` (no desde `start_date`).
+- [ ] **CA-03-11** (issue #100): El historial de un contrato dado de alta en curso (`GET /contracts/:id/adjustments`) muestra el ajuste sintético `applied` con `previous_amount = initial_amount`, `new_amount = current_amount`, `pct_applied` nulo y `notes` con el prefijo `"Carga inicial:"`.
+- [ ] **CA-03-12** (issue #100): Un alta normal (sin `current_amount`/`current_amount_since`) se comporta idéntico a antes del issue #100: `current_amount = initial_amount`, sin ajuste sintético.
+- [ ] **CA-03-13** (issue #100): Un contrato USD también puede darse de alta en curso con `current_amount`/`current_amount_since` — el ajuste sintético se registra igual, sin habilitar el ajuste periódico automático (RN-03/RN-C02 sigue vigente).
+- [ ] **CA-03-14** (issue #100): `current_amount_since` anterior a `start_date` (ya normalizado a día 1) o posterior a hoy devuelve `400 INVALID_DATE_RANGE`.
+- [ ] **CA-03-15** (issue #100): Enviar `current_amount` sin `current_amount_since` (o viceversa) devuelve `400 VALIDATION_ERROR`.
 
 ## Integraciones
 

@@ -45,6 +45,12 @@ class ContractCreate(BaseModel):
     adjustment_index: AdjustmentIndex | None = Field(None)
     adjustment_index_notes: str | None = Field(None)
     notes: str | None = Field(None)
+    # RN-08/RN-C06 (issue #100): alta de contrato en curso -- opcionales,
+    # solo validos juntos (`_validate_current_amount_pair`). Aplican a ARS
+    # y USD por igual (RN-03/RN-C02 solo excluye a USD del ajuste
+    # PERIODICO automatico, no de esta declaracion puntual).
+    current_amount: Decimal | None = Field(None, gt=0)
+    current_amount_since: date | None = Field(None)
 
     @model_validator(mode="after")
     def _validate_date_range(self) -> ContractCreate:
@@ -52,6 +58,30 @@ class ContractCreate(BaseModel):
             raise ValueError("end_date debe ser posterior a start_date.")
         if (self.end_date - self.start_date).days > _MAX_CONTRACT_DURATION_DAYS:
             raise ValueError("La duracion del contrato no puede superar los 10 anios.")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_current_amount_pair(self) -> ContractCreate:
+        # RN-08/RN-C06, CA-03-15: `current_amount`/`current_amount_since`
+        # solo son validos juntos -- uno sin el otro es 400
+        # VALIDATION_ERROR (mismo criterio de shape-validation que
+        # `_validate_usd_no_adjustment`).
+        has_amount = self.current_amount is not None
+        has_since = self.current_amount_since is not None
+        if has_amount != has_since:
+            raise ValueError("current_amount y current_amount_since solo son validos juntos.")
+        if has_since:
+            # RN-08/RN-C06: `current_amount_since` se normaliza al dia 1
+            # de su mes (mismo criterio que `due_period` de
+            # ContractAdjustment, CHECK date_trunc de la migracion #16).
+            # CA-03-14 (`>= start_date` y `<= hoy`, ambos 400
+            # INVALID_DATE_RANGE): se valida en `service.py.create`, no
+            # aca -- ese error.code especifico esta reservado para
+            # `AdminPropException` (mismo criterio que
+            # `ContractOverlapException`, que tampoco vive en Pydantic).
+            self.current_amount_since = date(
+                self.current_amount_since.year, self.current_amount_since.month, 1
+            )
         return self
 
     @model_validator(mode="after")
