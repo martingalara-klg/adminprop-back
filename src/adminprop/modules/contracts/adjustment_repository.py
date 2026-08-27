@@ -140,6 +140,44 @@ class ContractAdjustmentRepository:
         await self._session.refresh(row)
         return row
 
+    # ─── RN-08/RN-C06 (issue #100): ajuste sintetico de carga inicial ──────
+
+    async def create_applied_initial(
+        self,
+        *,
+        organization_id: UUID,
+        contract_id: UUID,
+        due_period: date,
+        previous_amount: Decimal,
+        new_amount: Decimal,
+        actor_user_id: UUID,
+    ) -> ContractAdjustment:
+        """RN-08/RN-C06 (spec_module_03_contratos.md RF-02/RF-04 paso 6):
+        registra el ajuste `applied` sintetico de "alta de contrato en
+        curso" -- llamado por `ContractService.create` inmediatamente
+        despues de insertar el `Contract` (misma transaccion). Se
+        distingue de un ajuste aplicado manualmente (`apply()` arriba,
+        RF-04 paso 4) en dos puntos: `pct_applied` queda NULL (no hubo %
+        que calcular, es un valor declarado) y `notes` lleva el prefijo
+        `"Carga inicial:"`. Este ajuste es el ancla que usa
+        `get_last_applied_adjustment_due_period` para el proximo ajuste
+        periodico (RN-C03) -- sin modificar esa consulta."""
+        row = ContractAdjustment(
+            organization_id=organization_id,
+            contract_id=contract_id,
+            due_period=due_period,
+            status="applied",
+            previous_amount=previous_amount,
+            new_amount=new_amount,
+            notes="Carga inicial: monto vigente declarado al alta del contrato (RN-C06).",
+            applied_by=actor_user_id,
+            applied_at=datetime.now(UTC),
+        )
+        self._session.add(row)
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
+
     # ─── RF-04 paso 3/5: bandeja + aplicacion + historial ──────────────────
 
     async def get_by_id(

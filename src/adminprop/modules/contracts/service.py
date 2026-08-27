@@ -18,10 +18,15 @@ Fuera de alcance (ver PR "Decisiones de implementacion"):
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi import Depends
 
+from adminprop.modules.contracts.adjustment_repository import (
+    ContractAdjustmentRepository,
+    get_contract_adjustment_repository,
+)
 from adminprop.modules.contracts.rent_period_hook import (
     maybe_generate_current_month_rent_period,
 )
@@ -39,6 +44,7 @@ from adminprop.shared.errors.codes import (
     BusinessRuleViolationException,
     ContractNotActiveException,
     ContractOverlapException,
+    InvalidDateRangeException,
     InvalidStatusTransitionException,
     NotFoundException,
 )
@@ -48,9 +54,20 @@ from adminprop.shared.notifications import service as notifications_service
 class ContractService:
     """RF-01 (listado y consulta) + RF-02 (alta) + RF-03 (ciclo de vida)."""
 
-    def __init__(self, repo: ContractRepository, property_repo: PropertyRepository) -> None:
+    def __init__(
+        self,
+        repo: ContractRepository,
+        property_repo: PropertyRepository,
+        adjustment_repo: ContractAdjustmentRepository | None = None,
+    ) -> None:
         self._repo = repo
         self._property_repo = property_repo
+        # RN-08/RN-C06 (issue #100): opcional con fallback a la MISMA
+        # `session` de `repo` -- asi `workers/notification_worker.py`, que
+        # instancia `ContractService(contract_repo, property_repo)`
+        # posicional sin este 3er argumento, sigue funcionando sin
+        # cambios (nunca llama a `create`, solo a `detect_expiring_and_expired`).
+        self._adjustment_repo = adjustment_repo or ContractAdjustmentRepository(repo.session)
 
     async def create(
         self,
@@ -67,6 +84,9 @@ class ContractService:
         adjustment_index: str | None,
         adjustment_index_notes: str | None,
         notes: str | None,
+        current_amount: Decimal | None = None,
+        current_amount_since: date | None = None,
+        actor_user_id: UUID | None = None,
     ):
         """RF-02 + CA-03-01/03: `property_id`/`renter_id` validados contra
         el mismo tenant (RN-06/RN-D01); RN-03/RN-C02 (USD sin ajuste) ya
@@ -92,6 +112,21 @@ class ContractService:
                 field="start_date", details={"conflicting_contract_id": str(conflicting.id)}
             )
 
+        # RN-08/RN-C06 (issue #100): alta de contrato en curso. El par
+        # esta-o-no-esta ya lo valido `ContractCreate` a nivel Pydantic
+        # (`_validate_current_amount_pair`), igual que la normalizacion de
+        # `current_amount_since` al dia 1 de su mes y el chequeo `>=
+        # start_date` (CA-03-14, comparacion pura sin "hoy"). Aca solo
+        # falta el chequeo que SI necesita la fecha actual: `<= hoy`.
+        if current_amount is not None and current_amount_since is not None:
+            today = datetime.now(UTC).date()
+            if current_amount_since > today:
+                raise InvalidDateRangeException(
+                    field="current_amount_since",
+                    message="current_amount_since no puede ser posterior a hoy.",
+                    details={"current_amount_since": current_amount_since.isoformat()},
+                )
+
         row = await self._repo.create(
             organization_id=organization_id,
             property_id=property_id,
@@ -105,7 +140,36 @@ class ContractService:
             adjustment_index=adjustment_index,
             adjustment_index_notes=adjustment_index_notes,
             notes=notes,
+            current_amount=current_amount,
         )
+
+        if current_amount is not None and current_amount_since is not None:
+            # RN-08/RN-C06, CA-03-11: ajuste sintetico "applied" de carga
+            # inicial -- MISMA transaccion que el INSERT del contrato (si
+            # algo falla, ninguno de los dos queda a medias). Ancla de
+            # `detect_due_adjustments` (RN-C03) sin tocar esa logica.
+            await self._adjustment_repo.create_applied_initial(
+                organization_id=organization_id,
+                contract_id=row.id,
+                due_period=current_amount_since,
+                previous_amount=initial_amount,
+                new_amount=current_amount,
+                actor_user_id=actor_user_id,
+            )
+            await audit(
+                self._repo.session,
+                organization_id=organization_id,
+                action="contract.current_amount_declared",
+                entity_type="contract",
+                entity_id=row.id,
+                before={"current_amount": str(initial_amount)},
+                after={
+                    "current_amount": str(current_amount),
+                    "current_amount_since": current_amount_since.isoformat(),
+                },
+                user_id=actor_user_id,
+            )
+
         await self._repo.commit()
         return row
 
@@ -370,5 +434,6 @@ class ContractService:
 def get_contract_service(
     repo: ContractRepository = Depends(get_contract_repository),
     property_repo: PropertyRepository = Depends(get_property_repository),
+    adjustment_repo: ContractAdjustmentRepository = Depends(get_contract_adjustment_repository),
 ) -> ContractService:
-    return ContractService(repo, property_repo)
+    return ContractService(repo, property_repo, adjustment_repo)
