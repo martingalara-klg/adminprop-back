@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.7
-fecha: 2026-08-25
+version: 1.9
+fecha: 2026-08-27
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.7
+**Versión:** 1.9
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -243,7 +243,7 @@ DELETE /neighborhoods/:id                (soft; 409 ENTITY_HAS_DEPENDENCIES si t
 
 ```
 GET    /contracts                        (?status=&expiring_in_days=)
-POST   /contracts                        (valida CONTRACT_OVERLAP, RN-C02)
+POST   /contracts                        (valida CONTRACT_OVERLAP, RN-C02, RN-C06)
 GET    /contracts/:id
 PATCH  /contracts/:id                    (solo notes/metadata; montos NUNCA — RN-C04)
 POST   /contracts/:id/activate           (draft → active; genera el rent_period del mes en curso si corresponde)
@@ -252,6 +252,8 @@ GET    /contracts/:id/adjustments        (historial de ajustes)
 GET    /adjustments                      (?status=pending — bandeja de ajustes que tocan)
 POST   /adjustments/:id/apply            (body: { pct }; pending → applied; recalcula current_amount — RN-C03)
 ```
+
+**`POST /contracts` — issue #100, decisión #121 (RN-C06, `sdd_02` §3):** el body acepta dos campos opcionales adicionales, `current_amount` (decimal > 0) y `current_amount_since` (fecha), **solo válidos juntos** — enviar uno sin el otro es `400 VALIDATION_ERROR`. Aplican tanto a contratos ARS como USD. Si vienen: la respuesta trae `current_amount` igual al valor declarado (no a `initial_amount`) y el historial (`GET /contracts/:id/adjustments`) incluye el ajuste sintético `applied` de carga inicial (RN-C06). Validaciones de fecha (`current_amount_since`, ya normalizado al día 1 de su mes, debe ser `>= start_date` y `<= hoy`) responden `400 INVALID_DATE_RANGE` con `field: "current_amount_since"`.
 
 ## 9. Cobranzas (`/rent-periods`, `/payments`)
 
