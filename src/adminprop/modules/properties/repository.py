@@ -382,9 +382,7 @@ class NeighborhoodRepository:
         await self._session.refresh(row)
         return row
 
-    async def get_by_id(
-        self, neighborhood_id: UUID, organization_id: UUID
-    ) -> Neighborhood | None:
+    async def get_by_id(self, neighborhood_id: UUID, organization_id: UUID) -> Neighborhood | None:
         return await self._get_row(neighborhood_id, organization_id)
 
     async def list(self, organization_id: UUID) -> list[Neighborhood]:
@@ -431,9 +429,7 @@ class NeighborhoodRepository:
         result = await self._session.execute(stmt)
         return result.first() is not None
 
-    async def _get_row(
-        self, neighborhood_id: UUID, organization_id: UUID
-    ) -> Neighborhood | None:
+    async def _get_row(self, neighborhood_id: UUID, organization_id: UUID) -> Neighborhood | None:
         stmt = select(Neighborhood).where(
             Neighborhood.id == neighborhood_id,
             Neighborhood.organization_id == organization_id,

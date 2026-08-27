@@ -172,9 +172,7 @@ class TestCA0108NeighborhoodRequiredOnProperties:
         assert item["neighborhood_id"] is None
         assert item["neighborhood"] is None
 
-        detail = await client.get(
-            f"/v1/properties/{legacy_property_id}", headers=owner["headers"]
-        )
+        detail = await client.get(f"/v1/properties/{legacy_property_id}", headers=owner["headers"])
         assert detail.status_code == 200
         assert detail.json()["data"]["neighborhood_id"] is None
         assert detail.json()["data"]["neighborhood"] is None

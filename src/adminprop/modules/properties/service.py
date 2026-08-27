@@ -294,9 +294,7 @@ class NeighborhoodService:
     async def create(self, *, organization_id: UUID, name: str):
         # RF-05 + CA-01-07: "name unico por organizacion, case-insensitive"
         if await self._repo.name_exists(organization_id, name):
-            raise ConflictException(
-                message="Ya existe un barrio con ese nombre.", field="name"
-            )
+            raise ConflictException(message="Ya existe un barrio con ese nombre.", field="name")
         row = await self._repo.create(organization_id=organization_id, name=name)
         await self._repo.commit()
         return row
@@ -310,9 +308,7 @@ class NeighborhoodService:
             raise NotFoundException()
 
         if await self._repo.name_exists(organization_id, name, exclude_id=neighborhood_id):
-            raise ConflictException(
-                message="Ya existe un barrio con ese nombre.", field="name"
-            )
+            raise ConflictException(message="Ya existe un barrio con ese nombre.", field="name")
 
         updated = await self._repo.update(neighborhood_id, organization_id, name=name)
         if updated is None:  # pragma: no cover -- defensivo, ya se valido existencia arriba

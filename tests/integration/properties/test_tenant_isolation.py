@@ -281,7 +281,9 @@ class TestNeighborhoodCrossTenantIsolation:
     async def test_patch_neighborhood_of_another_organization_returns_404(self, client, seed):
         _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
         org_b, _owner_b = await _seed_org_with_owner(seed, name="Org B")
-        neighborhood_b = await seed.create_neighborhood_row(organization_id=org_b["organization_id"])
+        neighborhood_b = await seed.create_neighborhood_row(
+            organization_id=org_b["organization_id"]
+        )
 
         response = await client.patch(
             f"/v1/neighborhoods/{neighborhood_b}",
@@ -295,7 +297,9 @@ class TestNeighborhoodCrossTenantIsolation:
     async def test_delete_neighborhood_of_another_organization_returns_404(self, client, seed):
         _org_a, owner_a = await _seed_org_with_owner(seed, name="Org A")
         org_b, _owner_b = await _seed_org_with_owner(seed, name="Org B")
-        neighborhood_b = await seed.create_neighborhood_row(organization_id=org_b["organization_id"])
+        neighborhood_b = await seed.create_neighborhood_row(
+            organization_id=org_b["organization_id"]
+        )
 
         response = await client.delete(
             f"/v1/neighborhoods/{neighborhood_b}", headers=owner_a["headers"]

@@ -83,9 +83,7 @@ class TestCA0107NeighborhoodCrud:
 
     async def test_ca_01_07_rename_to_existing_name_returns_409(self, client, seed):
         _org, owner = await _seed_org_with_owner(seed)
-        await client.post(
-            "/v1/neighborhoods", json={"name": "Cofico"}, headers=owner["headers"]
-        )
+        await client.post("/v1/neighborhoods", json={"name": "Cofico"}, headers=owner["headers"])
         created = await client.post(
             "/v1/neighborhoods", json={"name": "General Paz"}, headers=owner["headers"]
         )
