@@ -408,6 +408,21 @@ class SettlementExchangeRateRequiredException(AdminPropException):
     message = "Se requiere el tipo de cambio para generar la liquidacion: hay montos en USD en el periodo."
 
 
+class ConflictException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 409 CONFLICT.
+
+    Issue #99 (spec_module_01_propiedades.md RF-05, CA-01-07): `name`
+    duplicado (case-insensitive) al crear/renombrar un `neighborhood` en
+    la misma organizacion. Codigo transversal (ya listado en el catalogo
+    de sdd_03 desde la version inicial); esta es la primera subclase
+    Python concreta -- mismo criterio que `EntityHasDependenciesException`.
+    """
+
+    status_code = 409
+    error_code = "CONFLICT"
+    message = "El recurso ya existe."
+
+
 class EntityHasDependenciesException(AdminPropException):
     """sdd_03 §"Codigos de Error Globales" -- 409 ENTITY_HAS_DEPENDENCIES.
 

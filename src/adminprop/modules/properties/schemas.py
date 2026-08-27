@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # RF-01 §"Validaciones": "property_type: uno del catalogo sugerido o texto
 # libre corto (<= 50)" -- sin CHECK cerrado en DB (migracion #14), por eso
@@ -28,16 +28,56 @@ ServiceType = Literal["rentas", "municipalidad", "luz", "gas", "agua", "expensas
 ManualPropertyStatus = Literal["available", "unavailable"]
 
 
+# ─── Barrios (neighborhoods) — RF-05 (issue #99) ─────────────────────────
+
+
+class NeighborhoodCreate(BaseModel):
+    """Body de POST /v1/neighborhoods."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=100)
+
+
+class NeighborhoodUpdate(BaseModel):
+    """Body de PATCH /v1/neighborhoods/:id -- rename."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., min_length=1, max_length=100)
+
+
+class NeighborhoodDetail(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+
+
+class NeighborhoodResponse(BaseModel):
+    data: NeighborhoodDetail
+
+
+class NeighborhoodListResponse(BaseModel):
+    """RF-05: "listado del catalogo completo, sin paginacion"."""
+
+    data: list[NeighborhoodDetail]
+
+
 # ─── Propiedades (properties) — RF-01, RF-03 ─────────────────────────────
 
 
 class PropertyCreate(BaseModel):
-    """Body de POST /v1/properties. `landlord_id` obligatorio (CA-01-01)."""
+    """Body de POST /v1/properties. `landlord_id` obligatorio (CA-01-01).
+    `neighborhood_id` obligatorio (issue #99, CA-01-08) -- decision del
+    PO: propiedades nuevas siempre llevan barrio, aunque la columna sea
+    nullable en DB por datos legacy."""
 
     model_config = ConfigDict(extra="forbid")
 
     address: str = Field(..., min_length=5, max_length=300)
     landlord_id: UUID = Field(...)
+    neighborhood_id: UUID = Field(...)
     property_type: str = Field(default="departamento", max_length=_PROPERTY_TYPE_MAX_LENGTH)
     notes: str | None = Field(None)
 
@@ -49,15 +89,35 @@ class PropertyUpdate(BaseModel):
     (derivado)" -- `status` solo acepta los 2 valores manuales
     (`ManualPropertyStatus`); enviar `"rented"` es rechazado por Pydantic
     con `422 VALIDATION_ERROR` antes de llegar al service.
+
+    `neighborhood_id` (issue #99): si el campo viene en el body, no puede
+    ser `None` -- "obligatorio en PATCH solo si el campo viene" (RF-01).
+    Por eso NO es `UUID | None`: si el cliente omite el campo, Pydantic no
+    lo incluye en `model_fields_set` y el service no lo toca; si lo envia
+    como `null`, Pydantic rechaza con `422 VALIDATION_ERROR` antes de
+    llegar al service (mismo criterio que `status="rented"` mas arriba).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     address: str | None = Field(None, min_length=5, max_length=300)
     landlord_id: UUID | None = Field(None)
+    neighborhood_id: UUID | None = Field(None)
     property_type: str | None = Field(None, max_length=_PROPERTY_TYPE_MAX_LENGTH)
     status: ManualPropertyStatus | None = Field(None)
     notes: str | None = Field(None)
+
+    @field_validator("neighborhood_id")
+    @classmethod
+    def _neighborhood_id_cannot_be_explicit_null(cls, v: UUID | None) -> UUID | None:
+        # `validate_default=False` (default de Pydantic v2) hace que este
+        # validator SOLO corra cuando el cliente envia el campo
+        # explicitamente -- si lo omite, el default `None` se aplica sin
+        # pasar por aca. Por eso `v is None` aca significa "el cliente
+        # mando `neighborhood_id: null`", no "el cliente omitio el campo".
+        if v is None:
+            raise ValueError("neighborhood_id no puede ser null.")
+        return v
 
 
 class PropertySummary(BaseModel):
@@ -69,6 +129,8 @@ class PropertySummary(BaseModel):
     id: UUID
     address: str
     landlord_id: UUID
+    neighborhood_id: UUID | None
+    neighborhood: NeighborhoodDetail | None = None
     property_type: str
     status: str
     created_at: datetime
@@ -157,6 +219,8 @@ class PropertyDetail(BaseModel):
     id: UUID
     address: str
     landlord_id: UUID
+    neighborhood_id: UUID | None
+    neighborhood: NeighborhoodDetail | None = None
     property_type: str
     status: str
     notes: str | None
