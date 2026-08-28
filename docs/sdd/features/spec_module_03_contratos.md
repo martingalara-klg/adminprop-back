@@ -2,12 +2,12 @@
 name: AdminProp — Módulo 3 — Contratos de Locación
 description: Contratos propiedad+inquilino con condiciones pactadas, ciclo de vida, ajustes por índice con ingreso manual del % y alertas de vencimiento
 type: project
-version: 1.2
+version: 1.3
 fecha: 2026-08-28
 ---
 # Módulo 3 — Contratos de Locación
 
-**Versión:** 1.2 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-28
+**Versión:** 1.3 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-28
 
 ## Propósito
 
@@ -36,7 +36,10 @@ Listado con filtros: estado, propiedad, inquilino, propietario (vía propiedad),
 - Campos: propiedad, inquilino, moneda (`ARS`/`USD`), monto inicial, fecha de inicio y fin, **% de mora diaria**, y solo para ARS: **frecuencia de ajuste en meses** + **índice de referencia** (`icl` / `ipc_cordoba` / `otro` + nota) — el índice es **informativo** (S-03 del PRD).
 - El contrato nace en `draft`; los datos son editables hasta activarlo.
 - Validaciones al crear (y al activar): no solapamiento con otro contrato `active` de la misma propiedad (`409 CONTRACT_OVERLAP`, RN-01); contratos USD sin configuración de ajuste (RN-03).
-- **Alta de contrato en curso (issue #100, RN-08/RN-C06):** dos campos opcionales adicionales, `current_amount` + `current_amount_since`, para migrar contratos que ya vienen corriendo con aumentos ya ocurridos por fuera del sistema (ej: contrato firmado hace 8 meses). Solo se aceptan **juntos** (`400 VALIDATION_ERROR` si viene uno sin el otro); aplican a **ARS y USD** por igual. Si vienen, el contrato nace con `current_amount` en el monto vigente declarado (no en `initial_amount`, que queda como el monto histórico informativo) y el sistema registra un ajuste `applied` sintético de "carga inicial" (ver RF-04 y `sdd_02` §2.8) — sin tocar el flujo normal de ajustes manuales.
+- **Alta de contrato en curso (RN-08/RN-C06 v2, issue #107 — supersede parcialmente el issue #100):** para migrar contratos que ya vienen corriendo con aumentos ya ocurridos por fuera del sistema (ej: contrato firmado hace 8 meses), el mecanismo depende de si el contrato configura `adjustment_frequency_months`:
+  - **Con `adjustment_frequency_months` (solo ARS):** campo opcional `historical_amounts[]` — lista ORDENADA de montos, uno por cada tramo transcurrido desde `start_date` (tramo = ventana de `adjustment_frequency_months` meses; el backend deriva las fechas, nunca el cliente). Cantidad esperada = tramos transcurridos hasta hoy, calculada por el backend; cantidad incorrecta es `400 VALIDATION_ERROR` con mensaje explícito. `current_amount`/`current_amount_since` **no se aceptan** en este caso (superados por `historical_amounts[]`).
+  - **Sin `adjustment_frequency_months` (USD siempre; ARS sin ajuste):** se mantiene sin cambios el mecanismo del issue #100 — `current_amount` + `current_amount_since`, solo válidos **juntos** (`400 VALIDATION_ERROR` si viene uno sin el otro). `historical_amounts[]` **no se acepta** en este caso.
+  - En ambos casos, si vienen, el contrato nace con `current_amount` en el monto vigente declarado (no en `initial_amount`, que queda como el monto histórico informativo del tramo/período inicial) y el sistema registra uno o más ajustes `applied` sintéticos de "carga inicial" (ver RF-04 y `sdd_02` §2.8) — sin tocar el flujo normal de ajustes manuales.
 
 ### RF-03 — Ciclo de vida
 
@@ -54,7 +57,11 @@ El flujo completo del ajuste (RN-C03 del dominio):
 3. **Aplicación manual:** el operador calcula el % por fuera (según el índice de referencia del contrato) y lo ingresa (`POST /adjustments/:id/apply` con `pct`): el sistema calcula `new_amount = previous × (1 + pct/100)`, actualiza el monto vigente del contrato y marca el ajuste `applied` (quién, cuándo).
 4. **Efecto en cobranzas:** el rent_period del mes de ajuste **no se genera** hasta que el ajuste esté aplicado (RN-P01); una vez aplicado, se genera con el monto nuevo.
 5. **Historial:** cada ajuste aplicado es inmutable; una corrección es un nuevo ajuste con nota (`sdd_02` §2.8).
-6. **Ajuste sintético de carga inicial (issue #100, RN-08/RN-C06):** al declarar `current_amount`/`current_amount_since` en el alta (RF-02), el sistema salta los pasos 1-2 (no hay detección ni aviso: el operador ya lo declaró) y registra directamente el `ContractAdjustment` en `applied`, con `due_period = current_amount_since`, `previous_amount = initial_amount`, `new_amount = current_amount`, `pct_applied = NULL` y `notes` prefijado `"Carga inicial:"`. Este ajuste queda como el ancla del paso 1 (`get_last_applied_adjustment_due_period`) para el próximo ajuste periódico ARS — el paso 1 no cambia su lógica, solo encuentra un `applied` más reciente.
+6. **Ajuste(s) sintético(s) de carga inicial (RN-08/RN-C06 v2, issue #107):** al declarar la carga inicial en el alta (RF-02), el sistema salta los pasos 1-2 (no hay detección ni aviso: el operador ya lo declaró) y registra directamente el/los `ContractAdjustment` en `applied`, con `pct_applied = NULL` y `notes` prefijado `"Carga inicial:"`:
+   - Con `historical_amounts[]` (contratos con `adjustment_frequency_months`): una **cadena** de ajustes, uno por cada tramo transcurrido a partir del segundo — `due_period` = inicio de ese tramo, `previous_amount`/`new_amount` encadenados con el valor del tramo anterior/siguiente de la lista.
+   - Con `current_amount`/`current_amount_since` (contratos sin `adjustment_frequency_months`): un único ajuste, con `due_period = current_amount_since`, `previous_amount = initial_amount`, `new_amount = current_amount` (comportamiento del issue #100, sin cambios).
+
+   El ÚLTIMO ajuste sintético queda como el ancla del paso 1 (`get_last_applied_adjustment_due_period`) para el próximo ajuste periódico ARS — el paso 1 no cambia su lógica, solo encuentra un `applied` más reciente.
 
 ### RF-05 — Alertas de vencimiento
 
@@ -79,7 +86,7 @@ Feedback #2 del PO (2026-08-28): la ficha del contrato (`GET /contracts/:id`) de
 - **RN-05:** `daily_late_fee_pct` es obligatorio y ≥ 0 desde el alta (sin él no se puede sugerir mora).
 - **RN-06:** Propiedad e inquilino referenciados deben existir, no estar borrados y pertenecer a la organización (cross-tenant = 404, RN-D01).
 - **RN-07:** Un contrato `expired`/`terminated` no genera nuevos períodos; sus deudas siguen cobrables (= RN-C05).
-- **RN-08** (issue #100, = RN-C06): Alta de contrato en curso — `current_amount` + `current_amount_since` son opcionales pero solo válidos juntos; si vienen, `current_amount` reemplaza a `initial_amount` como monto de arranque del contrato y el sistema registra un ajuste sintético `applied` trazable (ver RF-02, RF-04 paso 6). Aplica a ARS y USD por igual — RN-03/RN-C02 solo excluye a USD del ajuste periódico automático por índice, no de esta declaración puntual.
+- **RN-08** (v2, issue #107, = RN-C06 — supersede parcialmente el issue #100): Alta de contrato en curso. Con `adjustment_frequency_months` configurado (solo ARS): `historical_amounts[]` — uno por tramo transcurrido, cantidad exacta calculada por el backend; `current_amount` termina en el último valor de la lista y el sistema registra una cadena de ajustes sintéticos `applied` trazables (ver RF-02, RF-04 paso 6). Sin `adjustment_frequency_months` (USD siempre; ARS sin ajuste): `current_amount` + `current_amount_since`, opcionales pero solo válidos juntos (comportamiento del issue #100, sin cambios) — reemplaza a `initial_amount` como monto de arranque y registra un único ajuste sintético `applied`. Los dos mecanismos son mutuamente excluyentes según `adjustment_frequency_months`; RN-03/RN-C02 solo excluye a USD del ajuste periódico automático por índice, no de esta declaración puntual de carga inicial.
 - **RN-09** (issue #106): Serie mensual de valores locativos (RF-06) — cálculo determinístico desde `initial_amount` + ajustes `applied` (solo `applied`; `pending` no cuenta), orden descendente. Como `contracts` no persiste una fecha propia de terminación anticipada (RF-03 solo audita el motivo, no agrega columna), la fecha de corte de un contrato `terminated` se deriva del evento `contract.terminated` más reciente de ese contrato en `audit_logs` (misma transacción que la transición de estado — decisión de implementación, issue #106); si no existiera (defensivo), el fallback es `end_date`. Un contrato `expired` usa directamente `end_date` (vencimiento natural, sin ambigüedad).
 
 ## Validaciones
@@ -87,7 +94,8 @@ Feedback #2 del PO (2026-08-28): la ficha del contrato (`GET /contracts/:id`) de
 - `initial_amount` > 0; `end_date` > `start_date`; duración máxima razonable (≤ 10 años).
 - `adjustment_frequency_months` entero > 0 (solo ARS); `adjustment_index` obligatorio si hay frecuencia; `adjustment_index_notes` obligatoria si el índice es `otro`.
 - `pct` del ajuste: decimal, puede ser negativo (deflación/renegociación) — confirmación explícita en UI si < 0; tope de sanidad ±500%.
-- `current_amount` > 0 (issue #100, RN-08); `current_amount_since` se normaliza al día 1 de su mes y debe ser `>= start_date` y `<= hoy` (`400 INVALID_DATE_RANGE`, `field: "current_amount_since"`); enviar solo uno de los dos campos es `400 VALIDATION_ERROR`.
+- Sin `adjustment_frequency_months` (RN-08, comportamiento #100): `current_amount` > 0; `current_amount_since` se normaliza al día 1 de su mes y debe ser `>= start_date` y `<= hoy` (`400 INVALID_DATE_RANGE`, `field: "current_amount_since"`); enviar solo uno de los dos campos es `400 VALIDATION_ERROR`; enviar `historical_amounts` en este caso es `400 VALIDATION_ERROR`.
+- Con `adjustment_frequency_months` (RN-08 v2, issue #107): `historical_amounts[]`, cada elemento > 0; cantidad = tramos transcurridos calculados por el backend (cantidad distinta → `400 VALIDATION_ERROR` con el detalle de cuántos espera); `historical_amounts[0]` debe ser igual a `initial_amount` (`400 VALIDATION_ERROR` si difiere); si el contrato recién arrancó (ningún tramo más allá del inicial) no corresponde enviarlo; enviar `current_amount`/`current_amount_since` en este caso es `400 VALIDATION_ERROR`.
 
 ## Criterios de Aceptación
 
@@ -99,13 +107,13 @@ Feedback #2 del PO (2026-08-28): la ficha del contrato (`GET /contracts/:id`) de
 - [ ] **CA-03-06:** El monto vigente de un contrato activo no puede editarse por PATCH (`422 BUSINESS_RULE_VIOLATION` — RN-04); solo cambia vía ajuste.
 - [ ] **CA-03-07:** Un contrato que vence dentro del umbral configurado genera la notificación de vencimiento una sola vez, y aparece en el filtro `expiring_in_days`.
 - [ ] **CA-03-08:** Al terminar un contrato, la propiedad vuelve a `available` y sus períodos impagos siguen visibles en el estado de deuda.
-- [ ] **CA-03-09** (issue #100): Al activar un contrato dado de alta en curso (con `current_amount`/`current_amount_since`), el período del mes actual nace con el monto vigente declarado, no con `initial_amount`.
-- [ ] **CA-03-10** (issue #100): El próximo ajuste por índice de un contrato ARS dado de alta en curso se detecta contando desde `current_amount_since` (no desde `start_date`).
-- [ ] **CA-03-11** (issue #100): El historial de un contrato dado de alta en curso (`GET /contracts/:id/adjustments`) muestra el ajuste sintético `applied` con `previous_amount = initial_amount`, `new_amount = current_amount`, `pct_applied` nulo y `notes` con el prefijo `"Carga inicial:"`.
-- [ ] **CA-03-12** (issue #100): Un alta normal (sin `current_amount`/`current_amount_since`) se comporta idéntico a antes del issue #100: `current_amount = initial_amount`, sin ajuste sintético.
-- [ ] **CA-03-13** (issue #100): Un contrato USD también puede darse de alta en curso con `current_amount`/`current_amount_since` — el ajuste sintético se registra igual, sin habilitar el ajuste periódico automático (RN-03/RN-C02 sigue vigente).
-- [ ] **CA-03-14** (issue #100): `current_amount_since` anterior a `start_date` (ya normalizado a día 1) o posterior a hoy devuelve `400 INVALID_DATE_RANGE`.
-- [ ] **CA-03-15** (issue #100): Enviar `current_amount` sin `current_amount_since` (o viceversa) devuelve `400 VALIDATION_ERROR`.
+- [ ] **CA-03-09** (v2, issue #107): Alta de un contrato ARS con `adjustment_frequency_months` y `historical_amounts[]` con exactamente 1 tramo transcurrido más allá del inicial (2 elementos totales: original + 1 aumento) — el sistema crea 1 ajuste sintético `applied` (`due_period` = inicio del segundo tramo, `previous_amount` = el primer valor, `new_amount` = el segundo) y `current_amount` queda en el último valor; al activar, el período del mes actual nace con ese monto.
+- [ ] **CA-03-10** (v2, issue #107): Alta de un contrato ARS con 2 tramos transcurridos más allá del inicial (3 elementos, ejemplo del PO: original + 2 aumentos, frecuencia cada 4 meses, 10 meses corridos) — el sistema crea 2 ajustes sintéticos `applied` encadenados (cada uno con su `due_period` = inicio de su tramo), visibles en orden en `GET /contracts/:id/adjustments`, y `current_amount` queda en el último valor; el próximo ajuste real se detecta anclado en el `due_period` del último sintético (sin cambios en `detect_due_adjustments`).
+- [ ] **CA-03-11** (v2, issue #107): Alta de un contrato ARS con `adjustment_frequency_months` cuyo `start_date` está dentro del tramo actual (0 tramos transcurridos más allá del inicial) y se envía `historical_amounts` de todos modos → `400 VALIDATION_ERROR` (no corresponde declararlo — equivale a un alta normal).
+- [ ] **CA-03-12** (v2, issue #107): Enviar `historical_amounts[]` con una cantidad de elementos distinta a la esperada (calculada por el backend desde `start_date` + `adjustment_frequency_months` + hoy) devuelve `400 VALIDATION_ERROR` con un mensaje que indica cuántos valores espera el sistema y el rango de fechas de cada tramo.
+- [ ] **CA-03-13** (v2, issue #107): Enviar `historical_amounts[0]` distinto de `initial_amount` devuelve `400 VALIDATION_ERROR`.
+- [ ] **CA-03-14** (v2, issue #107): Un contrato sin `adjustment_frequency_months` configurado (USD, o ARS sin ajuste) mantiene el mecanismo de un único valor vigente `current_amount`/`current_amount_since` (comportamiento del issue #100, sin cambios: opcionales pero solo válidos juntos, `current_amount_since` `>= start_date` y `<= hoy` con `400 INVALID_DATE_RANGE` si no, ajuste sintético único trazable en el historial); enviar `historical_amounts[]` en este caso devuelve `400 VALIDATION_ERROR`.
+- [ ] **CA-03-15** (v2, issue #107): Un contrato ARS con `adjustment_frequency_months` configurado que envía `current_amount`/`current_amount_since` (en vez de `historical_amounts[]`) devuelve `400 VALIDATION_ERROR` — ese mecanismo quedó superado por `historical_amounts[]` para contratos con ajuste periódico. Un alta normal (sin ninguno de los dos mecanismos) sigue comportándose igual: `current_amount = initial_amount`, sin ajuste sintético.
 - [ ] **CA-03-16** (issue #106): `GET /contracts/:id` de un contrato sin ajustes devuelve `monthly_amounts[]` con `initial_amount` en todos los meses desde `start_date` hasta el mes actual, orden descendente.
 - [ ] **CA-03-17** (issue #106): `GET /contracts/:id` de un contrato con 2 ajustes `applied` devuelve 3 tramos de monto (inicial + 2 ajustes), cada uno vigente desde su `due_period`.
 - [ ] **CA-03-18** (issue #106): `GET /contracts/:id` de un contrato con carga inicial retroactiva (issue #100) incluye el ajuste sintético en el cálculo — los meses anteriores a `current_amount_since` muestran `initial_amount`, los posteriores muestran `current_amount`.
