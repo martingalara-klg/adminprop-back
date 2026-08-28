@@ -867,6 +867,125 @@ class TestCA0308AndCA0104TerminateReturnsPropertyToAvailable:
         assert response.json()["error"]["code"] == "CONTRACT_NOT_ACTIVE"
 
 
+class TestCAR124ContractTerminatePermission:
+    """sdd_03 v1.11 §"Catalogo de Permisos" (decision #124, issue #105):
+    terminar un contrato es exclusivo de `owner` -- permiso atomico
+    dedicado `contract:terminate`, ya no `contract:manage` (que `admin`
+    sigue teniendo para el resto del ciclo de vida del contrato). Mismo
+    criterio de test que `test_set_commission_permission.py` (issue #51):
+    ejercitar el permiso atomico en `permissions[]`, nunca el nombre del
+    rol."""
+
+    async def _seed_active_contract(self, seed, organization_id):
+        property_id, renter_id = await _seed_property_and_renter(seed, organization_id)
+        contract_id = await seed.create_contract_row(
+            organization_id=organization_id,
+            property_id=property_id,
+            renter_id=renter_id,
+            status="active",
+        )
+        await _set_property_status(property_id, "rented")
+        return contract_id, property_id
+
+    async def test_ca_r124_01_owner_terminates_contract_succeeds(self, client, seed):
+        """CA-R124-01: el owner (seed real de `ROLE_DEFINITIONS`, que ya
+        incluye `contract:terminate`) puede terminar un contrato activo."""
+        _org, owner = await _seed_org_with_owner(seed)
+        contract_id, property_id = await self._seed_active_contract(
+            seed, owner["organization_id"]
+        )
+
+        response = await client.post(
+            f"/v1/contracts/{contract_id}/terminate",
+            json={"reason": "Mudanza del inquilino"},
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["status"] == "terminated"
+        assert await seed.get_property_status(property_id) == "available"
+
+    async def test_ca_r124_02_admin_with_contract_manage_returns_403(self, client, seed):
+        """CA-R124-02: un `admin` seedeado con los permisos REALES del rol
+        de sistema (`contract:manage`, sin `contract:terminate` --
+        `ROLE_DEFINITIONS`) recibe 403 FORBIDDEN al intentar terminar un
+        contrato, aunque pueda crear/actualizar/activar contratos sin
+        restriccion."""
+        org = await seed.create_organization_with_system_roles()
+        admin = await seed.add_member(
+            organization_id=org["organization_id"],
+            role_id=org["roles"]["admin"],
+            role_name="admin",
+        )
+        contract_id, _property_id = await self._seed_active_contract(
+            seed, org["organization_id"]
+        )
+
+        response = await client.post(
+            f"/v1/contracts/{contract_id}/terminate",
+            json={"reason": "Intento de admin"},
+            headers=admin["headers"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "FORBIDDEN"
+
+    async def test_ca_r124_03_custom_role_with_contract_terminate_permission_succeeds(
+        self, client, seed
+    ):
+        """CA-R124-03: la autorizacion es por el permiso atomico
+        `contract:terminate` en `permissions[]` -- no por el nombre del
+        rol. Un rol CUSTOM (`custom_manager`, no `owner`) con ese permiso
+        explicito puede terminar el contrato."""
+        org_id = await seed.create_organization(status="active")
+        permissions = ["contract:read", "contract:manage", "contract:terminate"]
+        role_id = await seed.create_role(org_id, name="custom_manager", permissions=permissions)
+        member = await seed.add_member(
+            organization_id=org_id,
+            role_id=role_id,
+            role_name="custom_manager",
+            permissions=permissions,
+        )
+        contract_id, property_id = await self._seed_active_contract(seed, org_id)
+
+        response = await client.post(
+            f"/v1/contracts/{contract_id}/terminate",
+            json={"reason": "Terminado por rol custom"},
+            headers=member["headers"],
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["status"] == "terminated"
+        assert await seed.get_property_status(property_id) == "available"
+
+    async def test_ca_r124_03_custom_role_without_contract_terminate_returns_403(
+        self, client, seed
+    ):
+        """Complementario a CA-R124-03: un rol CUSTOM con `contract:manage`
+        pero SIN `contract:terminate` recibe 403 -- confirma que el
+        permiso nuevo es estrictamente necesario, no basta con
+        `contract:manage` sin importar el nombre del rol."""
+        org_id = await seed.create_organization(status="active")
+        permissions = ["contract:read", "contract:manage"]
+        role_id = await seed.create_role(org_id, name="custom_manager", permissions=permissions)
+        member = await seed.add_member(
+            organization_id=org_id,
+            role_id=role_id,
+            role_name="custom_manager",
+            permissions=permissions,
+        )
+        contract_id, _property_id = await self._seed_active_contract(seed, org_id)
+
+        response = await client.post(
+            f"/v1/contracts/{contract_id}/terminate",
+            json={"reason": "Intento sin permiso"},
+            headers=member["headers"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
 class TestContractListFilters:
     """RF-01: "Listado con filtros: estado, propiedad, inquilino, moneda,
     expiring_in_days"."""
