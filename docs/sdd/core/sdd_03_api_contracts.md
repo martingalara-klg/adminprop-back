@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.9
-fecha: 2026-08-27
+version: 1.10
+fecha: 2026-08-28
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.9
+**Versión:** 1.10
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -61,10 +61,10 @@ El frontend discrimina por `error.code`, muestra `error.message`, asocia `error.
 `INVITATION_NOT_FOUND` (404) · `INVITATION_EXPIRED` (410) · `INVITATION_ALREADY_ACCEPTED` (409) · `INVITATION_PENDING_EXISTS` (409) · `USER_ALREADY_MEMBER` (409) · `LAST_OWNER_REQUIRED` (422) · `ROLE_NOT_FOUND` (404) · `SYSTEM_ROLE_IMMUTABLE` (422) · `RESET_TOKEN_EXPIRED` (410, agregado issue #8 — `GET/POST /auth/reset-password/:token`; token existió pero venció su ventana de 1h. El caso "nunca existió / ya usado" usa el `NOT_FOUND` genérico de arriba)
 
 **Contratos:**
-`CONTRACT_OVERLAP` (409, con `details.conflicting_contract_id`) · `CONTRACT_NOT_ACTIVE` (422) · `ADJUSTMENT_PENDING_EXISTS` (409) · `ADJUSTMENT_ALREADY_APPLIED` (409) · `ADJUSTMENT_PCT_REQUIRED` (400)
+`CONTRACT_OVERLAP` (409, con `details.conflicting_contract_id`) · `CONTRACT_NOT_ACTIVE` (422) · `ADJUSTMENT_PENDING_EXISTS` (409) · `ADJUSTMENT_ALREADY_APPLIED` (409) · `ADJUSTMENT_PCT_REQUIRED` (400) · `CONTRACT_HAS_DEBT` (422, `POST /contracts/:id/debt-certificate`, con el detalle de lo adeudado del contrato en `details` — issue #104, renombrado desde `RENTER_HAS_DEBT`: el libre deuda es por contrato, no por inquilino)
 
 **Cobranzas:**
-`RENT_PERIOD_ALREADY_PAID` (422) · `PAYMENT_EXCEEDS_CONTRACT_BALANCE` (422) · `EXCHANGE_RATE_REQUIRED` (400) · `PAYMENT_ALREADY_VOIDED` (409) · `RENTER_HAS_DEBT` (422, con el detalle de lo adeudado en `details`)
+`RENT_PERIOD_ALREADY_PAID` (422) · `PAYMENT_EXCEEDS_CONTRACT_BALANCE` (422) · `EXCHANGE_RATE_REQUIRED` (400) · `PAYMENT_ALREADY_VOIDED` (409)
 
 **Liquidaciones:**
 `SETTLEMENT_ALREADY_EXISTS` (409) · `SETTLEMENT_EXCHANGE_RATE_REQUIRED` (400) · `CHARGE_ENTRY_ALREADY_EXISTS` (409)
@@ -249,9 +249,12 @@ PATCH  /contracts/:id                    (solo notes/metadata; montos NUNCA — 
 POST   /contracts/:id/activate           (draft → active; genera el rent_period del mes en curso si corresponde)
 POST   /contracts/:id/terminate          (active → terminated; body: { reason })
 GET    /contracts/:id/adjustments        (historial de ajustes)
+POST   /contracts/:id/debt-certificate   (emite el certificado de libre deuda en PDF — RN-P08; verifica SOLO los períodos de ESE contrato; con deuda → 422 CONTRACT_HAS_DEBT con el detalle en details; permiso contract:read)
 GET    /adjustments                      (?status=pending — bandeja de ajustes que tocan)
 POST   /adjustments/:id/apply            (body: { pct }; pending → applied; recalcula current_amount — RN-C03)
 ```
+
+**`POST /contracts/:id/debt-certificate` — issue #104, decisión #123 (RN-P08, `spec_module_04` RF-08):** reemplaza a `POST /renters/:id/debt-certificate` (eliminado). Decisión del PO (2026-08-28): el libre deuda es conceptualmente **por contrato** — un inquilino puede alquilar 2 propiedades (ej: comercial) y deber en una sí y en otra no, así que el certificado se emite desde el contrato y verifica SOLO los períodos de ESE contrato (nunca los de otros contratos del mismo inquilino). El PDF (sincrónico) incluye encabezado de la administradora, inquilino, propiedad y fecha de emisión del contrato puntual. Permiso `contract:read` (no `renter:read`): mismo criterio que el resto de los endpoints de lectura de `/contracts/:id`. El error pasa de `RENTER_HAS_DEBT` a `CONTRACT_HAS_DEBT` (renombrado, no reutilizado con semántica nueva — ver §Códigos de Error Globales).
 
 **`POST /contracts` — issue #100, decisión #121 (RN-C06, `sdd_02` §3):** el body acepta dos campos opcionales adicionales, `current_amount` (decimal > 0) y `current_amount_since` (fecha), **solo válidos juntos** — enviar uno sin el otro es `400 VALIDATION_ERROR`. Aplican tanto a contratos ARS como USD. Si vienen: la respuesta trae `current_amount` igual al valor declarado (no a `initial_amount`) y el historial (`GET /contracts/:id/adjustments`) incluye el ajuste sintético `applied` de carga inicial (RN-C06). Validaciones de fecha (`current_amount_since`, ya normalizado al día 1 de su mes, debe ser `>= start_date` y `<= hoy`) responden `400 INVALID_DATE_RANGE` con `field: "current_amount_since"`.
 
@@ -264,7 +267,6 @@ GET    /rent-periods/:id/interest-preview  (?payment_date= — interés sugerido
 POST   /rent-periods/:id/payments        (registrar cobro — RN-P04/P05/P06/P07)
 POST   /payments/:id/void                (anulación lógica con motivo; auditada — RN-D04)
 GET    /payments/:id/receipt             (genera bajo demanda y descarga el recibo PDF del cobro — RN-P08; sobre un cobro anulado → 422 BUSINESS_RULE_VIOLATION)
-POST   /renters/:id/debt-certificate     (emite el certificado de libre deuda en PDF — RN-P08; con deuda → 422 RENTER_HAS_DEBT con el detalle en details)
 GET    /debt                             (?landlord_id=&renter_id=&min_days= — estado de deuda global, UC-10)
 ```
 

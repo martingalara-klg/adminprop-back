@@ -2,12 +2,12 @@
 name: AdminProp — Modelo de Dominio
 description: Entidades del dominio de gestión de alquileres, invariantes (RN-C, RN-P, RN-L, RN-A, RN-D), relaciones y glosario unificado
 type: project
-version: 1.5
+version: 1.6
 fecha: 2026-08-28
 ---
 # AdminProp — Modelo de Dominio
 
-**Versión:** 1.5
+**Versión:** 1.6
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -459,7 +459,7 @@ Registro append-only de las operaciones sensibles.
 - **RN-P05:** Se aceptan pagos parciales; el saldo restante queda como deuda del inquilino.
 - **RN-P06:** Si la moneda del pago difiere de la del contrato, el tipo de cambio se ingresa manualmente y es obligatorio.
 - **RN-P07:** Un cobro con destino "cuenta del propietario" es dinero ya rendido: no suma al neto a rendir, pero sí a la base de cálculo de la comisión.
-- **RN-P08:** El recibo de cobro se genera bajo demanda (opcional) y refleja exactamente lo imputado; el certificado de **libre deuda** solo se emite si el inquilino no registra saldos impagos, y cada emisión queda auditada.
+- **RN-P08:** El recibo de cobro se genera bajo demanda (opcional) y refleja exactamente lo imputado; el certificado de **libre deuda es por contrato** (issue #104, decisión #123, 2026-08-28: un inquilino puede tener 2 contratos y deber en uno solo) — se emite desde el contrato y verifica SOLO los períodos de ESE contrato (nunca los de otros contratos del mismo inquilino), y cada emisión queda auditada.
 
 ### RN-L — Liquidaciones
 
