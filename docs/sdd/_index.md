@@ -18,18 +18,18 @@ Este archivo es el **mapa de navegación** de toda la documentación SDD del pro
 |---|---|---|---|---|---|---|
 | `project_adminprop` | Contexto general del proyecto | (raíz) | Activo | 1.0 | ✅ | ✅ |
 | `sdd_01_prd` | Product Requirements Document (UC-01..UC-20, R-XX, S-XX) | core | Activo | 1.1 | ✅ | ✅ |
-| `sdd_02_domain_model` | Modelo de dominio + invariantes (RN-C/P/L/A/D) | core | Activo | 1.2 | ✅ | ✅ (lectura) |
+| `sdd_02_domain_model` | Modelo de dominio + invariantes (RN-C/P/L/A/D) | core | Activo | 1.5 | ✅ | ✅ (lectura) |
 | `sdd_03_api_contracts` | Contratos REST de la API | core | Activo | 1.7 | ✅ | ✅ **compartido — vinculante** |
 | `sdd_04_nonfunctional` | Requisitos no funcionales | core | Activo | 1.1 | ✅ | ✅ (parcial: §2) |
 | `spec_module_00_superadmin` | Módulo 0 — Super Admin & onboarding | core | Activo | 1.0 | ✅ | ✅ (rutas /superadmin) |
-| `spec_module_01_propiedades` | Módulo 1 — Propiedades y cuentas de servicio | features | Activo | 1.0 | ✅ | ✅ |
+| `spec_module_01_propiedades` | Módulo 1 — Propiedades y cuentas de servicio | features | Activo | 1.2 | ✅ | ✅ |
 | `spec_module_02_personas` | Módulo 2 — Propietarios e inquilinos | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_module_03_contratos` | Módulo 3 — Contratos + ajustes por índice | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_module_04_cobranzas` | Módulo 4 — Cobranzas y mora | features | Activo | 1.1 | ✅ | ✅ |
 | `spec_module_05_liquidaciones` | Módulo 5 — Liquidaciones a propietarios | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_module_06_mantenimiento` | Módulo 6 — Mantenimiento y cotizaciones | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_module_07_administracion` | Módulo 7 — Usuarios, roles, configuración, auditoría | features | Activo | 1.0 | ✅ | ✅ |
-| `spec_data_model` | Modelo de datos físico (23 tablas, RLS, migraciones) | infrastructure | Activo | 1.2 | ✅ | ⚪ |
+| `spec_data_model` | Modelo de datos físico (23 tablas, RLS, migraciones) | infrastructure | Activo | 1.3 | ✅ | ⚪ |
 | `spec_notificaciones` | Notificaciones (transversal: in-app + email) | infrastructure | Activo | 1.1 | ✅ | ✅ (panel in-app) |
 
 **Leyenda:** ✅ referencia primaria (leer antes de implementar) · ⚪ referencia secundaria · ❌ no aplica.
@@ -136,6 +136,7 @@ Numeración heredada del sistema de referencia donde los skills la citan (#2..#6
 | 119 | **CORS deshabilitado por default** (`CORS_ALLOWED_ORIGINS` vacío ⇒ sin `CORSMiddleware`); con orígenes configurados, siempre exactos + `allow_credentials=True` (nunca `*`). No sustituye mismo-origen: las cookies `SameSite=Lax` (#43) no viajan cross-site aunque CORS lo permita — el despliegue recomendado sigue siendo front+API bajo el mismo origen | `sdd_04` v1.1 §2.4a, decisión 2026-08-26, issue #90 | ✅ Tomada |
 | 120 | **Catálogo de barrios parametrizable por organización** (`neighborhoods`): `name` único por org case-insensitive, soft delete protegido por dependencias. `properties.neighborhood_id` **nullable en DB** (datos legacy preexistentes) pero **obligatorio en la API** para create/update de propiedades de ahora en más. ABM vía `property:manage`/`property:read` — sin permisos nuevos | `sdd_02` v1.3, `sdd_03` v1.8, `spec_data_model` v1.2, `spec_module_01` v1.1, decisión 2026-08-27, issue #99 | ✅ Tomada |
 | 121 | **Alta de contrato en curso — declarar monto vigente:** `POST /contracts` acepta `current_amount` + `current_amount_since` opcionales (solo juntos), aplicable a ARS y USD. El sistema registra un `ContractAdjustment` sintético ya `applied` (`pct_applied` nulo, `notes` prefijado `"Carga inicial:"`) que ancla la detección del próximo ajuste periódico (`detect_due_adjustments`, RN-C03) sin modificar esa lógica; `current_amount` reemplaza a `initial_amount` como monto de arranque | `sdd_02` v1.4 (RN-C06), `sdd_03` v1.9, `spec_module_03` v1.1, decisión 2026-08-27, issue #100 | ✅ Tomada |
+| 122 | **`duplex` agregado al catálogo de `property_type`**, que pasa de texto libre sugerido a **catálogo cerrado** (`CHECK` en DB + `Literal` en la API): `departamento`/`casa`/`duplex`/`local`/`cochera`/`otro` | `sdd_02` v1.5, `spec_data_model` v1.3, `spec_module_01` v1.2, decisión 2026-08-28, issue #103 | ✅ Tomada |
 
 ### Decisiones aún pendientes
 
