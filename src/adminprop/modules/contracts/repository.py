@@ -321,6 +321,34 @@ class ContractRepository:
         row.expiring_notified_at = notified_at
         await self._session.flush()
 
+    # ─── RF-06 (issue #106): serie mensual de valores locativos ────────────
+
+    async def get_terminated_at(self, contract_id: UUID, organization_id: UUID) -> date | None:
+        """RN-09: fecha efectiva de terminacion anticipada de un contrato
+        `terminated`. `contracts` no tiene columna propia para esto
+        (`service.py.terminate` solo persiste el motivo en `audit_logs`,
+        no en la tabla) -- se deriva del evento `contract.terminated` MAS
+        RECIENTE de ESE contrato, filtrado explicitamente por
+        `organization_id` (defense in depth, mismo criterio que el resto
+        de este repository). `None` si no existe (defensivo -- no deberia
+        pasar: `terminate()` audita en la MISMA transaccion que el cambio
+        de estado; el caller -- `monthly_amounts.compute_monthly_amounts`
+        -- cae a `end_date` en ese caso)."""
+        stmt = text(
+            "SELECT created_at FROM audit_logs "
+            "WHERE organization_id = :organization_id "
+            "AND entity_type = 'contract' AND entity_id = :contract_id "
+            "AND action = 'contract.terminated' "
+            "ORDER BY created_at DESC LIMIT 1"
+        )
+        result = await self._session.execute(
+            stmt, {"organization_id": str(organization_id), "contract_id": str(contract_id)}
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return row.date()
+
     async def _get_row(self, contract_id: UUID, organization_id: UUID) -> Contract | None:
         stmt = select(Contract).where(
             Contract.id == contract_id,

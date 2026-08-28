@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.11
+version: 1.12
 fecha: 2026-08-28
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.11
+**Versión:** 1.12
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -246,7 +246,7 @@ DELETE /neighborhoods/:id                (soft; 409 ENTITY_HAS_DEPENDENCIES si t
 ```
 GET    /contracts                        (?status=&expiring_in_days=)
 POST   /contracts                        (valida CONTRACT_OVERLAP, RN-C02, RN-C06)
-GET    /contracts/:id
+GET    /contracts/:id                    (incluye monthly_amounts[] — issue #106, ver debajo)
 PATCH  /contracts/:id                    (solo notes/metadata; montos NUNCA — RN-C04)
 POST   /contracts/:id/activate           (draft → active; genera el rent_period del mes en curso si corresponde)
 POST   /contracts/:id/terminate          (active → terminated; body: { reason }; permiso contract:terminate, solo owner)
@@ -261,6 +261,13 @@ POST   /adjustments/:id/apply            (body: { pct }; pending → applied; re
 **`POST /contracts/:id/terminate` — issue #105, decisión #124 (RN-A, `spec_module_03`):** feedback #2 del PO — terminar un contrato pasa a ser exclusivo de `owner` (hasta ahora, `contract:manage` se lo permitía también a `admin`). Se agrega el permiso atómico dedicado `contract:terminate` al catálogo, sembrado SOLO en el rol `owner` (`admin` conserva `contract:manage` para el resto del ciclo de vida del contrato — crear, actualizar, activar). Mismo patrón que `landlord:set-commission` (decisión #116): migración de backfill agrega el permiso al rol `owner` de organizaciones ya existentes.
 
 **`POST /contracts` — issue #100, decisión #121 (RN-C06, `sdd_02` §3):** el body acepta dos campos opcionales adicionales, `current_amount` (decimal > 0) y `current_amount_since` (fecha), **solo válidos juntos** — enviar uno sin el otro es `400 VALIDATION_ERROR`. Aplican tanto a contratos ARS como USD. Si vienen: la respuesta trae `current_amount` igual al valor declarado (no a `initial_amount`) y el historial (`GET /contracts/:id/adjustments`) incluye el ajuste sintético `applied` de carga inicial (RN-C06). Validaciones de fecha (`current_amount_since`, ya normalizado al día 1 de su mes, debe ser `>= start_date` y `<= hoy`) responden `400 INVALID_DATE_RANGE` con `field: "current_amount_since"`.
+
+**`GET /contracts/:id` — issue #106, decisión #125 (`spec_module_03` RF-06):** feedback #2 del PO — la ficha del contrato debe mostrar el valor del alquiler mes a mes (el actual primero, hacia atrás), **derivado en el backend** (el front no calcula lógica de negocio). La respuesta agrega `monthly_amounts[]`, lista de `{ "period": "YYYY-MM-01", "amount": "123.45" }` (mismo formato de `period` que `due_period` de `ContractAdjustment` — día 1 del mes calendario; `amount` como `NUMERIC`, nunca float), en **orden DESCENDENTE**. El rango va desde `start_date` hasta:
+- el mes actual, si el contrato sigue vigente (`draft`/`active`);
+- `end_date`, si venció naturalmente (`status = "expired"`);
+- la **fecha de terminación efectiva**, si fue terminado anticipadamente (`status = "terminated"`) — `contracts` no tiene columna propia para esto (RF-03 solo persiste el motivo en `audit_logs`), así que se deriva del evento `contract.terminated` más reciente de ESE contrato en `audit_logs` (mismo timestamp que la transición de estado — misma transacción, `POST /contracts/:id/terminate`); si por algún motivo no existe (defensivo), el fallback es `end_date`.
+
+El monto de cada mes es determinístico: `initial_amount` hasta el primer ajuste `applied` cuyo `due_period <= mes`, luego el `new_amount` del **último** ajuste `applied` cuyo `due_period <= mes` (incluye el ajuste sintético "Carga inicial" del issue #100/RN-C06). Solo cuentan ajustes `applied` — los `pending` no afectan el histórico. Un contrato USD sin carga inicial declarada tiene una serie plana en `initial_amount` (RN-C02: sin ajuste periódico automático). Si el contrato aún no empezó (`start_date` futuro), `monthly_amounts` es `[]`.
 
 ## 9. Cobranzas (`/rent-periods`, `/payments`)
 

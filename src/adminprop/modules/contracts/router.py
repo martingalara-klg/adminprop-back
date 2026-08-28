@@ -4,7 +4,9 @@ SDD: core/sdd_03_api_contracts.md §8 "Contratos".
 Implements: CA-03-01, 02, 03, 06, 08, CA-01-04 (issue #17);
             CA-03-04, CA-03-05 (issue #18, RF-04);
             CA-04-11, CA-04-12 (issue #104 -- libre deuda POR CONTRATO,
-            movido desde `modules/people`, ver `sdd_03` v1.10 §8).
+            movido desde `modules/people`, ver `sdd_03` v1.10 §8);
+            CA-03-16..22 (issue #106, RF-06 -- monthly_amounts[] en
+            GET /contracts/:id, `sdd_03` v1.12 §8).
 """
 
 from __future__ import annotations
@@ -28,8 +30,11 @@ from adminprop.modules.contracts.adjustment_service import (
 from adminprop.modules.contracts.repository import ContractFilters, ContractRepository
 from adminprop.modules.contracts.schemas import (
     ContractCreate,
+    ContractDetail,
+    ContractDetailResponse,
     ContractListResponse,
     ContractResponse,
+    ContractSummary,
     ContractTerminateRequest,
     ContractUpdate,
 )
@@ -117,20 +122,27 @@ async def list_contracts(
 
 @router.get(
     "/{contract_id}",
-    response_model=ContractResponse,
+    response_model=ContractDetailResponse,
     dependencies=[Depends(requires_permission("contract:read"))],
 )
 async def get_contract(
     contract_id: UUID,
     organization_id: UUID = Depends(get_current_tenant),
     service: ContractService = Depends(get_contract_service),
-) -> ContractResponse:
-    """RF-01: detalle del contrato."""
+) -> ContractDetailResponse:
+    """RF-01 + RF-06 (issue #106): detalle del contrato, incluido
+    `monthly_amounts[]` -- serie mensual de valores locativos, orden
+    DESCENDENTE (mes actual primero), calculada en el backend."""
     contract = await service.get(contract_id, organization_id)
     if contract is None:
         # RN-D01: 404, no 403 -- no distingue "no existe" de "otra org".
         raise NotFoundException()
-    return ContractResponse(data=contract)
+    monthly_amounts = await service.get_monthly_amounts(
+        contract, organization_id, today=datetime.now(UTC).date()
+    )
+    summary = ContractSummary.model_validate(contract)
+    detail = ContractDetail(**summary.model_dump(), monthly_amounts=monthly_amounts)
+    return ContractDetailResponse(data=detail)
 
 
 @router.patch(

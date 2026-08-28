@@ -19,12 +19,12 @@ Este archivo es el **mapa de navegación** de toda la documentación SDD del pro
 | `project_adminprop` | Contexto general del proyecto | (raíz) | Activo | 1.0 | ✅ | ✅ |
 | `sdd_01_prd` | Product Requirements Document (UC-01..UC-20, R-XX, S-XX) | core | Activo | 1.1 | ✅ | ✅ |
 | `sdd_02_domain_model` | Modelo de dominio + invariantes (RN-C/P/L/A/D) | core | Activo | 1.6 | ✅ | ✅ (lectura) |
-| `sdd_03_api_contracts` | Contratos REST de la API | core | Activo | 1.11 | ✅ | ✅ **compartido — vinculante** |
+| `sdd_03_api_contracts` | Contratos REST de la API | core | Activo | 1.12 | ✅ | ✅ **compartido — vinculante** |
 | `sdd_04_nonfunctional` | Requisitos no funcionales | core | Activo | 1.1 | ✅ | ✅ (parcial: §2) |
 | `spec_module_00_superadmin` | Módulo 0 — Super Admin & onboarding | core | Activo | 1.0 | ✅ | ✅ (rutas /superadmin) |
 | `spec_module_01_propiedades` | Módulo 1 — Propiedades y cuentas de servicio | features | Activo | 1.2 | ✅ | ✅ |
 | `spec_module_02_personas` | Módulo 2 — Propietarios e inquilinos | features | Activo | 1.0 | ✅ | ✅ |
-| `spec_module_03_contratos` | Módulo 3 — Contratos + ajustes por índice | features | Activo | 1.0 | ✅ | ✅ |
+| `spec_module_03_contratos` | Módulo 3 — Contratos + ajustes por índice | features | Activo | 1.2 | ✅ | ✅ |
 | `spec_module_04_cobranzas` | Módulo 4 — Cobranzas y mora | features | Activo | 1.2 | ✅ | ✅ |
 | `spec_module_05_liquidaciones` | Módulo 5 — Liquidaciones a propietarios | features | Activo | 1.0 | ✅ | ✅ |
 | `spec_module_06_mantenimiento` | Módulo 6 — Mantenimiento y cotizaciones | features | Activo | 1.0 | ✅ | ✅ |
@@ -139,6 +139,7 @@ Numeración heredada del sistema de referencia donde los skills la citan (#2..#6
 | 122 | **`duplex` agregado al catálogo de `property_type`**, que pasa de texto libre sugerido a **catálogo cerrado** (`CHECK` en DB + `Literal` en la API): `departamento`/`casa`/`duplex`/`local`/`cochera`/`otro` | `sdd_02` v1.5, `spec_data_model` v1.3, `spec_module_01` v1.2, decisión 2026-08-28, issue #103 | ✅ Tomada |
 | 123 | **Certificado de libre deuda: es POR CONTRATO, no por inquilino** (feedback #2 del PO): un inquilino puede alquilar 2 propiedades y deber en una sí y en otra no. `POST /renters/:id/debt-certificate` se reemplaza por `POST /contracts/:id/debt-certificate` (permiso `contract:read`), que verifica SOLO los períodos del contrato del path. El error `RENTER_HAS_DEBT` se **renombra** a `CONTRACT_HAS_DEBT` (no se mantiene con semántica nueva — el código debe reflejar el recurso real) | `sdd_02` v1.6 (RN-P08), `sdd_03` v1.10, `spec_module_04` v1.2, decisión 2026-08-28, issue #104 | ✅ Tomada |
 | 124 | **Permiso atómico `contract:terminate`** agregado al catálogo (solo `owner`, exclusivo): feedback #2 del PO — terminar un contrato dejó de ser posible para `admin` (hasta ahora lo permitía `contract:manage`, compartido con el resto del ciclo de vida del contrato). Mismo patrón que `landlord:set-commission` (decisión #116): migración de backfill agrega el permiso al rol `owner` de organizaciones ya existentes | `sdd_03` v1.11, decisión 2026-08-28, issue #105 | ✅ Tomada |
+| 125 | **`GET /contracts/:id` expone `monthly_amounts[]`** (serie mensual de valores locativos, mes actual primero): feedback #2 del PO — cálculo determinístico en el backend desde `initial_amount` + ajustes `applied` por `due_period` (incluye la "Carga inicial" sintética del issue #100). Como `contracts` no tiene columna propia de fecha de terminación anticipada, la fecha de corte de un contrato `terminated` se deriva del evento `contract.terminated` más reciente en `audit_logs` (mismo timestamp que la transición de estado, misma transacción); `expired` usa `end_date` directamente (vencimiento natural, sin ambigüedad) | `sdd_03` v1.12 (RN-C: RN-09 de `spec_module_03`), `spec_module_03` v1.2, decisión 2026-08-28, issue #106 | ✅ Tomada |
 
 ### Decisiones aún pendientes
 

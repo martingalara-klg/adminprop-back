@@ -208,6 +208,29 @@ class ContractAdjustmentRepository:
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
+    # ─── RF-06 (issue #106): serie mensual de valores locativos ────────────
+
+    async def list_applied_by_contract(
+        self, contract_id: UUID, organization_id: UUID
+    ) -> list[ContractAdjustment]:
+        """RN-09: solo los ajustes `applied` (los `pending` no cuentan
+        para el monto vigente historico), orden ASCENDENTE por
+        `due_period` -- el orden que `monthly_amounts.compute_monthly_amounts`
+        espera para encontrar "el ultimo applied cuyo due_period <= mes".
+        Incluye el ajuste sintetico "Carga inicial" del issue #100 (tambien
+        queda `applied`, sin distincion especial aca)."""
+        stmt = (
+            select(ContractAdjustment)
+            .where(
+                ContractAdjustment.contract_id == contract_id,
+                ContractAdjustment.organization_id == organization_id,
+                ContractAdjustment.status == "applied",
+            )
+            .order_by(ContractAdjustment.due_period.asc())
+        )
+        result = await self._session.execute(stmt)
+        return list(result.scalars().all())
+
     async def list_pending(
         self, *, organization_id: UUID, cursor: str | None, limit: int
     ) -> tuple[list[ContractAdjustment], str | None]:

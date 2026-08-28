@@ -1,8 +1,9 @@
 """Logica de negocio del modulo contratos (issue #17).
 
-SDD: docs/sdd/features/spec_module_03_contratos.md RF-01..RF-03.
-Implements: CA-03-01, 02, 03, 06, 08, CA-01-04 (RN-01/RN-C01, RN-02,
-RN-03/RN-C02, RN-04/RN-C04, RN-06, RN-07/RN-C05).
+SDD: docs/sdd/features/spec_module_03_contratos.md RF-01..RF-03, RF-06
+(issue #106). Implements: CA-03-01, 02, 03, 06, 08, CA-01-04 (RN-01/RN-C01,
+RN-02, RN-03/RN-C02, RN-04/RN-C04, RN-06, RN-07/RN-C05); CA-03-16..22
+(RN-09, serie mensual de valores locativos).
 
 Fuera de alcance (ver PR "Decisiones de implementacion"):
 - RF-04 (ajustes por indice: deteccion diaria, bandeja, aplicar %) y
@@ -26,6 +27,12 @@ from fastapi import Depends
 from adminprop.modules.contracts.adjustment_repository import (
     ContractAdjustmentRepository,
     get_contract_adjustment_repository,
+)
+from adminprop.modules.contracts.models import Contract
+from adminprop.modules.contracts.monthly_amounts import (
+    AppliedAdjustment,
+    MonthlyAmountRow,
+    compute_monthly_amounts,
 )
 from adminprop.modules.contracts.rent_period_hook import (
     maybe_generate_current_month_rent_period,
@@ -185,6 +192,32 @@ class ContractService:
 
     async def get(self, contract_id: UUID, organization_id: UUID):
         return await self._repo.get_by_id(contract_id, organization_id)
+
+    async def get_monthly_amounts(
+        self, contract: Contract, organization_id: UUID, *, today: date
+    ) -> list[MonthlyAmountRow]:
+        """RF-06/RN-09 (issue #106): `GET /contracts/:id` §"monthly_amounts[]".
+        Esta capa solo resuelve los datos de DB que necesita el calculo
+        puro (`monthly_amounts.compute_monthly_amounts`): los ajustes
+        `applied` del contrato, y -- solo si esta `terminated` -- la fecha
+        de terminacion efectiva (evento `contract.terminated` de
+        `audit_logs`, ver `repository.py.get_terminated_at`)."""
+        applied = await self._adjustment_repo.list_applied_by_contract(contract.id, organization_id)
+        terminated_at = None
+        if contract.status == "terminated":
+            terminated_at = await self._repo.get_terminated_at(contract.id, organization_id)
+        return compute_monthly_amounts(
+            status=contract.status,
+            start_date=contract.start_date,
+            end_date=contract.end_date,
+            initial_amount=contract.initial_amount,
+            applied_adjustments=[
+                AppliedAdjustment(due_period=row.due_period, new_amount=row.new_amount)
+                for row in applied
+            ],
+            today=today,
+            terminated_at=terminated_at,
+        )
 
     async def list(
         self,
