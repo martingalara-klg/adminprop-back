@@ -12,10 +12,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-# RF-01 §"Validaciones": "property_type: uno del catalogo sugerido o texto
-# libre corto (<= 50)" -- sin CHECK cerrado en DB (migracion #14), por eso
-# aca es `str` con `max_length`, no `Literal`.
-_PROPERTY_TYPE_MAX_LENGTH = 50
+# RF-01 §"Validaciones" (issue #103, decision #122): "property_type:
+# catalogo cerrado" -- CHECK en DB desde la migracion
+# 20260828_123003_add_check_property_type_with_duplex.py, por eso aca es
+# `Literal` (antes era `str` con `max_length`, cuando era texto libre).
+PropertyType = Literal["departamento", "casa", "duplex", "local", "cochera", "otro"]
 
 # RF-02 §"Validaciones": "service_type: uno de los 7 valores del enum"
 # (CHECK cerrado en DB, migracion #14) -- aca si es `Literal`.
@@ -78,7 +79,7 @@ class PropertyCreate(BaseModel):
     address: str = Field(..., min_length=5, max_length=300)
     landlord_id: UUID = Field(...)
     neighborhood_id: UUID = Field(...)
-    property_type: str = Field(default="departamento", max_length=_PROPERTY_TYPE_MAX_LENGTH)
+    property_type: PropertyType = Field(default="departamento")
     notes: str | None = Field(None)
 
 
@@ -103,7 +104,7 @@ class PropertyUpdate(BaseModel):
     address: str | None = Field(None, min_length=5, max_length=300)
     landlord_id: UUID | None = Field(None)
     neighborhood_id: UUID | None = Field(None)
-    property_type: str | None = Field(None, max_length=_PROPERTY_TYPE_MAX_LENGTH)
+    property_type: PropertyType | None = Field(None)
     status: ManualPropertyStatus | None = Field(None)
     notes: str | None = Field(None)
 
