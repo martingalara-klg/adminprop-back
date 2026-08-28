@@ -891,9 +891,7 @@ class TestCAR124ContractTerminatePermission:
         """CA-R124-01: el owner (seed real de `ROLE_DEFINITIONS`, que ya
         incluye `contract:terminate`) puede terminar un contrato activo."""
         _org, owner = await _seed_org_with_owner(seed)
-        contract_id, property_id = await self._seed_active_contract(
-            seed, owner["organization_id"]
-        )
+        contract_id, property_id = await self._seed_active_contract(seed, owner["organization_id"])
 
         response = await client.post(
             f"/v1/contracts/{contract_id}/terminate",
@@ -917,9 +915,7 @@ class TestCAR124ContractTerminatePermission:
             role_id=org["roles"]["admin"],
             role_name="admin",
         )
-        contract_id, _property_id = await self._seed_active_contract(
-            seed, org["organization_id"]
-        )
+        contract_id, _property_id = await self._seed_active_contract(seed, org["organization_id"])
 
         response = await client.post(
             f"/v1/contracts/{contract_id}/terminate",
