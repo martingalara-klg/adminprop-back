@@ -162,3 +162,33 @@ class ContractResponse(BaseModel):
 class ContractListResponse(BaseModel):
     data: list[ContractSummary]
     meta: dict
+
+
+class MonthlyAmount(BaseModel):
+    """Item de `monthly_amounts[]` -- issue #106, `sdd_03` v1.12 §8.
+
+    `period` es el dia 1 del mes calendario (mismo criterio que
+    `due_period` de `ContractAdjustment`); `amount` es el monto vigente
+    de ESE mes, derivado en el backend desde `initial_amount` + ajustes
+    `applied` (RN-09 de `spec_module_03`). `from_attributes=True` porque
+    el service devuelve `monthly_amounts.MonthlyAmountRow` (dataclass),
+    no un dict.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    period: date
+    amount: Decimal
+
+
+class ContractDetail(ContractSummary):
+    """Respuesta de `GET /v1/contracts/:id` (issue #106): `ContractSummary`
+    + `monthly_amounts[]` en orden DESCENDENTE (mes actual primero). Solo
+    este endpoint la expone -- `POST`/`PATCH`/`activate`/`terminate`
+    siguen usando `ContractSummary`/`ContractResponse` sin este campo."""
+
+    monthly_amounts: list[MonthlyAmount]
+
+
+class ContractDetailResponse(BaseModel):
+    data: ContractDetail
