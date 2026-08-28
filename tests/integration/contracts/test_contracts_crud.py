@@ -517,6 +517,60 @@ class TestCA0315HistoricalAmountsSupersedesSingleValue:
         assert history.json()["data"] == []
 
 
+class TestHistoricalAmountsShapeValidation:
+    """`ContractCreate._validate_historical_amounts_shape`: validaciones
+    de shape (sin DB, sin "hoy") de `historical_amounts[]` -- cada
+    elemento > 0, y al menos 2 elementos cuando se envia."""
+
+    async def test_historical_amounts_with_non_positive_element_returns_400(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+
+        response = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": "2026-01-01",
+                "end_date": "2027-01-01",
+                "daily_late_fee_pct": "0.1",
+                "adjustment_frequency_months": 4,
+                "adjustment_index": "icl",
+                "historical_amounts": ["100000.00", "0.00"],
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    async def test_historical_amounts_with_single_element_returns_400(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+
+        response = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": "2026-01-01",
+                "end_date": "2027-01-01",
+                "daily_late_fee_pct": "0.1",
+                "adjustment_frequency_months": 4,
+                "adjustment_index": "icl",
+                "historical_amounts": ["100000.00"],
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
 class TestCA0309HistoricalAmountsOneElapsedTramo:
     """CA-03-09 (v2, issue #107): 1 tramo transcurrido mas alla del
     inicial (2 elementos en `historical_amounts`) -- 1 ajuste sintetico
