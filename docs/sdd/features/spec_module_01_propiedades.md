@@ -2,12 +2,12 @@
 name: AdminProp — Módulo 1 — Propiedades
 description: Inventario de inmuebles administrados con sus cuentas de servicios informativas, catálogo de barrios y la ficha consolidada por propiedad
 type: project
-version: 1.2
+version: 1.3
 fecha: 2026-08-28
 ---
 # Módulo 1 — Propiedades
 
-**Versión:** 1.2 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-06
+**Versión:** 1.3 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-06
 
 ## Propósito
 
@@ -64,6 +64,7 @@ La vista de detalle reúne todo lo de la propiedad:
 
 - `rented` ⟺ existe un contrato `active` sobre la propiedad (se actualiza al activar/terminar/vencer contratos — Módulo 3).
 - `available` / `unavailable` son estados manuales válidos solo sin contrato activo (`unavailable` = en refacción, fuera de cartera temporal, etc.).
+- **Defensa en profundidad (issue #109):** `PATCH /properties/:id` con `status` en el body sobre una propiedad con contrato `active` devuelve `422 INVALID_STATUS_TRANSITION` — el invariante `rented ⟺ contrato active` no se rompe manualmente ni siquiera cuando el cliente omite la mitigación del front (PR `adminprop-front#58`). Un `PATCH` que **no** incluye `status` sobre una propiedad `rented` sigue editando el resto de los campos con normalidad.
 
 ## Reglas de Negocio
 
@@ -92,6 +93,7 @@ La vista de detalle reúne todo lo de la propiedad:
 - [ ] **CA-01-08** (issue #99): Crear o editar una propiedad sin `neighborhood_id` devuelve `400 VALIDATION_ERROR`; con un `neighborhood_id` inexistente o de otra organización devuelve `404 NOT_FOUND`. Una propiedad legacy (creada antes de issue #99, `neighborhood_id = NULL` en DB) sigue siendo legible en listado y ficha, con `neighborhood: null`.
 - [ ] **CA-01-09** (issue #99): `GET /properties?neighborhood_id=<id>` devuelve solo las propiedades de ese barrio.
 - [ ] **CA-01-10** (issue #103): `duplex` es un valor válido de `property_type` — se puede crear y editar una propiedad con `property_type: "duplex"`; un valor fuera del catálogo cerrado (`departamento`/`casa`/`duplex`/`local`/`cochera`/`otro`) devuelve `400 VALIDATION_ERROR`.
+- [ ] **CA-01-11** (issue #109): `PATCH /properties/:id` con `status` (`available`/`unavailable`) sobre una propiedad con contrato `active` devuelve `422 INVALID_STATUS_TRANSITION`, sin aplicar el cambio; el mismo `PATCH` **sin** `status` sobre esa propiedad `rented` devuelve `200` y aplica el resto de los campos editados.
 
 ## Integraciones
 
