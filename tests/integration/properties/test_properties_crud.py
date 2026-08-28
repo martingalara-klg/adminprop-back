@@ -755,6 +755,140 @@ class TestPropertyUpdate:
         assert any(str(r["entity_id"]) == property_id for r in rows)
 
 
+class TestCA0111StatusRejectedWithActiveContract:
+    """CA-01-11 (issue #109): `PATCH /properties/:id` con `status` sobre una
+    propiedad con contrato `active` devuelve `422 INVALID_STATUS_TRANSITION`,
+    sin aplicar el cambio; sin `status` en el body, el PATCH sigue
+    funcionando con normalidad sobre una propiedad `rented`. Defensa en
+    profundidad del invariante `rented ⟺ contrato active` (RF-04) -- el
+    front (adminprop-front#58) ya omite `status` para propiedades rented."""
+
+    async def _create_rented_property(self, client, seed, owner, *, address: str) -> str:
+        landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
+        created = await client.post(
+            "/v1/properties",
+            json={
+                "address": address,
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
+            headers=owner["headers"],
+        )
+        property_id = created.json()["data"]["id"]
+        renter_id = await seed.create_renter_row(organization_id=owner["organization_id"])
+        contract = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": property_id,
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "1000.00",
+                "start_date": "2026-01-01",
+                "end_date": "2027-01-01",
+                "daily_late_fee_pct": "0.1",
+            },
+            headers=owner["headers"],
+        )
+        contract_id = contract.json()["data"]["id"]
+        await client.post(f"/v1/contracts/{contract_id}/activate", headers=owner["headers"])
+        return property_id
+
+    async def test_ca_01_11_patch_status_on_rented_property_returns_422(self, client, seed):
+        """PATCH con `status` sobre propiedad con contrato activo ->
+        422 INVALID_STATUS_TRANSITION -- hoy (antes del fix) esto devolvia
+        200 y rompia el invariante `rented <=> contrato active`."""
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id = await self._create_rented_property(
+            client, seed, owner, address="Alquilada con status forzado 5"
+        )
+
+        response = await client.patch(
+            f"/v1/properties/{property_id}",
+            json={"status": "available"},
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "INVALID_STATUS_TRANSITION"
+
+        unchanged = await client.get(f"/v1/properties/{property_id}", headers=owner["headers"])
+        assert unchanged.json()["data"]["status"] == "rented"
+
+    async def test_ca_01_11_patch_status_unavailable_on_rented_property_also_returns_422(
+        self, client, seed
+    ):
+        """El rechazo aplica a ambos valores manuales, no solo `available`."""
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id = await self._create_rented_property(
+            client, seed, owner, address="Alquilada con status forzado 6"
+        )
+
+        response = await client.patch(
+            f"/v1/properties/{property_id}",
+            json={"status": "unavailable"},
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "INVALID_STATUS_TRANSITION"
+
+    async def test_ca_01_11_patch_without_status_on_rented_property_still_edits_other_fields(
+        self, client, seed
+    ):
+        """CA-01-11: PATCH sin `status` sobre propiedad rented -> OK, edita
+        el resto de los campos con normalidad."""
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id = await self._create_rented_property(
+            client, seed, owner, address="Alquilada, edito otros campos 7"
+        )
+
+        response = await client.patch(
+            f"/v1/properties/{property_id}",
+            json={"notes": "Inquilino avisado de reparacion menor"},
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["status"] == "rented"
+
+        detail = await client.get(f"/v1/properties/{property_id}", headers=owner["headers"])
+        assert detail.json()["data"]["notes"] == "Inquilino avisado de reparacion menor"
+        assert detail.json()["data"]["status"] == "rented"
+
+    async def test_ca_01_11_patch_status_available_without_active_contract_still_works(
+        self, client, seed
+    ):
+        """Complementario: sin contrato activo, `PATCH status` sigue
+        funcionando (no es una regresion global sobre `status`)."""
+        _org, owner = await _seed_org_with_owner(seed)
+        landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
+        created = await client.post(
+            "/v1/properties",
+            json={
+                "address": "Sin contrato, status editable 8",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
+            headers=owner["headers"],
+        )
+        property_id = created.json()["data"]["id"]
+
+        response = await client.patch(
+            f"/v1/properties/{property_id}",
+            json={"status": "unavailable"},
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["status"] == "unavailable"
+
+
 class TestPropertyFicha:
     """RF-03: ficha consolidada -- datos + cuentas de servicio; contrato
     vigente, historial de reparaciones y conceptos recurrentes quedan

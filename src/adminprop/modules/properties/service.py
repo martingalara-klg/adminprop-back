@@ -29,6 +29,7 @@ from adminprop.shared.audit.service import audit
 from adminprop.shared.errors.codes import (
     ConflictException,
     EntityHasDependenciesException,
+    InvalidStatusTransitionException,
     NotFoundException,
 )
 
@@ -123,6 +124,24 @@ class PropertyService:
         current = await self._repo.get_by_id(property_id, organization_id)
         if current is None:
             raise NotFoundException()
+
+        # RF-04 + issue #109: `available`/`unavailable` son estados
+        # manuales validos SOLO sin contrato activo (CA-01-04:
+        # `rented` <=> contrato `active`). Defensa en profundidad --
+        # `has_active_dependencies` consulta la tabla `contracts`
+        # directamente (fuente de verdad del invariante), no solo el
+        # `status` cacheado en `properties`. El front ya omite `status`
+        # para propiedades rented (adminprop-front#58); esto bloquea el
+        # mismo salto si algun cliente lo envia igual.
+        if "status" in fields_set and await self._repo.has_active_dependencies(
+            property_id, organization_id
+        ):
+            raise InvalidStatusTransitionException(
+                message="No se puede cambiar el estado manualmente: la propiedad tiene un "
+                "contrato activo.",
+                field="status",
+                details={"property_id": str(property_id)},
+            )
 
         if "landlord_id" in fields_set and landlord_id is not None:
             landlord_still_valid = await self._repo.landlord_exists(landlord_id, organization_id)
