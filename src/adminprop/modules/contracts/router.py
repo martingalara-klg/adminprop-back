@@ -2,15 +2,20 @@
 
 SDD: core/sdd_03_api_contracts.md §8 "Contratos".
 Implements: CA-03-01, 02, 03, 06, 08, CA-01-04 (issue #17);
-            CA-03-04, CA-03-05 (issue #18, RF-04).
+            CA-03-04, CA-03-05 (issue #18, RF-04);
+            CA-04-11, CA-04-12 (issue #104 -- libre deuda POR CONTRATO,
+            movido desde `modules/people`, ver `sdd_03` v1.10 §8).
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from adminprop.db.session import get_tenant_db_session
 from adminprop.modules.contracts.adjustment_schemas import (
     AdjustmentApplyRequest,
     AdjustmentListResponse,
@@ -20,7 +25,7 @@ from adminprop.modules.contracts.adjustment_service import (
     ContractAdjustmentService,
     get_contract_adjustment_service,
 )
-from adminprop.modules.contracts.repository import ContractFilters
+from adminprop.modules.contracts.repository import ContractFilters, ContractRepository
 from adminprop.modules.contracts.schemas import (
     ContractCreate,
     ContractListResponse,
@@ -207,6 +212,66 @@ async def list_contract_adjustments(
         raise NotFoundException()
     items = await adjustment_service.list_for_contract(contract_id, organization_id)
     return AdjustmentListResponse(data=items, meta={})
+
+
+@router.post(
+    "/{contract_id}/debt-certificate",
+    dependencies=[Depends(requires_permission("contract:read"))],
+)
+async def issue_contract_debt_certificate(
+    contract_id: UUID,
+    organization_id: UUID = Depends(get_current_tenant),
+    payload: JWTPayload = Depends(requires_permission("contract:read")),
+    contract_service: ContractService = Depends(get_contract_service),
+    session: AsyncSession = Depends(get_tenant_db_session),
+) -> Response:
+    """sdd_03 §8 + RF-08 (issue #104 -- movido desde `modules/people`,
+    decision del PO: el libre deuda es POR CONTRATO): emite el
+    certificado de libre deuda en PDF (SINCRONICO) -- CA-04-11 (sin
+    deuda, auditado como `debt_certificate.issued`), CA-04-12 (con
+    deuda -> `422 CONTRACT_HAS_DEBT` con el detalle en `details`, RN-P08).
+    Verifica SOLO los periodos de ESTE contrato -- no los de otros
+    contratos del mismo inquilino.
+
+    Permiso `contract:read` (no `renter:read`, ya que el recurso ahora
+    cuelga de `/contracts/:id`): emitir el certificado es una operacion
+    de lectura/reporte sobre el contrato, mismo criterio que
+    `GET /contracts/:id`/`GET /contracts/:id/adjustments`.
+
+    `DebtCertificateService`/`DebtService`/`RenterRepository`/
+    `PropertyRepository` se importan DIFERIDO -- ver el docstring de
+    `contracts/debt_certificate_service.py` para el ciclo de import que
+    evita (mismo criterio que documentaba `people/router.py.
+    issue_debt_certificate`, issue #24, ahora eliminado)."""
+    contract = await contract_service.get(contract_id, organization_id)
+    if contract is None:
+        # RN-D01: 404, no 403 -- no distingue "no existe" de "otra org".
+        raise NotFoundException()
+
+    from adminprop.modules.administracion.repository import AdministracionRepository
+    from adminprop.modules.contracts.debt_certificate_service import DebtCertificateService
+    from adminprop.modules.payments.repository import RentPeriodRepository
+    from adminprop.modules.payments.service import DebtService
+    from adminprop.modules.people.repository import RenterRepository
+    from adminprop.modules.properties.repository import PropertyRepository
+
+    debt_service = DebtService(RentPeriodRepository(session), AdministracionRepository(session))
+    certificate_service = DebtCertificateService(
+        contract_repo=ContractRepository(session),
+        renter_repo=RenterRepository(session),
+        property_repo=PropertyRepository(session),
+        admin_repo=AdministracionRepository(session),
+        debt_service=debt_service,
+        actor_user_id=payload.sub,
+    )
+    pdf_bytes = await certificate_service.issue(
+        contract_id, organization_id, today=datetime.now(tz=UTC).date()
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="libre-deuda-{contract_id}.pdf"'},
+    )
 
 
 @adjustments_router.get(

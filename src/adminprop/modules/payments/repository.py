@@ -228,15 +228,20 @@ class RentPeriodRepository:
         property_id: UUID | None = None,
         landlord_id: UUID | None = None,
         renter_id: UUID | None = None,
+        contract_id: UUID | None = None,
     ) -> list[RentPeriodCandidate]:
-        """RF-02 (panel del mes) + RF-06/CA-02-05 (deuda): candidatos crudos
-        del join, ordenados `created_at desc, id desc` (mismo criterio de
+        """RF-02 (panel del mes) + RF-06/CA-02-05 (deuda) + RF-08/RN-P08
+        (issue #104: libre deuda POR CONTRATO): candidatos crudos del
+        join, ordenados `created_at desc, id desc` (mismo criterio de
         orden que el resto de los listados del repo) -- `in_arrears`/
         `days_late`/`suggested_interest` y la paginacion por cursor las
         resuelve `service.py` porque dependen de `today`/`grace_day`
         (RN-P02/P03), no de columnas de la fila. `unpaid_only` filtra
         `status IN ('pending', 'partial')` -- usado por RF-06/CA-02-05
-        (solo interesan los periodos con deuda)."""
+        (solo interesan los periodos con deuda). `contract_id` acota a un
+        unico contrato -- usado por RF-08 (issue #104: el libre deuda
+        verifica SOLO los periodos de ESE contrato, no todos los del
+        inquilino)."""
         conditions: list[str] = []
         params: dict[str, object] = {"org_id": str(organization_id)}
         if period is not None:
@@ -256,6 +261,9 @@ class RentPeriodRepository:
         if renter_id is not None:
             conditions.append("c.renter_id = :renter_id")
             params["renter_id"] = str(renter_id)
+        if contract_id is not None:
+            conditions.append("c.id = :contract_id")
+            params["contract_id"] = str(contract_id)
 
         sql = self._CANDIDATE_SQL
         if conditions:

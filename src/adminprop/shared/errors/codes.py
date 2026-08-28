@@ -454,17 +454,22 @@ class EntityHasDependenciesException(AdminPropException):
     message = "El recurso tiene dependencias activas y no puede eliminarse."
 
 
-class RenterHasDebtException(AdminPropException):
-    """sdd_03 §"Codigos de Error Globales" -- 422 RENTER_HAS_DEBT.
+class ContractHasDebtException(AdminPropException):
+    """sdd_03 §"Codigos de Error Globales" -- 422 CONTRACT_HAS_DEBT.
 
-    Issue #24 (spec_module_04_cobranzas.md RF-08, RN-P08): `POST
-    /renters/:id/debt-certificate` sobre un inquilino con periodos
-    impagos o saldos parciales -- "con deuda -> 422 RENTER_HAS_DEBT con
-    el detalle de lo adeudado en `details`" (CA-04-12). El caller arma
-    `details` con la lista de deudas (`DebtEntry`, `modules/payments/
-    service.py`) serializada.
+    Issue #24 (spec_module_04_cobranzas.md RF-08, RN-P08), renombrada en
+    el issue #104 (decision del PO, 2026-08-28: el libre deuda es POR
+    CONTRATO -- un inquilino puede tener 2 contratos y deber en uno solo,
+    asi que `POST /contracts/:id/debt-certificate` verifica SOLO los
+    periodos de ESE contrato). Antes se llamaba `RenterHasDebtException`/
+    `RENTER_HAS_DEBT` -- se renombra (no se mantiene con semantica nueva)
+    porque el codigo debe reflejar el recurso real del que cuelga el
+    endpoint (decision documentada en `sdd_03` v1.10, `_index.md` #123).
+    "con deuda -> 422 CONTRACT_HAS_DEBT con el detalle de lo adeudado en
+    `details`" (CA-04-12). El caller arma `details` con el `DebtEntry`
+    (`modules/payments/service.py`) serializado.
     """
 
     status_code = 422
-    error_code = "RENTER_HAS_DEBT"
-    message = "El inquilino tiene deuda pendiente: no se puede emitir el libre deuda."
+    error_code = "CONTRACT_HAS_DEBT"
+    message = "El contrato tiene deuda pendiente: no se puede emitir el libre deuda."

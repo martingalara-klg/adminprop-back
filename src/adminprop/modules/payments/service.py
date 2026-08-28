@@ -642,6 +642,7 @@ class DebtService:
         landlord_id: UUID | None,
         renter_id: UUID | None,
         min_days: int | None,
+        contract_id: UUID | None = None,
     ) -> list[DebtEntry]:
         grace_day = await self._grace_day(organization_id)
         candidates = await self._repo.list_candidates(
@@ -649,6 +650,7 @@ class DebtService:
             unpaid_only=True,
             landlord_id=landlord_id,
             renter_id=renter_id,
+            contract_id=contract_id,
         )
 
         by_contract: dict[UUID, list[RentPeriodPanelEntry]] = {}
@@ -718,6 +720,26 @@ class DebtService:
             renter_id=renter_id,
             min_days=None,
         )
+
+    async def contract_debt(
+        self, contract_id: UUID, organization_id: UUID, *, today: date
+    ) -> DebtEntry | None:
+        """RF-08 (issue #104, RN-P08): libre deuda POR CONTRATO -- decision
+        del PO (2026-08-28): un inquilino puede tener 2 contratos y deber
+        en uno solo, asi que el certificado verifica SOLO los periodos de
+        ESE contrato (nunca los otros contratos del mismo inquilino).
+        Devuelve `None` cuando el contrato no tiene periodos impagos ni
+        saldos parciales; a lo sumo un `DebtEntry` porque `_aggregate` ya
+        agrupa por `contract_id`."""
+        entries = await self._aggregate(
+            organization_id=organization_id,
+            today=today,
+            landlord_id=None,
+            renter_id=None,
+            min_days=None,
+            contract_id=contract_id,
+        )
+        return entries[0] if entries else None
 
 
 def get_debt_service(
