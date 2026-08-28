@@ -151,6 +151,24 @@ async def test_ca_14_check_properties_status_rechaza_valor_invalido():
     )
 
 
+async def test_ca_01_10_check_property_type_incluye_los_6_valores_del_catalogo():
+    """CA-01-10 (issue #103): CHECK de `properties.property_type` incluye los
+    6 valores del catalogo cerrado -- departamento/casa/duplex/local/
+    cochera/otro (decision #122, migracion 20260828_123003)."""
+    engine = get_engine()
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            sa.text(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conrelid = 'properties'::regclass AND contype = 'c'"
+            )
+        )
+        check_defs = [row[0] for row in result]
+    property_type_def = next(d for d in check_defs if "property_type" in d)
+    for value in ("departamento", "casa", "duplex", "local", "cochera", "otro"):
+        assert value in property_type_def
+
+
 async def test_ca_14_check_service_type_incluye_los_7_valores_del_spec():
     """CHECK: `property_service_accounts.service_type` incluye los 7 valores
     del spec (rentas, municipalidad, luz, gas, agua, expensas, otro)."""

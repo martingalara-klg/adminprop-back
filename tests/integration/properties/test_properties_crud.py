@@ -119,6 +119,107 @@ class TestCA0101CreatePropertyAppearsInListingAndLandlordFicha:
         assert response.json()["error"]["field"] == "landlord_id"
 
 
+class TestCA0110PropertyTypeClosedCatalog:
+    """CA-01-10 (issue #103, decision #122): `property_type` es un
+    catalogo cerrado que ahora incluye `duplex`; un valor inventado se
+    rechaza."""
+
+    async def test_ca_01_10_create_property_with_duplex_type_is_accepted(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
+
+        response = await client.post(
+            "/v1/properties",
+            json={
+                "address": "Av. Duplex 456",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+                "property_type": "duplex",
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 201
+        assert response.json()["data"]["property_type"] == "duplex"
+
+    async def test_ca_01_10_update_property_type_to_duplex_is_accepted(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
+        created = await client.post(
+            "/v1/properties",
+            json={
+                "address": "Pasa a duplex 789",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+                "property_type": "casa",
+            },
+            headers=owner["headers"],
+        )
+        property_id = created.json()["data"]["id"]
+
+        response = await client.patch(
+            f"/v1/properties/{property_id}",
+            json={"property_type": "duplex"},
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["property_type"] == "duplex"
+
+    async def test_ca_01_10_create_property_with_invented_type_returns_400(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
+
+        response = await client.post(
+            "/v1/properties",
+            json={
+                "address": "Tipo inventado 000",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+                "property_type": "castillo",
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    async def test_ca_01_10_update_property_with_invented_type_returns_400(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
+        created = await client.post(
+            "/v1/properties",
+            json={
+                "address": "Tipo invalido en patch 111",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
+            headers=owner["headers"],
+        )
+        property_id = created.json()["data"]["id"]
+
+        response = await client.patch(
+            f"/v1/properties/{property_id}",
+            json={"property_type": "castillo"},
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
 class TestCA0108NeighborhoodRequiredOnProperties:
     """CA-01-08 (issue #99): `neighborhood_id` obligatorio en create/update;
     propiedades legacy sin barrio siguen legibles."""
