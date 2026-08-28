@@ -45,12 +45,16 @@ class ContractCreate(BaseModel):
     adjustment_index: AdjustmentIndex | None = Field(None)
     adjustment_index_notes: str | None = Field(None)
     notes: str | None = Field(None)
-    # RN-08/RN-C06 (issue #100): alta de contrato en curso -- opcionales,
-    # solo validos juntos (`_validate_current_amount_pair`). Aplican a ARS
-    # y USD por igual (RN-03/RN-C02 solo excluye a USD del ajuste
-    # PERIODICO automatico, no de esta declaracion puntual).
+    # RN-08/RN-C06 v2 (issue #107, supersede parcialmente el issue #100):
+    # alta de contrato en curso -- DOS mecanismos mutuamente excluyentes
+    # segun `adjustment_frequency_months` (`_validate_historical_amounts_shape`):
+    # `historical_amounts[]` (con frecuencia -- cadena guiada de tramos) o
+    # `current_amount`/`current_amount_since` (sin frecuencia -- USD
+    # siempre, o ARS sin ajuste -- comportamiento del issue #100, sin
+    # cambios).
     current_amount: Decimal | None = Field(None, gt=0)
     current_amount_since: date | None = Field(None)
+    historical_amounts: list[Decimal] | None = Field(None)
 
     @model_validator(mode="after")
     def _validate_date_range(self) -> ContractCreate:
@@ -62,7 +66,7 @@ class ContractCreate(BaseModel):
 
     @model_validator(mode="after")
     def _validate_current_amount_pair(self) -> ContractCreate:
-        # RN-08/RN-C06, CA-03-15: `current_amount`/`current_amount_since`
+        # RN-08/RN-C06 v2, CA-03-15: `current_amount`/`current_amount_since`
         # solo son validos juntos -- uno sin el otro es 400
         # VALIDATION_ERROR (mismo criterio de shape-validation que
         # `_validate_usd_no_adjustment`).
@@ -71,6 +75,14 @@ class ContractCreate(BaseModel):
         if has_amount != has_since:
             raise ValueError("current_amount y current_amount_since solo son validos juntos.")
         if has_since:
+            # CA-03-15 (issue #107): con `adjustment_frequency_months`
+            # configurado, este mecanismo quedo superado por
+            # `historical_amounts[]` -- ya no se acepta.
+            if self.adjustment_frequency_months is not None:
+                raise ValueError(
+                    "current_amount/current_amount_since no aplican a un contrato con "
+                    "adjustment_frequency_months configurado; usar historical_amounts."
+                )
             # RN-08/RN-C06: `current_amount_since` se normaliza al dia 1
             # de su mes (mismo criterio que `due_period` de
             # ContractAdjustment, CHECK date_trunc de la migracion #16).
@@ -81,6 +93,32 @@ class ContractCreate(BaseModel):
             # `ContractOverlapException`, que tampoco vive en Pydantic).
             self.current_amount_since = date(
                 self.current_amount_since.year, self.current_amount_since.month, 1
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_historical_amounts_shape(self) -> ContractCreate:
+        # RN-08/RN-C06 v2 (issue #107), CA-03-14: `historical_amounts[]`
+        # solo aplica a un contrato CON `adjustment_frequency_months`
+        # configurado -- sin frecuencia no hay nocion de "tramo". La
+        # cantidad EXACTA esperada (depende de `start_date` + hoy) se
+        # valida en `service.py.create`, no aca (necesita "hoy", mismo
+        # criterio que `current_amount_since <= hoy`); aca solo shape:
+        # cada elemento > 0 y al menos 2 (1 elemento equivaldria a un alta
+        # normal -- no corresponde declararlo, CA-03-11).
+        if self.historical_amounts is None:
+            return self
+        if self.adjustment_frequency_months is None:
+            raise ValueError(
+                "historical_amounts solo aplica a un contrato con "
+                "adjustment_frequency_months configurado."
+            )
+        if any(amount <= 0 for amount in self.historical_amounts):
+            raise ValueError("Todos los valores de historical_amounts deben ser > 0.")
+        if len(self.historical_amounts) < 2:
+            raise ValueError(
+                "historical_amounts debe tener al menos 2 elementos (original + al menos un "
+                "tramo transcurrido); si el contrato recien arranco, no corresponde enviarlo."
             )
         return self
 

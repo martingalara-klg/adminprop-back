@@ -28,6 +28,11 @@ from adminprop.modules.contracts.adjustment_repository import (
     ContractAdjustmentRepository,
     get_contract_adjustment_repository,
 )
+from adminprop.modules.contracts.historical_amounts import (
+    build_synthetic_chain,
+    expected_tramo_count,
+    tramo_ranges,
+)
 from adminprop.modules.contracts.models import Contract
 from adminprop.modules.contracts.monthly_amounts import (
     AppliedAdjustment,
@@ -54,6 +59,7 @@ from adminprop.shared.errors.codes import (
     InvalidDateRangeException,
     InvalidStatusTransitionException,
     NotFoundException,
+    ValidationError,
 )
 from adminprop.shared.notifications import service as notifications_service
 
@@ -93,6 +99,7 @@ class ContractService:
         notes: str | None,
         current_amount: Decimal | None = None,
         current_amount_since: date | None = None,
+        historical_amounts: list[Decimal] | None = None,
         actor_user_id: UUID | None = None,
     ):
         """RF-02 + CA-03-01/03: `property_id`/`renter_id` validados contra
@@ -119,14 +126,24 @@ class ContractService:
                 field="start_date", details={"conflicting_contract_id": str(conflicting.id)}
             )
 
-        # RN-08/RN-C06 (issue #100): alta de contrato en curso. El par
-        # esta-o-no-esta y la normalizacion al dia 1 de su mes ya los
-        # resolvio `ContractCreate` a nivel Pydantic
-        # (`_validate_current_amount_pair`). CA-03-14: ambos extremos del
-        # rango -- `>= start_date` y `<= hoy` -- son 400
-        # INVALID_DATE_RANGE (no VALIDATION_ERROR generico), asi que
-        # ambos se validan aca con el mismo `error.code`.
+        # RN-08/RN-C06 v2 (issue #107, supersede parcialmente el issue
+        # #100): alta de contrato en curso. Dos mecanismos mutuamente
+        # excluyentes segun `adjustment_frequency_months`, ya enforzados a
+        # nivel de shape por `ContractCreate` (Pydantic). Este bloque
+        # resuelve las validaciones que necesitan estado/"hoy" y arma el
+        # monto de arranque final del contrato -- `final_current_amount`
+        # va al INSERT de `contracts` (una sola escritura, sin importar el
+        # mecanismo).
+        final_current_amount = current_amount
+        synthetic_chain: list[tuple[date, Decimal, Decimal]] = []
+
         if current_amount is not None and current_amount_since is not None:
+            # Camino sin `adjustment_frequency_months` (USD siempre; ARS
+            # sin ajuste) -- comportamiento del issue #100, sin cambios.
+            # CA-03-14: ambos extremos del rango -- `>= start_date` y
+            # `<= hoy` -- son 400 INVALID_DATE_RANGE (no VALIDATION_ERROR
+            # generico), asi que ambos se validan aca con el mismo
+            # `error.code`.
             if current_amount_since < start_date:
                 raise InvalidDateRangeException(
                     field="current_amount_since",
@@ -143,6 +160,67 @@ class ContractService:
                     message="current_amount_since no puede ser posterior a hoy.",
                     details={"current_amount_since": current_amount_since.isoformat()},
                 )
+            synthetic_chain = [(current_amount_since, initial_amount, current_amount)]
+
+        elif historical_amounts is not None:
+            # Camino con `adjustment_frequency_months` configurado (v2,
+            # issue #107) -- cadena guiada de tramos. CA-03-13: el primer
+            # valor debe coincidir con `initial_amount` (es el monto del
+            # tramo 0, ya declarado por ese campo).
+            if historical_amounts[0] != initial_amount:
+                raise ValidationError(
+                    field="historical_amounts",
+                    message="historical_amounts[0] debe ser igual a initial_amount.",
+                    details={
+                        "historical_amounts_0": str(historical_amounts[0]),
+                        "initial_amount": str(initial_amount),
+                    },
+                )
+            # CA-03-09/10/11/12: cantidad exacta de tramos transcurridos
+            # (necesita "hoy" -- por eso se valida aca, no en Pydantic,
+            # mismo criterio que `current_amount_since <= hoy`).
+            today = datetime.now(UTC).date()
+            expected_count = expected_tramo_count(
+                start_date=start_date,
+                adjustment_frequency_months=adjustment_frequency_months,
+                today=today,
+            )
+            if len(historical_amounts) != expected_count:
+                ranges = tramo_ranges(
+                    start_date=start_date,
+                    adjustment_frequency_months=adjustment_frequency_months,
+                    count=expected_count,
+                )
+                raise ValidationError(
+                    field="historical_amounts",
+                    message=(
+                        f"Se esperan {expected_count} valores en historical_amounts "
+                        f"({expected_count} tramos transcurridos desde {start_date.isoformat()} "
+                        f"con ajuste cada {adjustment_frequency_months} meses), "
+                        f"se recibieron {len(historical_amounts)}."
+                    ),
+                    details={
+                        "expected_count": expected_count,
+                        "received_count": len(historical_amounts),
+                        "tramos": [
+                            {
+                                "index": tramo.index,
+                                "start": tramo.start.isoformat(),
+                                "end": tramo.end.isoformat(),
+                            }
+                            for tramo in ranges
+                        ],
+                    },
+                )
+            final_current_amount = historical_amounts[-1]
+            chain = build_synthetic_chain(
+                start_date=start_date,
+                adjustment_frequency_months=adjustment_frequency_months,
+                historical_amounts=historical_amounts,
+            )
+            synthetic_chain = [
+                (link.due_period, link.previous_amount, link.new_amount) for link in chain
+            ]
 
         row = await self._repo.create(
             organization_id=organization_id,
@@ -157,22 +235,24 @@ class ContractService:
             adjustment_index=adjustment_index,
             adjustment_index_notes=adjustment_index_notes,
             notes=notes,
-            current_amount=current_amount,
+            current_amount=final_current_amount,
         )
 
-        if current_amount is not None and current_amount_since is not None:
-            # RN-08/RN-C06, CA-03-11: ajuste sintetico "applied" de carga
-            # inicial -- MISMA transaccion que el INSERT del contrato (si
-            # algo falla, ninguno de los dos queda a medias). Ancla de
+        if synthetic_chain:
+            # RN-08/RN-C06 v2, CA-03-09/10/11: ajuste(s) sintetico(s)
+            # "applied" de carga inicial -- MISMA transaccion que el
+            # INSERT del contrato (si algo falla, nada de esto queda a
+            # medias). El ULTIMO de la cadena es el ancla de
             # `detect_due_adjustments` (RN-C03) sin tocar esa logica.
-            await self._adjustment_repo.create_applied_initial(
-                organization_id=organization_id,
-                contract_id=row.id,
-                due_period=current_amount_since,
-                previous_amount=initial_amount,
-                new_amount=current_amount,
-                actor_user_id=actor_user_id,
-            )
+            for due_period, previous_amount, new_amount in synthetic_chain:
+                await self._adjustment_repo.create_applied_initial(
+                    organization_id=organization_id,
+                    contract_id=row.id,
+                    due_period=due_period,
+                    previous_amount=previous_amount,
+                    new_amount=new_amount,
+                    actor_user_id=actor_user_id,
+                )
             await audit(
                 self._repo.session,
                 organization_id=organization_id,
@@ -181,8 +261,8 @@ class ContractService:
                 entity_id=row.id,
                 before={"current_amount": str(initial_amount)},
                 after={
-                    "current_amount": str(current_amount),
-                    "current_amount_since": current_amount_since.isoformat(),
+                    "current_amount": str(final_current_amount),
+                    "synthetic_adjustments": len(synthetic_chain),
                 },
                 user_id=actor_user_id,
             )
