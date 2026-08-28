@@ -182,7 +182,15 @@ async def terminate_contract(
     contract_id: UUID,
     dto: ContractTerminateRequest,
     organization_id: UUID = Depends(get_current_tenant),
-    payload: JWTPayload = Depends(requires_permission("contract:manage")),
+    # RN-A (accesos) + sdd_03 v1.11, decision #124 (issue #105, feedback
+    # #2 del PO): terminar un contrato pasa a ser exclusivo de `owner` --
+    # permiso dedicado `contract:terminate`, ya no `contract:manage`
+    # (que `admin` sigue teniendo para el resto del ciclo de vida del
+    # contrato: crear, actualizar, activar). Mismo criterio que
+    # `landlord:set-commission` (decision #116, issue #51), pero acá el
+    # chequeo vive en el router -- no condicional por campo -- porque
+    # este endpoint es una accion completa dedicada, no un PATCH parcial.
+    payload: JWTPayload = Depends(requires_permission("contract:terminate")),
     service: ContractService = Depends(get_contract_service),
 ) -> ContractResponse:
     """RF-03 + CA-03-08: `active -> terminated` con motivo; la propiedad

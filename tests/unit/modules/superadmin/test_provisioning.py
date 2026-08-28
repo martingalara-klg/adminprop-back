@@ -51,6 +51,7 @@ class TestRoleProvisioningCatalog:
             "role:read",
             "organization:configure",
             "landlord:set-commission",
+            "contract:terminate",
         }
         assert set(ADMIN_PERMISSIONS) == set(ALL_PERMISSIONS) - excluded
         assert excluded.isdisjoint(ADMIN_PERMISSIONS)
@@ -61,6 +62,15 @@ class TestRoleProvisioningCatalog:
         assert "landlord:set-commission" in ALL_PERMISSIONS
         assert "landlord:set-commission" not in ADMIN_PERMISSIONS
         assert "landlord:set-commission" in OWNER_PERMISSIONS
+
+    def test_admin_excludes_contract_terminate(self):
+        """Issue #105, decision #124: terminar un contrato es exclusivo
+        de `owner` -- sdd_03 v1.11 §"Catalogo de Permisos". `admin`
+        conserva `contract:manage` para el resto del ciclo de vida."""
+        assert "contract:terminate" in ALL_PERMISSIONS
+        assert "contract:terminate" not in ADMIN_PERMISSIONS
+        assert "contract:terminate" in OWNER_PERMISSIONS
+        assert "contract:manage" in ADMIN_PERMISSIONS
 
     def test_maintenance_is_scoped_to_work_orders_attachments_and_own_notifications(self):
         """Issue #31: agrega `notification:read` -- sdd_03 §"Resumen de

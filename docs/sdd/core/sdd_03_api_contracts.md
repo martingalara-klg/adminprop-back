@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.10
+version: 1.11
 fecha: 2026-08-28
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.10
+**Versión:** 1.11
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -80,9 +80,11 @@ El frontend discrimina por `error.code`, muestra `error.message`, asocia `error.
 
 Permisos atómicos (`recurso:acción`) portados en `permissions[]` del JWT:
 
-`landlord:read` `landlord:manage` `landlord:set-commission` · `renter:read` `renter:manage` · `property:read` `property:manage` · `contract:read` `contract:manage` · `adjustment:apply` · `rent-period:read` · `payment:create` `payment:void` · `charge:manage` · `settlement:read` `settlement:generate` `settlement:issue` · `work-order:read` `work-order:create` `work-order:quote` `work-order:approve` `work-order:close` `work-order:cancel` · `attachment:manage` · `user:manage` `role:read` `organization:configure` · `audit:read` · `notification:read`
+`landlord:read` `landlord:manage` `landlord:set-commission` · `renter:read` `renter:manage` · `property:read` `property:manage` · `contract:read` `contract:manage` `contract:terminate` · `adjustment:apply` · `rent-period:read` · `payment:create` `payment:void` · `charge:manage` · `settlement:read` `settlement:generate` `settlement:issue` · `work-order:read` `work-order:create` `work-order:quote` `work-order:approve` `work-order:close` `work-order:cancel` · `attachment:manage` · `user:manage` `role:read` `organization:configure` · `audit:read` · `notification:read`
 
 > `landlord:set-commission` (agregado v1.5, issue #51): permiso atómico exclusivo de `owner` para cambiar `commission_pct` de un propietario — reemplaza el chequeo previo por nombre de rol (`payload.role`). `admin` conserva `landlord:manage` (ABM completo salvo este campo).
+
+> `contract:terminate` (agregado v1.11, issue #105, decisión #124): permiso atómico exclusivo de `owner` para terminar un contrato (`POST /contracts/:id/terminate`). `admin` conserva `contract:manage` (ABM completo del contrato salvo terminarlo) — mismo patrón que `landlord:set-commission`: un endpoint/acción completa exigido por `Depends(requires_permission("contract:terminate"))` en el router, en vez del chequeo condicional por campo que usa `landlord:set-commission`.
 
 ## Resumen de Autorización por Recurso
 
@@ -247,7 +249,7 @@ POST   /contracts                        (valida CONTRACT_OVERLAP, RN-C02, RN-C0
 GET    /contracts/:id
 PATCH  /contracts/:id                    (solo notes/metadata; montos NUNCA — RN-C04)
 POST   /contracts/:id/activate           (draft → active; genera el rent_period del mes en curso si corresponde)
-POST   /contracts/:id/terminate          (active → terminated; body: { reason })
+POST   /contracts/:id/terminate          (active → terminated; body: { reason }; permiso contract:terminate, solo owner)
 GET    /contracts/:id/adjustments        (historial de ajustes)
 POST   /contracts/:id/debt-certificate   (emite el certificado de libre deuda en PDF — RN-P08; verifica SOLO los períodos de ESE contrato; con deuda → 422 CONTRACT_HAS_DEBT con el detalle en details; permiso contract:read)
 GET    /adjustments                      (?status=pending — bandeja de ajustes que tocan)
@@ -255,6 +257,8 @@ POST   /adjustments/:id/apply            (body: { pct }; pending → applied; re
 ```
 
 **`POST /contracts/:id/debt-certificate` — issue #104, decisión #123 (RN-P08, `spec_module_04` RF-08):** reemplaza a `POST /renters/:id/debt-certificate` (eliminado). Decisión del PO (2026-08-28): el libre deuda es conceptualmente **por contrato** — un inquilino puede alquilar 2 propiedades (ej: comercial) y deber en una sí y en otra no, así que el certificado se emite desde el contrato y verifica SOLO los períodos de ESE contrato (nunca los de otros contratos del mismo inquilino). El PDF (sincrónico) incluye encabezado de la administradora, inquilino, propiedad y fecha de emisión del contrato puntual. Permiso `contract:read` (no `renter:read`): mismo criterio que el resto de los endpoints de lectura de `/contracts/:id`. El error pasa de `RENTER_HAS_DEBT` a `CONTRACT_HAS_DEBT` (renombrado, no reutilizado con semántica nueva — ver §Códigos de Error Globales).
+
+**`POST /contracts/:id/terminate` — issue #105, decisión #124 (RN-A, `spec_module_03`):** feedback #2 del PO — terminar un contrato pasa a ser exclusivo de `owner` (hasta ahora, `contract:manage` se lo permitía también a `admin`). Se agrega el permiso atómico dedicado `contract:terminate` al catálogo, sembrado SOLO en el rol `owner` (`admin` conserva `contract:manage` para el resto del ciclo de vida del contrato — crear, actualizar, activar). Mismo patrón que `landlord:set-commission` (decisión #116): migración de backfill agrega el permiso al rol `owner` de organizaciones ya existentes.
 
 **`POST /contracts` — issue #100, decisión #121 (RN-C06, `sdd_02` §3):** el body acepta dos campos opcionales adicionales, `current_amount` (decimal > 0) y `current_amount_since` (fecha), **solo válidos juntos** — enviar uno sin el otro es `400 VALIDATION_ERROR`. Aplican tanto a contratos ARS como USD. Si vienen: la respuesta trae `current_amount` igual al valor declarado (no a `initial_amount`) y el historial (`GET /contracts/:id/adjustments`) incluye el ajuste sintético `applied` de carga inicial (RN-C06). Validaciones de fecha (`current_amount_since`, ya normalizado al día 1 de su mes, debe ser `>= start_date` y `<= hoy`) responden `400 INVALID_DATE_RANGE` con `field: "current_amount_since"`.
 
