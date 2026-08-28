@@ -2,12 +2,12 @@
 name: AdminProp — Especificación del Modelo de Datos
 description: Tablas físicas PostgreSQL (23 tablas en 8 capas), RLS, índices, orden de migración, seed data y convenciones de nomenclatura
 type: project
-version: 1.2
-fecha: 2026-08-27
+version: 1.3
+fecha: 2026-08-28
 ---
 # AdminProp — Especificación del Modelo de Datos
 
-**Versión:** 1.2
+**Versión:** 1.3
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -204,7 +204,7 @@ CREATE UNIQUE INDEX uq_neighborhoods_org_name ON neighborhoods (organization_id,
 | landlord_id | UUID | NOT NULL, FK → landlords | |
 | neighborhood_id | UUID | NULL, FK → neighborhoods | **Nullable en DB** (datos legacy preexistentes a issue #99) — **obligatorio en la API** para create/update de ahora en más |
 | address | TEXT | NOT NULL | Dirección completa |
-| property_type | TEXT | NOT NULL DEFAULT `'departamento'` | Texto sugerido en UI: departamento, casa, local, cochera, otro |
+| property_type | TEXT | NOT NULL DEFAULT `'departamento'` CHECK IN (`departamento`,`casa`,`duplex`,`local`,`cochera`,`otro`) | Catálogo cerrado (decisión #122, issue #103) — antes texto libre sugerido en UI, sin CHECK |
 | status | TEXT | NOT NULL DEFAULT `'available'` CHECK IN (`available`,`rented`,`unavailable`) | `rented` ⟺ contrato activo |
 | notes | TEXT | | |
 | metadata | JSONB | DEFAULT `'{}'` | |

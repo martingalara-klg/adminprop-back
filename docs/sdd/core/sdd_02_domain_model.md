@@ -2,12 +2,12 @@
 name: AdminProp — Modelo de Dominio
 description: Entidades del dominio de gestión de alquileres, invariantes (RN-C, RN-P, RN-L, RN-A, RN-D), relaciones y glosario unificado
 type: project
-version: 1.4
-fecha: 2026-08-27
+version: 1.5
+fecha: 2026-08-28
 ---
 # AdminProp — Modelo de Dominio
 
-**Versión:** 1.4
+**Versión:** 1.5
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -144,7 +144,7 @@ El inmueble administrado. Pertenece a un propietario.
 | landlord_id | UUID | FK a Propietario — obligatorio |
 | neighborhood_id | UUID | FK a Barrio — **nullable en DB** (datos legacy preexistentes a issue #99), **obligatorio en la API** para create/update de propiedades de ahora en más |
 | address | texto | Dirección completa |
-| property_type | texto | Departamento, casa, local, cochera, otro (catálogo simple) |
+| property_type | enum | `departamento` \| `casa` \| `duplex` \| `local` \| `cochera` \| `otro` (catálogo cerrado, decisión #122, issue #103) |
 | status | enum | `available` \| `rented` \| `unavailable` |
 | notes | texto | Observaciones |
 
@@ -152,6 +152,7 @@ El inmueble administrado. Pertenece a un propietario.
 - `status = rented` ⟺ existe un contrato `active` sobre la propiedad.
 - Una propiedad con historial (contratos, cobros, reparaciones) no se elimina físicamente; soft delete.
 - `neighborhood_id` es obligatorio en el alta/edición vía API (decisión del PO, issue #99); las propiedades creadas antes de esta feature pueden tener `neighborhood_id = NULL` y siguen siendo legibles — la obligatoriedad rige solo hacia adelante.
+- `property_type` es un catálogo cerrado (`CHECK` en DB) desde la decisión #122 (issue #103, ronda de feedback #2 del PO); antes de esa decisión era texto libre sugerido en UI, sin restricción a nivel de base de datos.
 
 ---
 
