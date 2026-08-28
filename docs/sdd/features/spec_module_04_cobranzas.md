@@ -2,12 +2,12 @@
 name: AdminProp — Módulo 4 — Cobranzas y Mora
 description: Generación mensual de alquileres pendientes, registro de cobros (medio, moneda, TC, destino), mora sugerida con perdón total/parcial, pagos parciales y estado de deuda
 type: project
-version: 1.1
-fecha: 2026-08-11
+version: 1.2
+fecha: 2026-08-28
 ---
 # Módulo 4 — Cobranzas y Mora
 
-**Versión:** 1.1 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-06
+**Versión:** 1.2 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-06
 
 ## Propósito
 
@@ -69,11 +69,12 @@ El flujo de plata que entra: cada mes el sistema genera los alquileres pendiente
 - Sobre un cobro anulado no se emite recibo (`422 BUSINESS_RULE_VIOLATION`).
 - Es **opcional**: la UI ofrece "Descargar recibo" después de registrar el cobro; no es un paso obligatorio del flujo (RN-P08).
 
-### RF-08 — Certificado de libre deuda
+### RF-08 — Certificado de libre deuda (POR CONTRATO)
 
-- `POST /renters/:id/debt-certificate` emite el **libre deuda en PDF** (sincrónico): encabezado de la administradora, datos del inquilino, sus contratos/propiedades y fecha de emisión.
-- **Solo se emite si el inquilino no registra períodos impagos ni saldos parciales** en ninguno de sus contratos (RN-P08). Con deuda → `422 RENTER_HAS_DEBT` con el detalle de lo adeudado en `details`.
-- Cada emisión queda como Adjunto del inquilino y registrada en el log de auditoría (`debt_certificate.issued`).
+- `POST /contracts/:id/debt-certificate` emite el **libre deuda en PDF** (sincrónico): encabezado de la administradora, inquilino, propiedad del contrato puntual y fecha de emisión.
+- Decisión del PO (issue #104, 2026-08-28): el libre deuda es **conceptualmente por contrato** — un inquilino puede alquilar 2 propiedades (ej: comercial) y deber en una sí y en otra no. **Solo se emite si ESE contrato no registra períodos impagos ni saldos parciales** (RN-P08) — verifica exclusivamente los períodos del contrato del path, nunca los de otros contratos del mismo inquilino. Con deuda → `422 CONTRACT_HAS_DEBT` con el detalle de lo adeudado en `details`.
+- Cada emisión queda como Adjunto del contrato y registrada en el log de auditoría (`debt_certificate.issued`, `entity_type = "contract"`).
+- Reemplaza a `POST /renters/:id/debt-certificate` (issue #24, eliminado en el #104).
 
 ## Reglas de Negocio (del módulo)
 
@@ -103,8 +104,8 @@ El flujo de plata que entra: cada mes el sistema genera los alquileres pendiente
 - [ ] **CA-04-08:** Un cobro con destino "cuenta del propietario" aparece en la liquidación como "ya rendido": descuenta del neto pero paga comisión (verificable en Módulo 5).
 - [ ] **CA-04-09:** El estado de deuda muestra por inquilino los períodos adeudados con saldo, días de mora e interés sugerido acumulado, filtrable por antigüedad.
 - [ ] **CA-04-10:** Tras registrar un cobro se puede descargar su recibo PDF con capital, interés, TC (si aplicó) y el encabezado de la administradora; un cobro anulado no emite recibo.
-- [ ] **CA-04-11:** Un inquilino sin deuda obtiene su certificado de libre deuda en PDF, y la emisión queda auditada.
-- [ ] **CA-04-12:** Un inquilino con períodos impagos o saldos parciales recibe `422 RENTER_HAS_DEBT` con el detalle de lo adeudado.
+- [ ] **CA-04-11:** Un contrato sin deuda obtiene su certificado de libre deuda en PDF, y la emisión queda auditada.
+- [ ] **CA-04-12:** Un contrato con períodos impagos o saldos parciales recibe `422 CONTRACT_HAS_DEBT` con el detalle de lo adeudado. Un inquilino con 2 contratos, con deuda en uno solo, obtiene el libre deuda del contrato sin deuda; el otro contrato sigue rechazando.
 
 ## Integraciones
 

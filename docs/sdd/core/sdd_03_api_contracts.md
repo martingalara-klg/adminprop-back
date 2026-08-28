@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.7
-fecha: 2026-08-25
+version: 1.13
+fecha: 2026-08-28
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.7
+**Versión:** 1.13
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -61,10 +61,10 @@ El frontend discrimina por `error.code`, muestra `error.message`, asocia `error.
 `INVITATION_NOT_FOUND` (404) · `INVITATION_EXPIRED` (410) · `INVITATION_ALREADY_ACCEPTED` (409) · `INVITATION_PENDING_EXISTS` (409) · `USER_ALREADY_MEMBER` (409) · `LAST_OWNER_REQUIRED` (422) · `ROLE_NOT_FOUND` (404) · `SYSTEM_ROLE_IMMUTABLE` (422) · `RESET_TOKEN_EXPIRED` (410, agregado issue #8 — `GET/POST /auth/reset-password/:token`; token existió pero venció su ventana de 1h. El caso "nunca existió / ya usado" usa el `NOT_FOUND` genérico de arriba)
 
 **Contratos:**
-`CONTRACT_OVERLAP` (409, con `details.conflicting_contract_id`) · `CONTRACT_NOT_ACTIVE` (422) · `ADJUSTMENT_PENDING_EXISTS` (409) · `ADJUSTMENT_ALREADY_APPLIED` (409) · `ADJUSTMENT_PCT_REQUIRED` (400)
+`CONTRACT_OVERLAP` (409, con `details.conflicting_contract_id`) · `CONTRACT_NOT_ACTIVE` (422) · `ADJUSTMENT_PENDING_EXISTS` (409) · `ADJUSTMENT_ALREADY_APPLIED` (409) · `ADJUSTMENT_PCT_REQUIRED` (400) · `CONTRACT_HAS_DEBT` (422, `POST /contracts/:id/debt-certificate`, con el detalle de lo adeudado del contrato en `details` — issue #104, renombrado desde `RENTER_HAS_DEBT`: el libre deuda es por contrato, no por inquilino)
 
 **Cobranzas:**
-`RENT_PERIOD_ALREADY_PAID` (422) · `PAYMENT_EXCEEDS_CONTRACT_BALANCE` (422) · `EXCHANGE_RATE_REQUIRED` (400) · `PAYMENT_ALREADY_VOIDED` (409) · `RENTER_HAS_DEBT` (422, con el detalle de lo adeudado en `details`)
+`RENT_PERIOD_ALREADY_PAID` (422) · `PAYMENT_EXCEEDS_CONTRACT_BALANCE` (422) · `EXCHANGE_RATE_REQUIRED` (400) · `PAYMENT_ALREADY_VOIDED` (409)
 
 **Liquidaciones:**
 `SETTLEMENT_ALREADY_EXISTS` (409) · `SETTLEMENT_EXCHANGE_RATE_REQUIRED` (400) · `CHARGE_ENTRY_ALREADY_EXISTS` (409)
@@ -80,9 +80,11 @@ El frontend discrimina por `error.code`, muestra `error.message`, asocia `error.
 
 Permisos atómicos (`recurso:acción`) portados en `permissions[]` del JWT:
 
-`landlord:read` `landlord:manage` `landlord:set-commission` · `renter:read` `renter:manage` · `property:read` `property:manage` · `contract:read` `contract:manage` · `adjustment:apply` · `rent-period:read` · `payment:create` `payment:void` · `charge:manage` · `settlement:read` `settlement:generate` `settlement:issue` · `work-order:read` `work-order:create` `work-order:quote` `work-order:approve` `work-order:close` `work-order:cancel` · `attachment:manage` · `user:manage` `role:read` `organization:configure` · `audit:read` · `notification:read`
+`landlord:read` `landlord:manage` `landlord:set-commission` · `renter:read` `renter:manage` · `property:read` `property:manage` · `contract:read` `contract:manage` `contract:terminate` · `adjustment:apply` · `rent-period:read` · `payment:create` `payment:void` · `charge:manage` · `settlement:read` `settlement:generate` `settlement:issue` · `work-order:read` `work-order:create` `work-order:quote` `work-order:approve` `work-order:close` `work-order:cancel` · `attachment:manage` · `user:manage` `role:read` `organization:configure` · `audit:read` · `notification:read`
 
 > `landlord:set-commission` (agregado v1.5, issue #51): permiso atómico exclusivo de `owner` para cambiar `commission_pct` de un propietario — reemplaza el chequeo previo por nombre de rol (`payload.role`). `admin` conserva `landlord:manage` (ABM completo salvo este campo).
+
+> `contract:terminate` (agregado v1.11, issue #105, decisión #124): permiso atómico exclusivo de `owner` para terminar un contrato (`POST /contracts/:id/terminate`). `admin` conserva `contract:manage` (ABM completo del contrato salvo terminarlo) — mismo patrón que `landlord:set-commission`: un endpoint/acción completa exigido por `Depends(requires_permission("contract:terminate"))` en el router, en vez del chequeo condicional por campo que usa `landlord:set-commission`.
 
 ## Resumen de Autorización por Recurso
 
@@ -205,19 +207,77 @@ GET    /properties/:id/work-orders                      (historial de reparacion
 GET    /properties/:id/recurring-charges                POST   /properties/:id/recurring-charges
 ```
 
+- `GET /properties` acepta `?neighborhood_id=` como filtro adicional (issue #99).
+- `POST /properties` y `PATCH /properties/:id` requieren `neighborhood_id` (`VALIDATION_ERROR` si falta en el `POST`; en `PATCH` solo si el campo viene en el body — parcial). `neighborhood_id` inexistente o de otra organización → `404 NOT_FOUND` con `field: "neighborhood_id"` (mismo criterio que `landlord_id`, RN-D01).
+- `GET /properties` y `GET /properties/:id` embeben el barrio como `neighborhood: { id, name }` (o `null` para propiedades legacy sin barrio, preexistentes a issue #99).
+
+### 7.1 Barrios (`/neighborhoods`) — catálogo parametrizable por organización (issue #99)
+
+```
+GET    /neighborhoods                    (listado del catálogo de la org, sin paginación — catálogo acotado)
+POST   /neighborhoods                    (body: { name })
+PATCH  /neighborhoods/:id                (rename; body: { name })
+DELETE /neighborhoods/:id                (soft; 409 ENTITY_HAS_DEPENDENCIES si tiene propiedades)
+```
+
+- Permiso: lectura con `property:read`; alta/edición/baja con `property:manage` — **sin permisos nuevos** (decisión del PO, issue #99).
+- `POST`/`PATCH` validan `name` único por organización, case-insensitive → `409 CONFLICT` si ya existe.
+- `DELETE` con propiedades asociadas (no borradas) → `409 ENTITY_HAS_DEPENDENCIES` con `details.entity_type = "neighborhood"`.
+
+- `GET /properties` acepta `?neighborhood_id=` como filtro adicional (issue #99).
+- `POST /properties` y `PATCH /properties/:id` requieren `neighborhood_id` (`VALIDATION_ERROR` si falta en el `POST`; en `PATCH` solo si el campo viene en el body — parcial). `neighborhood_id` inexistente o de otra organización → `404 NOT_FOUND` con `field: "neighborhood_id"` (mismo criterio que `landlord_id`, RN-D01).
+- `GET /properties` y `GET /properties/:id` embeben el barrio como `neighborhood: { id, name }` (o `null` para propiedades legacy sin barrio, preexistentes a issue #99).
+
+### 7.1 Barrios (`/neighborhoods`) — catálogo parametrizable por organización (issue #99)
+
+```
+GET    /neighborhoods                    (listado del catálogo de la org, sin paginación — catálogo acotado)
+POST   /neighborhoods                    (body: { name })
+PATCH  /neighborhoods/:id                (rename; body: { name })
+DELETE /neighborhoods/:id                (soft; 409 ENTITY_HAS_DEPENDENCIES si tiene propiedades)
+```
+
+- Permiso: lectura con `property:read`; alta/edición/baja con `property:manage` — **sin permisos nuevos** (decisión del PO, issue #99).
+- `POST`/`PATCH` validan `name` único por organización, case-insensitive → `409 CONFLICT` si ya existe.
+- `DELETE` con propiedades asociadas (no borradas) → `409 ENTITY_HAS_DEPENDENCIES` con `details.entity_type = "neighborhood"`.
+
 ## 8. Contratos (`/contracts`)
 
 ```
 GET    /contracts                        (?status=&expiring_in_days=)
-POST   /contracts                        (valida CONTRACT_OVERLAP, RN-C02)
-GET    /contracts/:id
+POST   /contracts                        (valida CONTRACT_OVERLAP, RN-C02, RN-C06 v2 — historical_amounts[] | current_amount+since)
+GET    /contracts/:id                    (incluye monthly_amounts[] — issue #106, ver debajo)
 PATCH  /contracts/:id                    (solo notes/metadata; montos NUNCA — RN-C04)
 POST   /contracts/:id/activate           (draft → active; genera el rent_period del mes en curso si corresponde)
-POST   /contracts/:id/terminate          (active → terminated; body: { reason })
+POST   /contracts/:id/terminate          (active → terminated; body: { reason }; permiso contract:terminate, solo owner)
 GET    /contracts/:id/adjustments        (historial de ajustes)
+POST   /contracts/:id/debt-certificate   (emite el certificado de libre deuda en PDF — RN-P08; verifica SOLO los períodos de ESE contrato; con deuda → 422 CONTRACT_HAS_DEBT con el detalle en details; permiso contract:read)
 GET    /adjustments                      (?status=pending — bandeja de ajustes que tocan)
 POST   /adjustments/:id/apply            (body: { pct }; pending → applied; recalcula current_amount — RN-C03)
 ```
+
+**`POST /contracts/:id/debt-certificate` — issue #104, decisión #123 (RN-P08, `spec_module_04` RF-08):** reemplaza a `POST /renters/:id/debt-certificate` (eliminado). Decisión del PO (2026-08-28): el libre deuda es conceptualmente **por contrato** — un inquilino puede alquilar 2 propiedades (ej: comercial) y deber en una sí y en otra no, así que el certificado se emite desde el contrato y verifica SOLO los períodos de ESE contrato (nunca los de otros contratos del mismo inquilino). El PDF (sincrónico) incluye encabezado de la administradora, inquilino, propiedad y fecha de emisión del contrato puntual. Permiso `contract:read` (no `renter:read`): mismo criterio que el resto de los endpoints de lectura de `/contracts/:id`. El error pasa de `RENTER_HAS_DEBT` a `CONTRACT_HAS_DEBT` (renombrado, no reutilizado con semántica nueva — ver §Códigos de Error Globales).
+
+**`POST /contracts/:id/terminate` — issue #105, decisión #124 (RN-A, `spec_module_03`):** feedback #2 del PO — terminar un contrato pasa a ser exclusivo de `owner` (hasta ahora, `contract:manage` se lo permitía también a `admin`). Se agrega el permiso atómico dedicado `contract:terminate` al catálogo, sembrado SOLO en el rol `owner` (`admin` conserva `contract:manage` para el resto del ciclo de vida del contrato — crear, actualizar, activar). Mismo patrón que `landlord:set-commission` (decisión #116): migración de backfill agrega el permiso al rol `owner` de organizaciones ya existentes.
+
+**`POST /contracts` — issue #107, decisión #126 (RN-C06 v2, `sdd_02` §3 — supersede parcialmente la decisión #121/issue #100):** el body acepta dos mecanismos de alta de contrato en curso, **mutuamente excluyentes** según si el contrato configura `adjustment_frequency_months` (siempre `null` para USD, opcional para ARS):
+
+- **Con `adjustment_frequency_months` (ARS con ajuste periódico):** campo opcional `historical_amounts` — lista ORDENADA de decimales `> 0`, uno por cada **tramo transcurrido** desde `start_date` (tramo `i` = `[start_date + i·frecuencia meses, start_date + (i+1)·frecuencia meses)`, fechas derivadas por el backend — el cliente nunca las envía). La cantidad esperada la calcula el backend desde `start_date` + `adjustment_frequency_months` + la fecha de hoy:
+  - Cantidad incorrecta → `400 VALIDATION_ERROR`, `field: "historical_amounts"`, mensaje indicando cuántos valores espera el sistema y el rango `[start, end)` de cada tramo esperado (en `details.expected_count` y `details.tramos`).
+  - `historical_amounts[0]` distinto de `initial_amount` → `400 VALIDATION_ERROR`, `field: "historical_amounts"`.
+  - Si el contrato recién arrancó (un solo tramo posible, ninguno "transcurrido" más allá del inicial) no corresponde enviarlo — enviarlo en ese caso también es `400 VALIDATION_ERROR` (equivale a un alta normal, sin declarar nada).
+  - `current_amount`/`current_amount_since` en el body de un contrato con `adjustment_frequency_months` → `400 VALIDATION_ERROR` (quedan superados por `historical_amounts` para este caso).
+  - Si `historical_amounts` viene con ≥ 2 elementos: la respuesta trae `current_amount` igual al ÚLTIMO valor de la lista, y el historial (`GET /contracts/:id/adjustments`) incluye una **cadena** de ajustes sintéticos `applied` de carga inicial (uno por tramo a partir del segundo, RN-C06 v2).
+- **Sin `adjustment_frequency_months` (USD siempre; ARS sin ajuste periódico):** se mantiene, sin cambios, el mecanismo del issue #100 — campos opcionales `current_amount` (decimal > 0) y `current_amount_since` (fecha), **solo válidos juntos** (enviar uno sin el otro es `400 VALIDATION_ERROR`). `current_amount_since`, normalizado al día 1 de su mes, debe ser `>= start_date` y `<= hoy` (`400 INVALID_DATE_RANGE`, `field: "current_amount_since"`). Si vienen: la respuesta trae `current_amount` igual al valor declarado y el historial incluye el único ajuste sintético `applied` correspondiente. `historical_amounts` en el body de un contrato sin `adjustment_frequency_months` → `400 VALIDATION_ERROR` (sin frecuencia no hay noción de "tramo").
+
+Los contratos ya dados de alta con el mecanismo del issue #100 (un único ajuste sintético) siguen siendo válidos — no requieren migración, son ajustes `applied` normales.
+
+**`GET /contracts/:id` — issue #106, decisión #125 (`spec_module_03` RF-06):** feedback #2 del PO — la ficha del contrato debe mostrar el valor del alquiler mes a mes (el actual primero, hacia atrás), **derivado en el backend** (el front no calcula lógica de negocio). La respuesta agrega `monthly_amounts[]`, lista de `{ "period": "YYYY-MM-01", "amount": "123.45" }` (mismo formato de `period` que `due_period` de `ContractAdjustment` — día 1 del mes calendario; `amount` como `NUMERIC`, nunca float), en **orden DESCENDENTE**. El rango va desde `start_date` hasta:
+- el mes actual, si el contrato sigue vigente (`draft`/`active`);
+- `end_date`, si venció naturalmente (`status = "expired"`);
+- la **fecha de terminación efectiva**, si fue terminado anticipadamente (`status = "terminated"`) — `contracts` no tiene columna propia para esto (RF-03 solo persiste el motivo en `audit_logs`), así que se deriva del evento `contract.terminated` más reciente de ESE contrato en `audit_logs` (mismo timestamp que la transición de estado — misma transacción, `POST /contracts/:id/terminate`); si por algún motivo no existe (defensivo), el fallback es `end_date`.
+
+El monto de cada mes es determinístico: `initial_amount` hasta el primer ajuste `applied` cuyo `due_period <= mes`, luego el `new_amount` del **último** ajuste `applied` cuyo `due_period <= mes` (incluye el ajuste sintético "Carga inicial" del issue #100/RN-C06). Solo cuentan ajustes `applied` — los `pending` no afectan el histórico. Un contrato USD sin carga inicial declarada tiene una serie plana en `initial_amount` (RN-C02: sin ajuste periódico automático). Si el contrato aún no empezó (`start_date` futuro), `monthly_amounts` es `[]`.
 
 ## 9. Cobranzas (`/rent-periods`, `/payments`)
 
@@ -228,7 +288,6 @@ GET    /rent-periods/:id/interest-preview  (?payment_date= — interés sugerido
 POST   /rent-periods/:id/payments        (registrar cobro — RN-P04/P05/P06/P07)
 POST   /payments/:id/void                (anulación lógica con motivo; auditada — RN-D04)
 GET    /payments/:id/receipt             (genera bajo demanda y descarga el recibo PDF del cobro — RN-P08; sobre un cobro anulado → 422 BUSINESS_RULE_VIOLATION)
-POST   /renters/:id/debt-certificate     (emite el certificado de libre deuda en PDF — RN-P08; con deuda → 422 RENTER_HAS_DEBT con el detalle en details)
 GET    /debt                             (?landlord_id=&renter_id=&min_days= — estado de deuda global, UC-10)
 ```
 

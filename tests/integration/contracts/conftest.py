@@ -244,7 +244,15 @@ def seed(rsa_keypair):
             status: str = "active",
             password: str = "Password1234",
             email: str | None = None,
+            permissions: list[str] | None = None,
         ) -> dict:
+            """`permissions` es opcional: por default se busca en
+            `ROLE_DEFINITIONS` por `role_name` (roles de sistema). Pasarlo
+            explicitamente permite sembrar un rol CUSTOM con un catalogo de
+            permisos arbitrario (issue #105, CA-R124-03: probar que el
+            chequeo de `contract:terminate` es por permiso atomico -- no
+            por nombre de rol -- mismo patron que `people/conftest.py`,
+            issue #51)."""
             user = await self.create_user(password=password, email=email)
             await self.create_membership(
                 user_id=user["id"],
@@ -252,7 +260,10 @@ def seed(rsa_keypair):
                 role_id=role_id,
                 status=status,
             )
-            permissions = next((list(p) for name, p in ROLE_DEFINITIONS if name == role_name), [])
+            if permissions is None:
+                permissions = next(
+                    (list(p) for name, p in ROLE_DEFINITIONS if name == role_name), []
+                )
             headers = _auth_headers(
                 user_id=user["id"],
                 organization_id=organization_id,
@@ -438,6 +449,46 @@ def seed(rsa_keypair):
                     },
                 )
             return adjustment_id
+
+        async def create_rent_period_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            contract_id: uuid.UUID,
+            period: str = "2026-06-01",
+            amount_due: str = "100000.00",
+            currency: str = "ARS",
+            status: str = "pending",
+            paid_total: str = "0.00",
+        ) -> uuid.UUID:
+            """issue #104: libre deuda POR CONTRATO -- mismo helper que
+            `tests/integration/people/conftest.py`/`tests/integration/
+            payments/conftest.py`, duplicado aca (mismo criterio del
+            encabezado de este archivo)."""
+            rent_period_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO rent_periods "
+                        "(id, organization_id, contract_id, period, amount_due, currency, "
+                        "status, paid_total) "
+                        "VALUES (:id, :org_id, :contract_id, :period, :amount_due, :currency, "
+                        ":status, :paid_total)"
+                    ),
+                    {
+                        "id": str(rent_period_id),
+                        "org_id": str(organization_id),
+                        "contract_id": str(contract_id),
+                        "period": date.fromisoformat(period),
+                        "amount_due": amount_due,
+                        "currency": currency,
+                        "status": status,
+                        "paid_total": paid_total,
+                    },
+                )
+            return rent_period_id
 
         async def get_contract_current_amount(self, contract_id: uuid.UUID) -> str:
             session_factory = get_session_factory()

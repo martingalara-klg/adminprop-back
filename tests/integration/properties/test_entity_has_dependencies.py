@@ -1,7 +1,7 @@
 """tests/integration/properties/test_entity_has_dependencies.py
 
-SDD: docs/sdd/features/spec_module_01_propiedades.md RF-01.
-Implements: CA-01-03.
+SDD: docs/sdd/features/spec_module_01_propiedades.md RF-01, RF-05.
+Implements: CA-01-03, CA-01-07.
 """
 
 from __future__ import annotations
@@ -35,9 +35,16 @@ class TestCA0103DeleteWithoutActiveContractSoftDeletes:
     async def test_ca_01_03_delete_property_without_active_contract_returns_204(self, client, seed):
         _org, owner = await _seed_org_with_owner(seed)
         landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "Sin contrato activo", "landlord_id": str(landlord_id)},
+            json={
+                "address": "Sin contrato activo",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
             headers=owner["headers"],
         )
         property_id = created.json()["data"]["id"]
@@ -55,9 +62,16 @@ class TestCA0103DeleteWithoutActiveContractSoftDeletes:
         borrado se trata igual que "no existe" para el resto de la API)."""
         _org, owner = await _seed_org_with_owner(seed)
         landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "Con historial conservado", "landlord_id": str(landlord_id)},
+            json={
+                "address": "Con historial conservado",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
             headers=owner["headers"],
         )
         property_id = created.json()["data"]["id"]
@@ -76,9 +90,16 @@ class TestCA0103DeleteWithoutActiveContractSoftDeletes:
         404 (ya no existe, RN-D01/RN-D02), nunca 409."""
         _org, owner = await _seed_org_with_owner(seed)
         landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "Doble baja", "landlord_id": str(landlord_id)},
+            json={
+                "address": "Doble baja",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
             headers=owner["headers"],
         )
         property_id = created.json()["data"]["id"]
@@ -95,9 +116,16 @@ class TestCA0103DeleteWithoutActiveContractSoftDeletes:
         """Issue #17: la propiedad con un contrato `active` no se borra."""
         _org, owner = await _seed_org_with_owner(seed)
         landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
         created = await client.post(
             "/v1/properties",
-            json={"address": "Con contrato activo", "landlord_id": str(landlord_id)},
+            json={
+                "address": "Con contrato activo",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
             headers=owner["headers"],
         )
         property_id = created.json()["data"]["id"]
@@ -190,3 +218,84 @@ class TestHasActiveDependenciesExtensibilityDocumented:
             result = await repo.has_active_dependencies(property_id, org["organization_id"])
 
         assert result is True
+
+
+class TestCA0107NeighborhoodEntityHasDependencies:
+    """CA-01-07 (issue #99): borrar un barrio con propiedades asociadas
+    devuelve 409 ENTITY_HAS_DEPENDENCIES; sin propiedades, la baja es
+    logica."""
+
+    async def test_delete_neighborhood_without_properties_returns_204(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
+
+        response = await client.delete(
+            f"/v1/neighborhoods/{neighborhood_id}", headers=owner["headers"]
+        )
+
+        assert response.status_code == 204
+
+    async def test_delete_neighborhood_with_properties_returns_409(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
+        await client.post(
+            "/v1/properties",
+            json={
+                "address": "Depende del barrio",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
+            headers=owner["headers"],
+        )
+
+        response = await client.delete(
+            f"/v1/neighborhoods/{neighborhood_id}", headers=owner["headers"]
+        )
+
+        assert response.status_code == 409
+        body = response.json()
+        assert body["error"]["code"] == "ENTITY_HAS_DEPENDENCIES"
+        assert body["error"]["details"]["entity_type"] == "neighborhood"
+
+    async def test_delete_neighborhood_after_property_soft_deleted_returns_204(self, client, seed):
+        """Una propiedad borrada (soft delete) ya no cuenta como
+        dependencia -- el barrio queda libre para borrarse."""
+        _org, owner = await _seed_org_with_owner(seed)
+        landlord_id = await seed.create_landlord_row(organization_id=owner["organization_id"])
+        neighborhood_id = await seed.create_neighborhood_row(
+            organization_id=owner["organization_id"]
+        )
+        created = await client.post(
+            "/v1/properties",
+            json={
+                "address": "Barrio a liberar",
+                "landlord_id": str(landlord_id),
+                "neighborhood_id": str(neighborhood_id),
+            },
+            headers=owner["headers"],
+        )
+        property_id = created.json()["data"]["id"]
+        await client.delete(f"/v1/properties/{property_id}", headers=owner["headers"])
+
+        response = await client.delete(
+            f"/v1/neighborhoods/{neighborhood_id}", headers=owner["headers"]
+        )
+
+        assert response.status_code == 204
+
+    async def test_delete_nonexistent_neighborhood_returns_404(self, client, seed):
+        import uuid
+
+        _org, owner = await _seed_org_with_owner(seed)
+
+        response = await client.delete(
+            f"/v1/neighborhoods/{uuid.uuid4()}", headers=owner["headers"]
+        )
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "NOT_FOUND"

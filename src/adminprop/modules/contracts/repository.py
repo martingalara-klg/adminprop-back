@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi import Depends
@@ -134,16 +135,20 @@ class ContractRepository:
         adjustment_index: str | None,
         adjustment_index_notes: str | None,
         notes: str | None,
+        current_amount: Decimal | None = None,
     ) -> Contract:
         # RN-02: todo contrato nace `draft`; `current_amount` arranca
-        # igual a `initial_amount` (RF-02, sdd_02 §2.7).
+        # igual a `initial_amount` (RF-02, sdd_02 §2.7) -- salvo alta de
+        # contrato en curso (RN-08/RN-C06, issue #100), donde el caller
+        # (`ContractService.create`) ya resolvio el monto vigente
+        # declarado y lo pasa explicito aca.
         row = Contract(
             organization_id=organization_id,
             property_id=property_id,
             renter_id=renter_id,
             currency=currency,
             initial_amount=initial_amount,
-            current_amount=initial_amount,
+            current_amount=current_amount if current_amount is not None else initial_amount,
             start_date=start_date,
             end_date=end_date,
             daily_late_fee_pct=daily_late_fee_pct,
@@ -315,6 +320,34 @@ class ContractRepository:
             return
         row.expiring_notified_at = notified_at
         await self._session.flush()
+
+    # ─── RF-06 (issue #106): serie mensual de valores locativos ────────────
+
+    async def get_terminated_at(self, contract_id: UUID, organization_id: UUID) -> date | None:
+        """RN-09: fecha efectiva de terminacion anticipada de un contrato
+        `terminated`. `contracts` no tiene columna propia para esto
+        (`service.py.terminate` solo persiste el motivo en `audit_logs`,
+        no en la tabla) -- se deriva del evento `contract.terminated` MAS
+        RECIENTE de ESE contrato, filtrado explicitamente por
+        `organization_id` (defense in depth, mismo criterio que el resto
+        de este repository). `None` si no existe (defensivo -- no deberia
+        pasar: `terminate()` audita en la MISMA transaccion que el cambio
+        de estado; el caller -- `monthly_amounts.compute_monthly_amounts`
+        -- cae a `end_date` en ese caso)."""
+        stmt = text(
+            "SELECT created_at FROM audit_logs "
+            "WHERE organization_id = :organization_id "
+            "AND entity_type = 'contract' AND entity_id = :contract_id "
+            "AND action = 'contract.terminated' "
+            "ORDER BY created_at DESC LIMIT 1"
+        )
+        result = await self._session.execute(
+            stmt, {"organization_id": str(organization_id), "contract_id": str(contract_id)}
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return None
+        return row.date()
 
     async def _get_row(self, contract_id: UUID, organization_id: UUID) -> Contract | None:
         stmt = select(Contract).where(

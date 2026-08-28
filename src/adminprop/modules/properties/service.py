@@ -17,14 +17,21 @@ from uuid import UUID
 from fastapi import Depends
 
 from adminprop.modules.properties.repository import (
+    NeighborhoodRepository,
     PropertyFilters,
     PropertyRepository,
     PropertyServiceAccountRepository,
+    get_neighborhood_repository,
     get_property_repository,
     get_property_service_account_repository,
 )
 from adminprop.shared.audit.service import audit
-from adminprop.shared.errors.codes import EntityHasDependenciesException, NotFoundException
+from adminprop.shared.errors.codes import (
+    ConflictException,
+    EntityHasDependenciesException,
+    InvalidStatusTransitionException,
+    NotFoundException,
+)
 
 
 class PropertyService:
@@ -38,6 +45,7 @@ class PropertyService:
         *,
         organization_id: UUID,
         landlord_id: UUID,
+        neighborhood_id: UUID,
         address: str,
         property_type: str,
         notes: str | None,
@@ -45,15 +53,24 @@ class PropertyService:
         """RF-01 + CA-01-01: `landlord_id` obligatorio, validado contra el
         mismo tenant y no borrado (RN-D01) -- un `landlord_id` invalido o
         de otra organizacion es 404, con el mismo criterio de no-revelar-
-        existencia que el resto del sistema."""
+        existencia que el resto del sistema.
+
+        Issue #99 + CA-01-08: `neighborhood_id` obligatorio (ya lo exige
+        `PropertyCreate` a nivel de Pydantic) y validado con el mismo
+        criterio RN-D01 que `landlord_id`."""
         if not await self._repo.landlord_exists(landlord_id, organization_id):
             raise NotFoundException(
                 message="El propietario indicado no existe.", field="landlord_id"
+            )
+        if not await self._repo.neighborhood_exists(neighborhood_id, organization_id):
+            raise NotFoundException(
+                message="El barrio indicado no existe.", field="neighborhood_id"
             )
 
         row = await self._repo.create(
             organization_id=organization_id,
             landlord_id=landlord_id,
+            neighborhood_id=neighborhood_id,
             address=address,
             property_type=property_type,
             notes=notes,
@@ -83,6 +100,7 @@ class PropertyService:
         *,
         address: str | None,
         landlord_id: UUID | None,
+        neighborhood_id: UUID | None,
         property_type: str | None,
         status: str | None,
         notes: str | None,
@@ -107,6 +125,24 @@ class PropertyService:
         if current is None:
             raise NotFoundException()
 
+        # RF-04 + issue #109: `available`/`unavailable` son estados
+        # manuales validos SOLO sin contrato activo (CA-01-04:
+        # `rented` <=> contrato `active`). Defensa en profundidad --
+        # `has_active_dependencies` consulta la tabla `contracts`
+        # directamente (fuente de verdad del invariante), no solo el
+        # `status` cacheado en `properties`. El front ya omite `status`
+        # para propiedades rented (adminprop-front#58); esto bloquea el
+        # mismo salto si algun cliente lo envia igual.
+        if "status" in fields_set and await self._repo.has_active_dependencies(
+            property_id, organization_id
+        ):
+            raise InvalidStatusTransitionException(
+                message="No se puede cambiar el estado manualmente: la propiedad tiene un "
+                "contrato activo.",
+                field="status",
+                details={"property_id": str(property_id)},
+            )
+
         if "landlord_id" in fields_set and landlord_id is not None:
             landlord_still_valid = await self._repo.landlord_exists(landlord_id, organization_id)
             if not landlord_still_valid:
@@ -114,11 +150,26 @@ class PropertyService:
                     message="El propietario indicado no existe.", field="landlord_id"
                 )
 
+        # Issue #99: `neighborhood_id` no puede vaciarse via PATCH -- si el
+        # campo viene, `PropertyUpdate` ya garantiza que no es `None`
+        # (rechazado por Pydantic antes de llegar aca); solo resta validar
+        # existencia/tenant con el mismo criterio RN-D01 que `landlord_id`.
+        if "neighborhood_id" in fields_set and neighborhood_id is not None:
+            neighborhood_still_valid = await self._repo.neighborhood_exists(
+                neighborhood_id, organization_id
+            )
+            if not neighborhood_still_valid:
+                raise NotFoundException(
+                    message="El barrio indicado no existe.", field="neighborhood_id"
+                )
+
         update_fields: dict[str, object] = {}
         if "address" in fields_set:
             update_fields["address"] = address
         if "landlord_id" in fields_set:
             update_fields["landlord_id"] = landlord_id
+        if "neighborhood_id" in fields_set:
+            update_fields["neighborhood_id"] = neighborhood_id
         if "property_type" in fields_set:
             update_fields["property_type"] = property_type
         if "status" in fields_set:
@@ -251,3 +302,56 @@ def get_property_service_account_service(
     repo: PropertyServiceAccountRepository = Depends(get_property_service_account_repository),
 ) -> PropertyServiceAccountService:
     return PropertyServiceAccountService(repo)
+
+
+class NeighborhoodService:
+    """RF-05 (issue #99): ABM del catalogo de barrios por organizacion."""
+
+    def __init__(self, repo: NeighborhoodRepository) -> None:
+        self._repo = repo
+
+    async def create(self, *, organization_id: UUID, name: str):
+        # RF-05 + CA-01-07: "name unico por organizacion, case-insensitive"
+        if await self._repo.name_exists(organization_id, name):
+            raise ConflictException(message="Ya existe un barrio con ese nombre.", field="name")
+        row = await self._repo.create(organization_id=organization_id, name=name)
+        await self._repo.commit()
+        return row
+
+    async def list(self, organization_id: UUID) -> list:
+        return await self._repo.list(organization_id)
+
+    async def update(self, neighborhood_id: UUID, organization_id: UUID, *, name: str):
+        existing = await self._repo.get_by_id(neighborhood_id, organization_id)
+        if existing is None:
+            raise NotFoundException()
+
+        if await self._repo.name_exists(organization_id, name, exclude_id=neighborhood_id):
+            raise ConflictException(message="Ya existe un barrio con ese nombre.", field="name")
+
+        updated = await self._repo.update(neighborhood_id, organization_id, name=name)
+        if updated is None:  # pragma: no cover -- defensivo, ya se valido existencia arriba
+            raise NotFoundException()
+        await self._repo.commit()
+        return updated
+
+    async def delete(self, neighborhood_id: UUID, organization_id: UUID) -> None:
+        """CA-01-07: `409 ENTITY_HAS_DEPENDENCIES` si el barrio tiene
+        propiedades asociadas (no borradas)."""
+        existing = await self._repo.get_by_id(neighborhood_id, organization_id)
+        if existing is None:
+            raise NotFoundException()
+
+        if await self._repo.has_properties(neighborhood_id, organization_id):
+            raise EntityHasDependenciesException(
+                details={"entity_type": "neighborhood", "entity_id": str(neighborhood_id)}
+            )
+
+        await self._repo.soft_delete(neighborhood_id, organization_id)
+        await self._repo.commit()
+
+
+def get_neighborhood_service(
+    repo: NeighborhoodRepository = Depends(get_neighborhood_repository),
+) -> NeighborhoodService:
+    return NeighborhoodService(repo)

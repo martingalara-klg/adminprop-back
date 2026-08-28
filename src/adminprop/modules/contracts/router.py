@@ -2,15 +2,22 @@
 
 SDD: core/sdd_03_api_contracts.md §8 "Contratos".
 Implements: CA-03-01, 02, 03, 06, 08, CA-01-04 (issue #17);
-            CA-03-04, CA-03-05 (issue #18, RF-04).
+            CA-03-04, CA-03-05 (issue #18, RF-04);
+            CA-04-11, CA-04-12 (issue #104 -- libre deuda POR CONTRATO,
+            movido desde `modules/people`, ver `sdd_03` v1.10 §8);
+            CA-03-16..22 (issue #106, RF-06 -- monthly_amounts[] en
+            GET /contracts/:id, `sdd_03` v1.12 §8).
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from adminprop.db.session import get_tenant_db_session
 from adminprop.modules.contracts.adjustment_schemas import (
     AdjustmentApplyRequest,
     AdjustmentListResponse,
@@ -20,11 +27,14 @@ from adminprop.modules.contracts.adjustment_service import (
     ContractAdjustmentService,
     get_contract_adjustment_service,
 )
-from adminprop.modules.contracts.repository import ContractFilters
+from adminprop.modules.contracts.repository import ContractFilters, ContractRepository
 from adminprop.modules.contracts.schemas import (
     ContractCreate,
+    ContractDetail,
+    ContractDetailResponse,
     ContractListResponse,
     ContractResponse,
+    ContractSummary,
     ContractTerminateRequest,
     ContractUpdate,
 )
@@ -45,15 +55,20 @@ adjustments_router = APIRouter(prefix="/v1/adjustments", tags=["contracts"])
     "",
     status_code=status.HTTP_201_CREATED,
     response_model=ContractResponse,
-    dependencies=[Depends(requires_permission("contract:manage"))],
 )
 async def create_contract(
     dto: ContractCreate,
     organization_id: UUID = Depends(get_current_tenant),
+    payload: JWTPayload = Depends(requires_permission("contract:manage")),
     service: ContractService = Depends(get_contract_service),
 ) -> ContractResponse:
     """RF-02 + CA-03-01/02/03: crea un contrato -- nace en `draft` (RN-02).
-    `property_id`/`renter_id` validados contra el mismo tenant (RN-06/RN-D01)."""
+    `property_id`/`renter_id` validados contra el mismo tenant (RN-06/RN-D01).
+    RN-08/RN-C06 v2 (issue #107): `historical_amounts[]` (con
+    `adjustment_frequency_months`) o `current_amount`/`current_amount_since`
+    (sin frecuencia, comportamiento del issue #100) -- `actor_user_id`
+    (`payload.sub`) es quien queda como `applied_by` del/los ajuste(s)
+    sintetico(s) de carga inicial, si corresponde."""
     contract = await service.create(
         organization_id=organization_id,
         property_id=dto.property_id,
@@ -67,6 +82,10 @@ async def create_contract(
         adjustment_index=dto.adjustment_index,
         adjustment_index_notes=dto.adjustment_index_notes,
         notes=dto.notes,
+        current_amount=dto.current_amount,
+        current_amount_since=dto.current_amount_since,
+        historical_amounts=dto.historical_amounts,
+        actor_user_id=payload.sub,
     )
     return ContractResponse(data=contract)
 
@@ -106,20 +125,27 @@ async def list_contracts(
 
 @router.get(
     "/{contract_id}",
-    response_model=ContractResponse,
+    response_model=ContractDetailResponse,
     dependencies=[Depends(requires_permission("contract:read"))],
 )
 async def get_contract(
     contract_id: UUID,
     organization_id: UUID = Depends(get_current_tenant),
     service: ContractService = Depends(get_contract_service),
-) -> ContractResponse:
-    """RF-01: detalle del contrato."""
+) -> ContractDetailResponse:
+    """RF-01 + RF-06 (issue #106): detalle del contrato, incluido
+    `monthly_amounts[]` -- serie mensual de valores locativos, orden
+    DESCENDENTE (mes actual primero), calculada en el backend."""
     contract = await service.get(contract_id, organization_id)
     if contract is None:
         # RN-D01: 404, no 403 -- no distingue "no existe" de "otra org".
         raise NotFoundException()
-    return ContractResponse(data=contract)
+    monthly_amounts = await service.get_monthly_amounts(
+        contract, organization_id, today=datetime.now(UTC).date()
+    )
+    summary = ContractSummary.model_validate(contract)
+    detail = ContractDetail(**summary.model_dump(), monthly_amounts=monthly_amounts)
+    return ContractDetailResponse(data=detail)
 
 
 @router.patch(
@@ -171,7 +197,15 @@ async def terminate_contract(
     contract_id: UUID,
     dto: ContractTerminateRequest,
     organization_id: UUID = Depends(get_current_tenant),
-    payload: JWTPayload = Depends(requires_permission("contract:manage")),
+    # RN-A (accesos) + sdd_03 v1.11, decision #124 (issue #105, feedback
+    # #2 del PO): terminar un contrato pasa a ser exclusivo de `owner` --
+    # permiso dedicado `contract:terminate`, ya no `contract:manage`
+    # (que `admin` sigue teniendo para el resto del ciclo de vida del
+    # contrato: crear, actualizar, activar). Mismo criterio que
+    # `landlord:set-commission` (decision #116, issue #51), pero acá el
+    # chequeo vive en el router -- no condicional por campo -- porque
+    # este endpoint es una accion completa dedicada, no un PATCH parcial.
+    payload: JWTPayload = Depends(requires_permission("contract:terminate")),
     service: ContractService = Depends(get_contract_service),
 ) -> ContractResponse:
     """RF-03 + CA-03-08: `active -> terminated` con motivo; la propiedad
@@ -201,6 +235,66 @@ async def list_contract_adjustments(
         raise NotFoundException()
     items = await adjustment_service.list_for_contract(contract_id, organization_id)
     return AdjustmentListResponse(data=items, meta={})
+
+
+@router.post(
+    "/{contract_id}/debt-certificate",
+    dependencies=[Depends(requires_permission("contract:read"))],
+)
+async def issue_contract_debt_certificate(
+    contract_id: UUID,
+    organization_id: UUID = Depends(get_current_tenant),
+    payload: JWTPayload = Depends(requires_permission("contract:read")),
+    contract_service: ContractService = Depends(get_contract_service),
+    session: AsyncSession = Depends(get_tenant_db_session),
+) -> Response:
+    """sdd_03 §8 + RF-08 (issue #104 -- movido desde `modules/people`,
+    decision del PO: el libre deuda es POR CONTRATO): emite el
+    certificado de libre deuda en PDF (SINCRONICO) -- CA-04-11 (sin
+    deuda, auditado como `debt_certificate.issued`), CA-04-12 (con
+    deuda -> `422 CONTRACT_HAS_DEBT` con el detalle en `details`, RN-P08).
+    Verifica SOLO los periodos de ESTE contrato -- no los de otros
+    contratos del mismo inquilino.
+
+    Permiso `contract:read` (no `renter:read`, ya que el recurso ahora
+    cuelga de `/contracts/:id`): emitir el certificado es una operacion
+    de lectura/reporte sobre el contrato, mismo criterio que
+    `GET /contracts/:id`/`GET /contracts/:id/adjustments`.
+
+    `DebtCertificateService`/`DebtService`/`RenterRepository`/
+    `PropertyRepository` se importan DIFERIDO -- ver el docstring de
+    `contracts/debt_certificate_service.py` para el ciclo de import que
+    evita (mismo criterio que documentaba `people/router.py.
+    issue_debt_certificate`, issue #24, ahora eliminado)."""
+    contract = await contract_service.get(contract_id, organization_id)
+    if contract is None:
+        # RN-D01: 404, no 403 -- no distingue "no existe" de "otra org".
+        raise NotFoundException()
+
+    from adminprop.modules.administracion.repository import AdministracionRepository
+    from adminprop.modules.contracts.debt_certificate_service import DebtCertificateService
+    from adminprop.modules.payments.repository import RentPeriodRepository
+    from adminprop.modules.payments.service import DebtService
+    from adminprop.modules.people.repository import RenterRepository
+    from adminprop.modules.properties.repository import PropertyRepository
+
+    debt_service = DebtService(RentPeriodRepository(session), AdministracionRepository(session))
+    certificate_service = DebtCertificateService(
+        contract_repo=ContractRepository(session),
+        renter_repo=RenterRepository(session),
+        property_repo=PropertyRepository(session),
+        admin_repo=AdministracionRepository(session),
+        debt_service=debt_service,
+        actor_user_id=payload.sub,
+    )
+    pdf_bytes = await certificate_service.issue(
+        contract_id, organization_id, today=datetime.now(tz=UTC).date()
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="libre-deuda-{contract_id}.pdf"'},
+    )
 
 
 @adjustments_router.get(

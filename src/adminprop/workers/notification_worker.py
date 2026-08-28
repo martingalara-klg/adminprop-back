@@ -52,6 +52,7 @@ from adminprop.shared.errors.retryable import (
 )
 from adminprop.shared.notifications.repository import NotificationRepository
 from adminprop.shared.notifications.service import enqueue_pending_emails
+from adminprop.shared.worker_runtime import run_worker_coroutine
 from adminprop.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -119,15 +120,24 @@ def send_transactional_email(
         extra={"request_id": request_id, "attempt": attempt, "service": "notification_worker"},
     )
     try:
+        # issue #93: `run_worker_coroutine` dispone el engine/cliente Redis
+        # cacheados por proceso al terminar -- mismo patron que
+        # `documents_worker.py`, misma vulnerabilidad (`get_session_factory`/
+        # `get_redis_client` son `@lru_cache` a nivel de proceso, atados al
+        # primer event loop; la SEGUNDA tarea de este worker en el mismo
+        # proceso revienta con `Future attached to a different loop` sin
+        # este wrapper -- ver `shared/worker_runtime.py`).
         message_id = asyncio.run(
-            send_email(
-                to=to,
-                subject=subject,
-                html=html,
-                text=text,
-                organization_name=organization_name,
-                owner_reply_email=owner_reply_email,
-                request_id=request_id,
+            run_worker_coroutine(
+                send_email(
+                    to=to,
+                    subject=subject,
+                    html=html,
+                    text=text,
+                    organization_name=organization_name,
+                    owner_reply_email=owner_reply_email,
+                    request_id=request_id,
+                )
             )
         )
     except RetryableNotificationError as exc:
@@ -282,8 +292,13 @@ def send_notification_email(
         },
     )
     try:
+        # issue #93: ver comentario equivalente en `send_transactional_email`.
         asyncio.run(
-            _send_notification_email_async(UUID(notification_id), UUID(organization_id), request_id)
+            run_worker_coroutine(
+                _send_notification_email_async(
+                    UUID(notification_id), UUID(organization_id), request_id
+                )
+            )
         )
     except RetryableNotificationError as exc:
         logger.warning(
@@ -395,7 +410,8 @@ def generate_rent_periods(self: Task) -> None:
             "service": "notification_worker",
         },
     )
-    asyncio.run(_generate_rent_periods_async(request_id))
+    # issue #93: ver comentario en `send_transactional_email`.
+    asyncio.run(run_worker_coroutine(_generate_rent_periods_async(request_id)))
     logger.info(
         "generate_rent_periods done",
         extra={"request_id": request_id, "service": "notification_worker"},
@@ -454,7 +470,8 @@ def detect_due_adjustments(self: Task) -> None:
             "service": "notification_worker",
         },
     )
-    asyncio.run(_detect_due_adjustments_async(request_id))
+    # issue #93: ver comentario en `send_transactional_email`.
+    asyncio.run(run_worker_coroutine(_detect_due_adjustments_async(request_id)))
     logger.info(
         "detect_due_adjustments done",
         extra={"request_id": request_id, "service": "notification_worker"},
@@ -519,7 +536,8 @@ def detect_expiring_contracts(self: Task) -> None:
             "service": "notification_worker",
         },
     )
-    asyncio.run(_detect_expiring_contracts_async(request_id))
+    # issue #93: ver comentario en `send_transactional_email`.
+    asyncio.run(run_worker_coroutine(_detect_expiring_contracts_async(request_id)))
     logger.info(
         "detect_expiring_contracts done",
         extra={"request_id": request_id, "service": "notification_worker"},

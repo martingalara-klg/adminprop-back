@@ -45,6 +45,16 @@ class ContractCreate(BaseModel):
     adjustment_index: AdjustmentIndex | None = Field(None)
     adjustment_index_notes: str | None = Field(None)
     notes: str | None = Field(None)
+    # RN-08/RN-C06 v2 (issue #107, supersede parcialmente el issue #100):
+    # alta de contrato en curso -- DOS mecanismos mutuamente excluyentes
+    # segun `adjustment_frequency_months` (`_validate_historical_amounts_shape`):
+    # `historical_amounts[]` (con frecuencia -- cadena guiada de tramos) o
+    # `current_amount`/`current_amount_since` (sin frecuencia -- USD
+    # siempre, o ARS sin ajuste -- comportamiento del issue #100, sin
+    # cambios).
+    current_amount: Decimal | None = Field(None, gt=0)
+    current_amount_since: date | None = Field(None)
+    historical_amounts: list[Decimal] | None = Field(None)
 
     @model_validator(mode="after")
     def _validate_date_range(self) -> ContractCreate:
@@ -52,6 +62,64 @@ class ContractCreate(BaseModel):
             raise ValueError("end_date debe ser posterior a start_date.")
         if (self.end_date - self.start_date).days > _MAX_CONTRACT_DURATION_DAYS:
             raise ValueError("La duracion del contrato no puede superar los 10 anios.")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_current_amount_pair(self) -> ContractCreate:
+        # RN-08/RN-C06 v2, CA-03-15: `current_amount`/`current_amount_since`
+        # solo son validos juntos -- uno sin el otro es 400
+        # VALIDATION_ERROR (mismo criterio de shape-validation que
+        # `_validate_usd_no_adjustment`).
+        has_amount = self.current_amount is not None
+        has_since = self.current_amount_since is not None
+        if has_amount != has_since:
+            raise ValueError("current_amount y current_amount_since solo son validos juntos.")
+        if has_since:
+            # CA-03-15 (issue #107): con `adjustment_frequency_months`
+            # configurado, este mecanismo quedo superado por
+            # `historical_amounts[]` -- ya no se acepta.
+            if self.adjustment_frequency_months is not None:
+                raise ValueError(
+                    "current_amount/current_amount_since no aplican a un contrato con "
+                    "adjustment_frequency_months configurado; usar historical_amounts."
+                )
+            # RN-08/RN-C06: `current_amount_since` se normaliza al dia 1
+            # de su mes (mismo criterio que `due_period` de
+            # ContractAdjustment, CHECK date_trunc de la migracion #16).
+            # CA-03-14 (`>= start_date` y `<= hoy`, ambos 400
+            # INVALID_DATE_RANGE): se valida en `service.py.create`, no
+            # aca -- ese error.code especifico esta reservado para
+            # `AdminPropException` (mismo criterio que
+            # `ContractOverlapException`, que tampoco vive en Pydantic).
+            self.current_amount_since = date(
+                self.current_amount_since.year, self.current_amount_since.month, 1
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_historical_amounts_shape(self) -> ContractCreate:
+        # RN-08/RN-C06 v2 (issue #107), CA-03-14: `historical_amounts[]`
+        # solo aplica a un contrato CON `adjustment_frequency_months`
+        # configurado -- sin frecuencia no hay nocion de "tramo". La
+        # cantidad EXACTA esperada (depende de `start_date` + hoy) se
+        # valida en `service.py.create`, no aca (necesita "hoy", mismo
+        # criterio que `current_amount_since <= hoy`); aca solo shape:
+        # cada elemento > 0 y al menos 2 (1 elemento equivaldria a un alta
+        # normal -- no corresponde declararlo, CA-03-11).
+        if self.historical_amounts is None:
+            return self
+        if self.adjustment_frequency_months is None:
+            raise ValueError(
+                "historical_amounts solo aplica a un contrato con "
+                "adjustment_frequency_months configurado."
+            )
+        if any(amount <= 0 for amount in self.historical_amounts):
+            raise ValueError("Todos los valores de historical_amounts deben ser > 0.")
+        if len(self.historical_amounts) < 2:
+            raise ValueError(
+                "historical_amounts debe tener al menos 2 elementos (original + al menos un "
+                "tramo transcurrido); si el contrato recien arranco, no corresponde enviarlo."
+            )
         return self
 
     @model_validator(mode="after")
@@ -132,3 +200,33 @@ class ContractResponse(BaseModel):
 class ContractListResponse(BaseModel):
     data: list[ContractSummary]
     meta: dict
+
+
+class MonthlyAmount(BaseModel):
+    """Item de `monthly_amounts[]` -- issue #106, `sdd_03` v1.12 §8.
+
+    `period` es el dia 1 del mes calendario (mismo criterio que
+    `due_period` de `ContractAdjustment`); `amount` es el monto vigente
+    de ESE mes, derivado en el backend desde `initial_amount` + ajustes
+    `applied` (RN-09 de `spec_module_03`). `from_attributes=True` porque
+    el service devuelve `monthly_amounts.MonthlyAmountRow` (dataclass),
+    no un dict.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    period: date
+    amount: Decimal
+
+
+class ContractDetail(ContractSummary):
+    """Respuesta de `GET /v1/contracts/:id` (issue #106): `ContractSummary`
+    + `monthly_amounts[]` en orden DESCENDENTE (mes actual primero). Solo
+    este endpoint la expone -- `POST`/`PATCH`/`activate`/`terminate`
+    siguen usando `ContractSummary`/`ContractResponse` sin este campo."""
+
+    monthly_amounts: list[MonthlyAmount]
+
+
+class ContractDetailResponse(BaseModel):
+    data: ContractDetail

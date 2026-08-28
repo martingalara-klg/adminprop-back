@@ -4,12 +4,15 @@ SDD: docs/sdd/features/spec_module_03_contratos.md RF-04 +
 core/sdd_03_api_contracts.md §8 "Contratos".
 Implements: CA-03-04 (bandeja/deteccion, cubierta a nivel HTTP para la
             parte "aparece en la bandeja") y CA-03-05 (aplicacion manual).
+            Tambien cubre RN-C06 v2 (issue #107): deteccion futura
+            anclada en el ultimo ajuste sintetico de una cadena
+            `historical_amounts[]`.
 """
 
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -408,3 +411,90 @@ class TestCA0305ApplyAdjustment:
 
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+class TestNextAdjustmentAnchoredOnLastSyntheticOfHistoricalAmountsChain:
+    """RN-C06 v2 (issue #107, supersede parcialmente CA-03-10/issue #100
+    -- `detect_due_adjustments` sigue anclando SIEMPRE en el `due_period`
+    del ultimo ajuste `applied`, RN-C03): el proximo ajuste por indice de
+    un contrato ARS dado de alta en curso con `historical_amounts[]` se
+    detecta contando desde el `due_period` del ULTIMO ajuste sintetico de
+    la cadena (el mas reciente), no desde `start_date` -- sin tocar la
+    logica de `detect_due_adjustments`."""
+
+    async def test_next_due_period_counted_from_last_synthetic_in_chain(self, client, seed):
+        import sqlalchemy as sa
+
+        from adminprop.modules.contracts.adjustment_repository import ContractAdjustmentRepository
+        from adminprop.modules.contracts.adjustment_service import (
+            ContractAdjustmentService,
+            _add_months,
+        )
+        from adminprop.modules.contracts.repository import ContractRepository
+
+        _org, owner, _admin, _maintenance = await _seed_org_with_owner_and_admin(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+
+        today = datetime.now(UTC).date()
+        current_month = date(today.year, today.month, 1)
+        # RN-C06 v2: `start_date` 9 meses atras, freq=3 -> 3 tramos
+        # transcurridos mas alla del inicial (4 elementos totales); el
+        # ULTIMO sintetico de la cadena SIEMPRE cae dentro del tramo que
+        # contiene "hoy" (por construccion, `expected_tramo_count`) --
+        # por eso el proximo `due_period` es necesariamente futuro
+        # respecto de "hoy real"; se simula el paso del tiempo pasandole
+        # a `detect_due_adjustments` un `today` posterior al
+        # `expected_due_period`, en vez de depender del reloj real (el
+        # worker `_detect_due_adjustments_async` siempre usa
+        # `datetime.now()`, no serviria para este escenario).
+        start_date = _add_months(current_month, -9)
+        expected_due_period = _add_months(current_month, 3)
+
+        created = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": start_date.isoformat(),
+                "end_date": _add_months(current_month, 24).isoformat(),
+                "daily_late_fee_pct": "0.1",
+                "adjustment_frequency_months": 3,
+                "adjustment_index": "icl",
+                "historical_amounts": ["100000.00", "120000.00", "140000.00", "150000.00"],
+            },
+            headers=owner["headers"],
+        )
+        assert created.status_code == 201
+        contract_id = created.json()["data"]["id"]
+
+        activated = await client.post(
+            f"/v1/contracts/{contract_id}/activate", headers=owner["headers"]
+        )
+        assert activated.status_code == 200
+
+        session_factory = get_session_factory()
+        async with session_factory() as session, session.begin():
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
+            service = ContractAdjustmentService(
+                ContractAdjustmentRepository(session), ContractRepository(session)
+            )
+            await service.detect_due_adjustments(
+                organization_id=owner["organization_id"],
+                today=expected_due_period + timedelta(days=1),
+            )
+
+        async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
+            result = await session.execute(
+                sa.text(
+                    "SELECT due_period, status FROM contract_adjustments "
+                    "WHERE contract_id = :contract_id AND status = 'pending'"
+                ),
+                {"contract_id": contract_id},
+            )
+            rows = [dict(row._mapping) for row in result]
+
+        assert len(rows) == 1
+        assert rows[0]["due_period"] == expected_due_period

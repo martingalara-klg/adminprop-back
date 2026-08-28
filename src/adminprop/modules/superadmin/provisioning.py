@@ -29,6 +29,7 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     "property:manage",
     "contract:read",
     "contract:manage",
+    "contract:terminate",
     "adjustment:apply",
     "rent-period:read",
     "payment:create",
@@ -59,7 +60,10 @@ ALL_PERMISSIONS: tuple[str, ...] = (
 #   organization:configure, landlord:set-commission (issue #51: cambio de
 #   `commission_pct` es exclusivo de owner -- sdd_03 v1.5 §"Catalogo de
 #   Permisos"; reemplaza el chequeo previo por `payload.role` en
-#   `LandlordService.update`).
+#   `LandlordService.update`), contract:terminate (issue #105, decision
+#   #124: terminar un contrato pasa a ser exclusivo de owner -- feedback
+#   #2 del PO; admin conserva contract:manage para el resto del ciclo de
+#   vida del contrato -- crear, actualizar, activar).
 # - maintenance: work-order:read/quote/close + attachment:manage (scoped
 #   a work orders, RN-A01) + notification:read (issue #31, fix: sdd_03
 #   §"Resumen de Autorizacion por Recurso" fila "Notificaciones propias"
@@ -68,7 +72,13 @@ ALL_PERMISSIONS: tuple[str, ...] = (
 #   lo que hubiera devuelto 403 FORBIDDEN a un usuario `maintenance`
 #   pidiendo sus propias notificaciones `work_order_created`/`quote_approved`).
 _ADMIN_EXCLUDED_PERMISSIONS = frozenset(
-    {"user:manage", "role:read", "organization:configure", "landlord:set-commission"}
+    {
+        "user:manage",
+        "role:read",
+        "organization:configure",
+        "landlord:set-commission",
+        "contract:terminate",
+    }
 )
 
 OWNER_PERMISSIONS: tuple[str, ...] = ALL_PERMISSIONS

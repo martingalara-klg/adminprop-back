@@ -1,7 +1,10 @@
 """tests/integration/contracts/test_contracts_crud.py
 
 SDD: docs/sdd/features/spec_module_03_contratos.md RF-01..RF-03.
-Implements: CA-03-01, CA-03-02, CA-03-03, CA-03-06, CA-03-08, CA-01-04.
+Implements: CA-03-01, CA-03-02, CA-03-03, CA-03-06, CA-03-08, CA-01-04,
+            CA-03-09, CA-03-10, CA-03-11, CA-03-12, CA-03-13, CA-03-14,
+            CA-03-15 (issue #107, RN-08/RN-C06 v2 -- supersede
+            parcialmente el issue #100).
 """
 
 from __future__ import annotations
@@ -16,6 +19,18 @@ from adminprop.db.session import get_session_factory
 from adminprop.modules.payments.repository import RentPeriodRepository
 
 pytestmark = pytest.mark.asyncio
+
+
+def _months_ago(anchor: date, months: int) -> date:
+    """Dia 1 del mes que cae `months` meses antes de `anchor` -- usado
+    para construir `start_date` deterministicos relativos a "hoy" (mismo
+    criterio que el resto del archivo: evitar fechas absolutas que
+    rompan con el paso del tiempo real, ver
+    `test_filter_by_expiring_in_days_only_returns_active_within_threshold`)."""
+    zero_based_month = anchor.month - 1 - months
+    year = anchor.year + zero_based_month // 12
+    month = zero_based_month % 12 + 1
+    return date(year, month, 1)
 
 
 async def _seed_org_with_owner(seed):
@@ -229,6 +244,562 @@ class TestContractCreateValidations:
         assert response.json()["data"]["adjustment_index_notes"] == (
             "Indice pactado por contrato especifico"
         )
+
+
+class TestCA0314NoFrequencySingleValueDeclaration:
+    """RN-08/RN-C06 v2 (issue #107): sin `adjustment_frequency_months`
+    configurado (ARS sin ajuste, o USD) se mantiene el mecanismo del
+    issue #100, sin cambios -- `current_amount`/`current_amount_since`."""
+
+    async def test_ca_03_14_history_shows_synthetic_applied_adjustment_without_frequency(
+        self, client, seed
+    ):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+        today = datetime.now(UTC).date()
+        current_amount_since = date(today.year, today.month, 1)
+
+        created = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": (today - timedelta(days=240)).isoformat(),
+                "end_date": (today + timedelta(days=365)).isoformat(),
+                "daily_late_fee_pct": "0.1",
+                "current_amount": "150000.00",
+                "current_amount_since": current_amount_since.isoformat(),
+            },
+            headers=owner["headers"],
+        )
+        assert created.status_code == 201
+        data = created.json()["data"]
+        assert data["current_amount"] == "150000.00"
+        assert data["initial_amount"] == "100000.00"
+        contract_id = data["id"]
+
+        history = await client.get(
+            f"/v1/contracts/{contract_id}/adjustments", headers=owner["headers"]
+        )
+        assert history.status_code == 200
+        rows = history.json()["data"]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["status"] == "applied"
+        assert row["previous_amount"] == "100000.00"
+        assert row["new_amount"] == "150000.00"
+        assert row["pct_applied"] is None
+        assert row["notes"].startswith("Carga inicial:")
+        assert row["due_period"] == current_amount_since.isoformat()
+
+    async def test_ca_03_14_usd_contract_accepts_current_amount_declaration(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+        today = datetime.now(UTC).date()
+        current_amount_since = date(today.year, today.month, 1)
+
+        created = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "USD",
+                "initial_amount": "500.00",
+                "start_date": (today - timedelta(days=240)).isoformat(),
+                "end_date": (today + timedelta(days=365)).isoformat(),
+                "daily_late_fee_pct": "0.1",
+                "current_amount": "650.00",
+                "current_amount_since": current_amount_since.isoformat(),
+            },
+            headers=owner["headers"],
+        )
+
+        assert created.status_code == 201
+        data = created.json()["data"]
+        assert data["currency"] == "USD"
+        assert data["current_amount"] == "650.00"
+        assert data["adjustment_frequency_months"] is None
+        assert data["adjustment_index"] is None
+
+        history = await client.get(
+            f"/v1/contracts/{data['id']}/adjustments", headers=owner["headers"]
+        )
+        assert history.status_code == 200
+        assert len(history.json()["data"]) == 1
+        assert history.json()["data"][0]["new_amount"] == "650.00"
+
+    async def test_ca_03_14_current_amount_since_before_start_date_returns_400(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+
+        response = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": "2026-06-15",
+                "end_date": "2027-06-15",
+                "daily_late_fee_pct": "0.1",
+                "current_amount": "150000.00",
+                "current_amount_since": "2026-05-01",
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["error"]["code"] == "INVALID_DATE_RANGE"
+        assert body["error"]["field"] == "current_amount_since"
+
+    async def test_ca_03_14_current_amount_since_after_today_returns_400(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+        today = datetime.now(UTC).date()
+        future_month = date(today.year, today.month, 1) + timedelta(days=62)
+        future_since = date(future_month.year, future_month.month, 1)
+
+        response = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": (today - timedelta(days=240)).isoformat(),
+                "end_date": (today + timedelta(days=365)).isoformat(),
+                "daily_late_fee_pct": "0.1",
+                "current_amount": "150000.00",
+                "current_amount_since": future_since.isoformat(),
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["error"]["code"] == "INVALID_DATE_RANGE"
+        assert body["error"]["field"] == "current_amount_since"
+
+    async def test_ca_03_14_current_amount_without_since_returns_400(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+
+        response = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": "2026-01-01",
+                "end_date": "2027-01-01",
+                "daily_late_fee_pct": "0.1",
+                "current_amount": "150000.00",
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    async def test_ca_03_14_current_amount_since_without_amount_returns_400(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+
+        response = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": "2026-01-01",
+                "end_date": "2027-01-01",
+                "daily_late_fee_pct": "0.1",
+                "current_amount_since": "2026-02-01",
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    async def test_ca_03_14_historical_amounts_without_frequency_returns_400(self, client, seed):
+        """CA-03-14: `historical_amounts[]` en un contrato SIN
+        `adjustment_frequency_months` devuelve 400 VALIDATION_ERROR --
+        sin frecuencia no hay nocion de "tramo"."""
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+
+        response = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": "2026-01-01",
+                "end_date": "2027-01-01",
+                "daily_late_fee_pct": "0.1",
+                "historical_amounts": ["100000.00", "120000.00"],
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+class TestCA0315HistoricalAmountsSupersedesSingleValue:
+    """CA-03-15 (issue #107): con `adjustment_frequency_months`
+    configurado, `current_amount`/`current_amount_since` quedan
+    superados por `historical_amounts[]` (400 VALIDATION_ERROR); un alta
+    normal (sin ninguno de los dos mecanismos) sigue igual."""
+
+    async def test_ca_03_15_current_amount_pair_rejected_when_frequency_configured(
+        self, client, seed
+    ):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+        today = datetime.now(UTC).date()
+        current_amount_since = date(today.year, today.month, 1)
+
+        response = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": (today - timedelta(days=240)).isoformat(),
+                "end_date": (today + timedelta(days=365)).isoformat(),
+                "daily_late_fee_pct": "0.1",
+                "adjustment_frequency_months": 4,
+                "adjustment_index": "icl",
+                "current_amount": "150000.00",
+                "current_amount_since": current_amount_since.isoformat(),
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    async def test_ca_03_15_normal_creation_has_no_synthetic_adjustment(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+
+        created = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": "2026-01-01",
+                "end_date": "2027-01-01",
+                "daily_late_fee_pct": "0.1",
+            },
+            headers=owner["headers"],
+        )
+        assert created.status_code == 201
+        data = created.json()["data"]
+        assert data["current_amount"] == "100000.00"
+        contract_id = data["id"]
+
+        history = await client.get(
+            f"/v1/contracts/{contract_id}/adjustments", headers=owner["headers"]
+        )
+        assert history.status_code == 200
+        assert history.json()["data"] == []
+
+
+class TestHistoricalAmountsShapeValidation:
+    """`ContractCreate._validate_historical_amounts_shape`: validaciones
+    de shape (sin DB, sin "hoy") de `historical_amounts[]` -- cada
+    elemento > 0, y al menos 2 elementos cuando se envia."""
+
+    async def test_historical_amounts_with_non_positive_element_returns_400(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+
+        response = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": "2026-01-01",
+                "end_date": "2027-01-01",
+                "daily_late_fee_pct": "0.1",
+                "adjustment_frequency_months": 4,
+                "adjustment_index": "icl",
+                "historical_amounts": ["100000.00", "0.00"],
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+    async def test_historical_amounts_with_single_element_returns_400(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+
+        response = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": "2026-01-01",
+                "end_date": "2027-01-01",
+                "daily_late_fee_pct": "0.1",
+                "adjustment_frequency_months": 4,
+                "adjustment_index": "icl",
+                "historical_amounts": ["100000.00"],
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+class TestCA0309HistoricalAmountsOneElapsedTramo:
+    """CA-03-09 (v2, issue #107): 1 tramo transcurrido mas alla del
+    inicial (2 elementos en `historical_amounts`) -- 1 ajuste sintetico
+    `applied`; al activar, el rent_period del mes actual nace con el
+    ultimo valor."""
+
+    async def test_ca_03_09_one_elapsed_tramo_creates_one_synthetic_adjustment(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+        today = datetime.now(UTC).date()
+        start_date = _months_ago(today, 1)  # 1 mes transcurrido, freq=1 -> 2 tramos totales
+
+        created = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": start_date.isoformat(),
+                "end_date": (today + timedelta(days=365)).isoformat(),
+                "daily_late_fee_pct": "0.1",
+                "adjustment_frequency_months": 1,
+                "adjustment_index": "icl",
+                "historical_amounts": ["100000.00", "150000.00"],
+            },
+            headers=owner["headers"],
+        )
+
+        assert created.status_code == 201
+        data = created.json()["data"]
+        assert data["current_amount"] == "150000.00"
+        assert data["initial_amount"] == "100000.00"
+        contract_id = data["id"]
+
+        history = await client.get(
+            f"/v1/contracts/{contract_id}/adjustments", headers=owner["headers"]
+        )
+        assert history.status_code == 200
+        rows = history.json()["data"]
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["status"] == "applied"
+        assert row["previous_amount"] == "100000.00"
+        assert row["new_amount"] == "150000.00"
+        assert row["pct_applied"] is None
+        assert row["notes"].startswith("Carga inicial:")
+        assert row["due_period"] == date(today.year, today.month, 1).isoformat()
+
+        response = await client.post(
+            f"/v1/contracts/{contract_id}/activate", headers=owner["headers"]
+        )
+        assert response.status_code == 200
+
+        current_month = date(today.year, today.month, 1)
+        session_factory = get_session_factory()
+        async with session_factory() as session, session.begin():
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
+            rent_period = await RentPeriodRepository(session).get_by_contract_and_period(
+                uuid.UUID(contract_id), owner["organization_id"], current_month
+            )
+        assert rent_period is not None
+        assert str(rent_period.amount_due) == "150000.00"
+
+
+class TestCA0310HistoricalAmountsTwoElapsedTramos:
+    """CA-03-10 (v2, issue #107): ejemplo del PO -- 10 meses corridos,
+    ajuste cada 4 -> original + 2 aumentos (3 elementos), 2 ajustes
+    sinteticos encadenados."""
+
+    async def test_ca_03_10_po_example_creates_two_chained_synthetic_adjustments(
+        self, client, seed
+    ):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+        today = datetime.now(UTC).date()
+        start_date = _months_ago(today, 10)
+
+        created = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": start_date.isoformat(),
+                "end_date": (today + timedelta(days=365)).isoformat(),
+                "daily_late_fee_pct": "0.1",
+                "adjustment_frequency_months": 4,
+                "adjustment_index": "icl",
+                "historical_amounts": ["100000.00", "120000.00", "150000.00"],
+            },
+            headers=owner["headers"],
+        )
+
+        assert created.status_code == 201
+        data = created.json()["data"]
+        assert data["current_amount"] == "150000.00"
+        contract_id = data["id"]
+
+        history = await client.get(
+            f"/v1/contracts/{contract_id}/adjustments", headers=owner["headers"]
+        )
+        assert history.status_code == 200
+        rows = sorted(history.json()["data"], key=lambda row: row["due_period"])
+        assert len(rows) == 2
+        first_due = start_date.replace(
+            month=(start_date.month - 1 + 4) % 12 + 1,
+            year=start_date.year + (start_date.month - 1 + 4) // 12,
+        )
+        second_due = start_date.replace(
+            month=(start_date.month - 1 + 8) % 12 + 1,
+            year=start_date.year + (start_date.month - 1 + 8) // 12,
+        )
+        assert rows[0]["due_period"] == first_due.isoformat()
+        assert rows[0]["previous_amount"] == "100000.00"
+        assert rows[0]["new_amount"] == "120000.00"
+        assert rows[0]["pct_applied"] is None
+        assert rows[0]["notes"].startswith("Carga inicial:")
+        assert rows[1]["due_period"] == second_due.isoformat()
+        assert rows[1]["previous_amount"] == "120000.00"
+        assert rows[1]["new_amount"] == "150000.00"
+        assert rows[1]["pct_applied"] is None
+        assert rows[1]["notes"].startswith("Carga inicial:")
+
+
+class TestCA0311HistoricalAmountsNotAllowedWithZeroElapsedTramos:
+    """CA-03-11 (v2, issue #107): el contrato recien arranco (0 tramos
+    transcurridos mas alla del inicial) -- enviar `historical_amounts`
+    de todos modos devuelve 400 VALIDATION_ERROR."""
+
+    async def test_ca_03_11_historical_amounts_rejected_when_no_tramo_elapsed(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+        today = datetime.now(UTC).date()
+        start_date = date(today.year, today.month, 1)
+
+        response = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": start_date.isoformat(),
+                "end_date": (today + timedelta(days=365)).isoformat(),
+                "daily_late_fee_pct": "0.1",
+                "adjustment_frequency_months": 4,
+                "adjustment_index": "icl",
+                "historical_amounts": ["100000.00", "120000.00"],
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["error"]["code"] == "VALIDATION_ERROR"
+        assert body["error"]["field"] == "historical_amounts"
+        assert body["error"]["details"]["expected_count"] == 1
+
+
+class TestCA0312HistoricalAmountsWrongCount:
+    """CA-03-12 (v2, issue #107): cantidad de `historical_amounts[]`
+    distinta a la esperada devuelve 400 VALIDATION_ERROR con un mensaje
+    que indica cuantos valores espera el sistema."""
+
+    async def test_ca_03_12_wrong_count_returns_400_with_expected_count_message(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+        today = datetime.now(UTC).date()
+        start_date = _months_ago(today, 1)  # freq=1 -> se esperan 2 elementos
+
+        response = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": start_date.isoformat(),
+                "end_date": (today + timedelta(days=365)).isoformat(),
+                "daily_late_fee_pct": "0.1",
+                "adjustment_frequency_months": 1,
+                "adjustment_index": "icl",
+                "historical_amounts": ["100000.00", "120000.00", "150000.00"],
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["error"]["code"] == "VALIDATION_ERROR"
+        assert body["error"]["field"] == "historical_amounts"
+        assert body["error"]["details"]["expected_count"] == 2
+        assert body["error"]["details"]["received_count"] == 3
+        assert "2" in body["error"]["message"]
+
+
+class TestCA0313HistoricalAmountsFirstElementMustMatchInitial:
+    """CA-03-13 (v2, issue #107): `historical_amounts[0]` distinto de
+    `initial_amount` devuelve 400 VALIDATION_ERROR."""
+
+    async def test_ca_03_13_first_element_mismatch_returns_400(self, client, seed):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+        today = datetime.now(UTC).date()
+        start_date = _months_ago(today, 1)
+
+        response = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": start_date.isoformat(),
+                "end_date": (today + timedelta(days=365)).isoformat(),
+                "daily_late_fee_pct": "0.1",
+                "adjustment_frequency_months": 1,
+                "adjustment_index": "icl",
+                "historical_amounts": ["999999.00", "150000.00"],
+            },
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 400
+        body = response.json()
+        assert body["error"]["code"] == "VALIDATION_ERROR"
+        assert body["error"]["field"] == "historical_amounts"
 
 
 class TestCA0302ContractOverlap:
@@ -551,6 +1122,52 @@ class TestCA0308AndCA0104TerminateReturnsPropertyToAvailable:
         assert rent_period.currency == "ARS"
         assert rent_period.status == "pending"
 
+    async def test_ca_03_14_activate_generates_rent_period_with_declared_current_amount(
+        self, client, seed
+    ):
+        """CA-03-14 (v2, issue #107, RN-08/RN-C06 -- sin
+        adjustment_frequency_months, comportamiento del issue #100 sin
+        cambios): alta retroactiva con monto vigente -- el periodo del
+        mes actual nace con el monto vigente declarado, no con
+        `initial_amount`."""
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+        today = datetime.now(UTC).date()
+        current_amount_since = date(today.year, today.month, 1)
+
+        created = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": (today - timedelta(days=240)).isoformat(),
+                "end_date": (today + timedelta(days=365)).isoformat(),
+                "daily_late_fee_pct": "0.1",
+                "current_amount": "150000.00",
+                "current_amount_since": current_amount_since.isoformat(),
+            },
+            headers=owner["headers"],
+        )
+        assert created.status_code == 201
+        contract_id = created.json()["data"]["id"]
+
+        response = await client.post(
+            f"/v1/contracts/{contract_id}/activate", headers=owner["headers"]
+        )
+        assert response.status_code == 200
+
+        current_month = date(today.year, today.month, 1)
+        session_factory = get_session_factory()
+        async with session_factory() as session, session.begin():
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
+            rent_period = await RentPeriodRepository(session).get_by_contract_and_period(
+                uuid.UUID(contract_id), owner["organization_id"], current_month
+            )
+        assert rent_period is not None
+        assert str(rent_period.amount_due) == "150000.00"
+
     async def test_ca_03_08_ca_01_04_terminate_active_contract_returns_property_to_available(
         self, client, seed
     ):
@@ -601,6 +1218,121 @@ class TestCA0308AndCA0104TerminateReturnsPropertyToAvailable:
 
         assert response.status_code == 422
         assert response.json()["error"]["code"] == "CONTRACT_NOT_ACTIVE"
+
+
+class TestCAR124ContractTerminatePermission:
+    """sdd_03 v1.11 §"Catalogo de Permisos" (decision #124, issue #105):
+    terminar un contrato es exclusivo de `owner` -- permiso atomico
+    dedicado `contract:terminate`, ya no `contract:manage` (que `admin`
+    sigue teniendo para el resto del ciclo de vida del contrato). Mismo
+    criterio de test que `test_set_commission_permission.py` (issue #51):
+    ejercitar el permiso atomico en `permissions[]`, nunca el nombre del
+    rol."""
+
+    async def _seed_active_contract(self, seed, organization_id):
+        property_id, renter_id = await _seed_property_and_renter(seed, organization_id)
+        contract_id = await seed.create_contract_row(
+            organization_id=organization_id,
+            property_id=property_id,
+            renter_id=renter_id,
+            status="active",
+        )
+        await _set_property_status(property_id, "rented")
+        return contract_id, property_id
+
+    async def test_ca_r124_01_owner_terminates_contract_succeeds(self, client, seed):
+        """CA-R124-01: el owner (seed real de `ROLE_DEFINITIONS`, que ya
+        incluye `contract:terminate`) puede terminar un contrato activo."""
+        _org, owner = await _seed_org_with_owner(seed)
+        contract_id, property_id = await self._seed_active_contract(seed, owner["organization_id"])
+
+        response = await client.post(
+            f"/v1/contracts/{contract_id}/terminate",
+            json={"reason": "Mudanza del inquilino"},
+            headers=owner["headers"],
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["status"] == "terminated"
+        assert await seed.get_property_status(property_id) == "available"
+
+    async def test_ca_r124_02_admin_with_contract_manage_returns_403(self, client, seed):
+        """CA-R124-02: un `admin` seedeado con los permisos REALES del rol
+        de sistema (`contract:manage`, sin `contract:terminate` --
+        `ROLE_DEFINITIONS`) recibe 403 FORBIDDEN al intentar terminar un
+        contrato, aunque pueda crear/actualizar/activar contratos sin
+        restriccion."""
+        org = await seed.create_organization_with_system_roles()
+        admin = await seed.add_member(
+            organization_id=org["organization_id"],
+            role_id=org["roles"]["admin"],
+            role_name="admin",
+        )
+        contract_id, _property_id = await self._seed_active_contract(seed, org["organization_id"])
+
+        response = await client.post(
+            f"/v1/contracts/{contract_id}/terminate",
+            json={"reason": "Intento de admin"},
+            headers=admin["headers"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "FORBIDDEN"
+
+    async def test_ca_r124_03_custom_role_with_contract_terminate_permission_succeeds(
+        self, client, seed
+    ):
+        """CA-R124-03: la autorizacion es por el permiso atomico
+        `contract:terminate` en `permissions[]` -- no por el nombre del
+        rol. Un rol CUSTOM (`custom_manager`, no `owner`) con ese permiso
+        explicito puede terminar el contrato."""
+        org_id = await seed.create_organization(status="active")
+        permissions = ["contract:read", "contract:manage", "contract:terminate"]
+        role_id = await seed.create_role(org_id, name="custom_manager", permissions=permissions)
+        member = await seed.add_member(
+            organization_id=org_id,
+            role_id=role_id,
+            role_name="custom_manager",
+            permissions=permissions,
+        )
+        contract_id, property_id = await self._seed_active_contract(seed, org_id)
+
+        response = await client.post(
+            f"/v1/contracts/{contract_id}/terminate",
+            json={"reason": "Terminado por rol custom"},
+            headers=member["headers"],
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"]["status"] == "terminated"
+        assert await seed.get_property_status(property_id) == "available"
+
+    async def test_ca_r124_03_custom_role_without_contract_terminate_returns_403(
+        self, client, seed
+    ):
+        """Complementario a CA-R124-03: un rol CUSTOM con `contract:manage`
+        pero SIN `contract:terminate` recibe 403 -- confirma que el
+        permiso nuevo es estrictamente necesario, no basta con
+        `contract:manage` sin importar el nombre del rol."""
+        org_id = await seed.create_organization(status="active")
+        permissions = ["contract:read", "contract:manage"]
+        role_id = await seed.create_role(org_id, name="custom_manager", permissions=permissions)
+        member = await seed.add_member(
+            organization_id=org_id,
+            role_id=role_id,
+            role_name="custom_manager",
+            permissions=permissions,
+        )
+        contract_id, _property_id = await self._seed_active_contract(seed, org_id)
+
+        response = await client.post(
+            f"/v1/contracts/{contract_id}/terminate",
+            json={"reason": "Intento sin permiso"},
+            headers=member["headers"],
+        )
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "FORBIDDEN"
 
 
 class TestContractListFilters:

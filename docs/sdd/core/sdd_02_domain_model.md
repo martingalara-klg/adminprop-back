@@ -2,12 +2,12 @@
 name: AdminProp — Modelo de Dominio
 description: Entidades del dominio de gestión de alquileres, invariantes (RN-C, RN-P, RN-L, RN-A, RN-D), relaciones y glosario unificado
 type: project
-version: 1.2
-fecha: 2026-08-20
+version: 1.7
+fecha: 2026-08-28
 ---
 # AdminProp — Modelo de Dominio
 
-**Versión:** 1.2
+**Versión:** 1.7
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -121,6 +121,19 @@ Quien alquila una propiedad mediante un contrato. Es un registro, no un usuario 
 
 ---
 
+### 2.4a Barrio (Neighborhood)
+
+Catálogo parametrizable por organización para agrupar propiedades (issue #99, feedback de uso real 2026-08-27) — habilita agrupar por barrio en liquidaciones y vistas futuras.
+
+| Atributo | Tipo | Descripción |
+|---|---|---|
+| id | UUID | Identificador único |
+| name | texto | Nombre del barrio |
+
+**Invariantes:**
+- `name` único por organización, case-insensitive.
+- Un barrio con propiedades asociadas no se elimina; se desactiva (soft delete) — `409 ENTITY_HAS_DEPENDENCIES` si tiene propiedades activas.
+
 ### 2.5 Propiedad (Property)
 
 El inmueble administrado. Pertenece a un propietario.
@@ -129,14 +142,17 @@ El inmueble administrado. Pertenece a un propietario.
 |---|---|---|
 | id | UUID | Identificador único |
 | landlord_id | UUID | FK a Propietario — obligatorio |
+| neighborhood_id | UUID | FK a Barrio — **nullable en DB** (datos legacy preexistentes a issue #99), **obligatorio en la API** para create/update de propiedades de ahora en más |
 | address | texto | Dirección completa |
-| property_type | texto | Departamento, casa, local, cochera, otro (catálogo simple) |
+| property_type | enum | `departamento` \| `casa` \| `duplex` \| `local` \| `cochera` \| `otro` (catálogo cerrado, decisión #122, issue #103) |
 | status | enum | `available` \| `rented` \| `unavailable` |
 | notes | texto | Observaciones |
 
 **Invariantes:**
 - `status = rented` ⟺ existe un contrato `active` sobre la propiedad.
 - Una propiedad con historial (contratos, cobros, reparaciones) no se elimina físicamente; soft delete.
+- `neighborhood_id` es obligatorio en el alta/edición vía API (decisión del PO, issue #99); las propiedades creadas antes de esta feature pueden tener `neighborhood_id = NULL` y siguen siendo legibles — la obligatoriedad rige solo hacia adelante.
+- `property_type` es un catálogo cerrado (`CHECK` en DB) desde la decisión #122 (issue #103, ronda de feedback #2 del PO); antes de esa decisión era texto libre sugerido en UI, sin restricción a nivel de base de datos.
 
 ---
 
@@ -188,12 +204,13 @@ El contrato de locación: vincula propiedad + inquilino con las condiciones pact
 - `current_amount` nunca se edita directamente: solo cambia al aplicar un Ajuste (ver RN-C04).
 - Un contrato `expired` o `terminated` no genera nuevos Períodos de Alquiler (ver RN-C05); sus deudas pendientes siguen cobrables.
 - `daily_late_fee_pct` ≥ 0.
+- Al alta de un contrato ya en curso (ver RN-C06, v2 — issue #107): si `adjustment_frequency_months` está configurado, `current_amount` nace en el **último** valor de la cadena `historical_amounts[]` declarada; si no está configurado (USD, o ARS sin ajuste), `current_amount` puede declararse vía `current_amount`/`current_amount_since` (comportamiento del issue #100, sin cambios).
 
 ---
 
 ### 2.8 Ajuste de Contrato (ContractAdjustment)
 
-La actualización del monto de un contrato ARS. El sistema detecta cuándo toca (según la frecuencia), lo genera como pendiente y notifica; el operador ingresa el % calculado por fuera.
+La actualización del monto de un contrato. El caso principal (ARS): el sistema detecta cuándo toca el ajuste por índice (según la frecuencia), lo genera como pendiente y notifica; el operador ingresa el % calculado por fuera. Un segundo caso (RN-C06, issues #100/#107): al dar de alta un contrato en curso, el sistema registra directamente uno o más ajustes **sintéticos** ya `applied` — sin `pct_applied` (no hubo % calculado) y con `notes` prefijado `"Carga inicial:"` — que dejan trazado el historial inicial→vigente y sirven de ancla para la detección del próximo ajuste periódico (solo relevante para ARS con `adjustment_frequency_months`). Con `adjustment_frequency_months` configurado (v2, issue #107) puede haber **varios** ajustes sintéticos encadenados, uno por tramo transcurrido a partir del segundo; sin frecuencia configurada (USD, o ARS sin ajuste — issue #100, sin cambios) hay a lo sumo **uno**.
 
 | Atributo | Tipo | Descripción |
 |---|---|---|
@@ -201,7 +218,7 @@ La actualización del monto de un contrato ARS. El sistema detecta cuándo toca 
 | contract_id | UUID | FK a Contrato |
 | due_period | año-mes | Período al que aplica el ajuste (ej: 2026-09) |
 | status | enum | `pending` \| `applied` |
-| pct_applied | decimal | % ingresado manualmente por el operador (null mientras `pending`) |
+| pct_applied | decimal | % ingresado manualmente por el operador (null mientras `pending`; null también en el ajuste sintético de carga inicial, RN-C06 — no hay % calculado) |
 | previous_amount | decimal | Monto vigente antes del ajuste |
 | new_amount | decimal | Monto resultante = previous × (1 + pct/100) |
 | applied_by / applied_at | UUID / timestamp | Quién y cuándo lo aplicó |
@@ -431,6 +448,10 @@ Registro append-only de las operaciones sensibles.
 - **RN-C03:** Ningún ajuste se aplica automáticamente: el sistema genera el ajuste pendiente y notifica; el nuevo monto solo existe tras el ingreso **manual** del % por un operador. El índice del contrato es informativo.
 - **RN-C04:** El monto vigente de un contrato (`current_amount`) solo cambia mediante un Ajuste registrado en el historial; nunca por edición directa.
 - **RN-C05:** Un contrato `expired` o `terminated` no genera nuevos períodos de alquiler; sus deudas existentes siguen cobrables.
+- **RN-C06** (v2, issue #107, decisión #126 — supersede parcialmente la decisión #121/issue #100): Alta de contrato en curso. El mecanismo depende de si el contrato tiene `adjustment_frequency_months` configurado:
+  - **Con `adjustment_frequency_months` configurado (solo ARS):** el campo es `historical_amounts[]` — lista ORDENADA de montos, uno por cada **tramo transcurrido** desde `start_date`. Tramo `i` = `[start_date + i·frecuencia meses, start_date + (i+1)·frecuencia meses)`, día 1 de mes; el último tramo transcurrido es el que contiene el mes actual (inclusive). La cantidad esperada se calcula en el backend (`start_date` + `adjustment_frequency_months` + hoy) — enviar una cantidad distinta es `400 VALIDATION_ERROR` con un mensaje que indica cuántos valores espera el sistema y el rango de fechas de cada tramo. `historical_amounts[0]` debe ser igual a `initial_amount` (400 VALIDATION_ERROR si difiere) — es el monto del tramo 0, ya declarado por ese campo. Si el contrato recién empezó (0 tramos transcurridos más allá del 0, es decir 1 solo tramo posible) no corresponde enviar `historical_amounts` — equivale a un alta normal; enviarlo en ese caso es `400 VALIDATION_ERROR`. Si vienen ≥ 2 elementos: `contracts.current_amount` nace en el **último** valor de la lista, y el sistema registra una **cadena** de `ContractAdjustment` sintéticos en estado `applied` — uno por cada tramo a partir del segundo — con `due_period` = inicio de ese tramo, `previous_amount`/`new_amount` encadenados con el tramo anterior/siguiente, `pct_applied = NULL` y `notes` prefijado `"Carga inicial:"`. El ÚLTIMO de esos ajustes sintéticos es el ancla que usa `detect_due_adjustments` (RN-C03, cuenta desde el `due_period` del último `applied`) sin necesidad de tocar esa lógica. `current_amount`/`current_amount_since` **no se aceptan** en este caso (400 VALIDATION_ERROR) — quedan superados por `historical_amounts[]`.
+  - **Sin `adjustment_frequency_months` configurado (USD siempre; ARS sin ajuste periódico):** se mantiene el mecanismo de un único valor vigente del issue #100, sin cambios — `current_amount` + `current_amount_since` opcionales, solo válidos **juntos**; `current_amount_since` se normaliza al día 1 de su mes y debe ser `>= start_date` y `<= hoy`. Si vienen: `contracts.current_amount` nace en `current_amount` (no en `initial_amount`, que queda como referencia histórica informativa) y el sistema registra un único `ContractAdjustment` sintético `applied` con `due_period = current_amount_since`, `previous_amount = initial_amount`, `new_amount = current_amount`, `pct_applied = NULL`, `notes` prefijado `"Carga inicial:"`. `historical_amounts[]` **no se acepta** en este caso (400 VALIDATION_ERROR) — sin frecuencia configurada no hay noción de "tramo".
+  - Los datos ya cargados por el issue #100 (contratos con un único ajuste sintético "Carga inicial") siguen siendo válidos — son ajustes `applied` normales, indistinguibles en DB de una cadena v2 de un solo eslabón.
 
 ### RN-P — Pagos y Cobranzas
 
@@ -441,7 +462,7 @@ Registro append-only de las operaciones sensibles.
 - **RN-P05:** Se aceptan pagos parciales; el saldo restante queda como deuda del inquilino.
 - **RN-P06:** Si la moneda del pago difiere de la del contrato, el tipo de cambio se ingresa manualmente y es obligatorio.
 - **RN-P07:** Un cobro con destino "cuenta del propietario" es dinero ya rendido: no suma al neto a rendir, pero sí a la base de cálculo de la comisión.
-- **RN-P08:** El recibo de cobro se genera bajo demanda (opcional) y refleja exactamente lo imputado; el certificado de **libre deuda** solo se emite si el inquilino no registra saldos impagos, y cada emisión queda auditada.
+- **RN-P08:** El recibo de cobro se genera bajo demanda (opcional) y refleja exactamente lo imputado; el certificado de **libre deuda es por contrato** (issue #104, decisión #123, 2026-08-28: un inquilino puede tener 2 contratos y deber en uno solo) — se emite desde el contrato y verifica SOLO los períodos de ESE contrato (nunca los de otros contratos del mismo inquilino), y cada emisión queda auditada.
 
 ### RN-L — Liquidaciones
 
@@ -477,6 +498,7 @@ Organization 1─N Landlord
 Organization 1─N Renter
 
 Landlord 1─N Property
+Neighborhood 1─N Property
 Property 1─N PropertyServiceAccount
 Property 1─N RecurringCharge 1─N ChargeEntry
 Property 1─N WorkOrder 1─N WorkOrderQuote

@@ -317,11 +317,41 @@ def seed(rsa_keypair):
                 )
             return renter_id
 
+        async def create_neighborhood_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            name: str = "Barrio de prueba",
+            deleted: bool = False,
+        ) -> uuid.UUID:
+            """Issue #99: siembra un `neighborhood` directamente en DB --
+            necesario porque `POST /v1/properties` ahora exige
+            `neighborhood_id` valido del mismo tenant."""
+            neighborhood_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
+                deleted_at = datetime.now(UTC) if deleted else None
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO neighborhoods (id, organization_id, name, deleted_at) "
+                        "VALUES (:id, :org_id, :name, :deleted_at)"
+                    ),
+                    {
+                        "id": str(neighborhood_id),
+                        "org_id": str(organization_id),
+                        "name": name,
+                        "deleted_at": deleted_at,
+                    },
+                )
+            return neighborhood_id
+
         async def create_property_row(
             self,
             *,
             organization_id: uuid.UUID,
             landlord_id: uuid.UUID,
+            neighborhood_id: uuid.UUID | None = None,
             address: str = "Av. Test 123",
             property_type: str = "departamento",
             status: str = "available",
@@ -329,7 +359,8 @@ def seed(rsa_keypair):
         ) -> uuid.UUID:
             """Siembra una `property` directamente en DB -- usado por los
             tests de aislamiento cross-tenant, que necesitan un recurso en
-            la organizacion B sin usar `client`."""
+            la organizacion B sin usar `client`. `neighborhood_id` es
+            opcional (issue #99: nullable en DB, propiedades legacy)."""
             property_id = uuid.uuid4()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
@@ -338,15 +369,16 @@ def seed(rsa_keypair):
                 await session.execute(
                     sa.text(
                         "INSERT INTO properties "
-                        "(id, organization_id, landlord_id, address, property_type, status, "
-                        "deleted_at) "
-                        "VALUES (:id, :org_id, :landlord_id, :address, :property_type, :status, "
-                        ":deleted_at)"
+                        "(id, organization_id, landlord_id, neighborhood_id, address, "
+                        "property_type, status, deleted_at) "
+                        "VALUES (:id, :org_id, :landlord_id, :neighborhood_id, :address, "
+                        ":property_type, :status, :deleted_at)"
                     ),
                     {
                         "id": str(property_id),
                         "org_id": str(organization_id),
                         "landlord_id": str(landlord_id),
+                        "neighborhood_id": str(neighborhood_id) if neighborhood_id else None,
                         "address": address,
                         "property_type": property_type,
                         "status": status,
