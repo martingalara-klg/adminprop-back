@@ -166,6 +166,55 @@ class TestCA0318GetContractWithRetroactiveInitialLoad:
             assert by_period[earliest_period] == "100000.00"
 
 
+class TestCA0318VGetContractWithHistoricalAmountsChain:
+    """CA-03-18 (v2, issue #107, RN-08/RN-C06): `monthly_amounts[]` de
+    un contrato dado de alta con `historical_amounts[]` (varios tramos)
+    refleja CADA ajuste sintetico de la cadena -- coherencia con RF-06
+    (issue #106): el calculo (`compute_monthly_amounts`) no distingue un
+    ajuste sintetico de uno manual, solo mira `applied`."""
+
+    async def test_ca_03_18v_historical_amounts_chain_shifts_monthly_amounts_per_tramo(
+        self, client, seed
+    ):
+        _org, owner = await _seed_org_with_owner(seed)
+        property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
+        today = datetime.now(UTC).date()
+        # freq=4, 10 meses corridos -- ejemplo del PO: 3 tramos.
+        zero_based_month = today.month - 1 - 10
+        start_year = today.year + zero_based_month // 12
+        start_month = zero_based_month % 12 + 1
+        start_date = date(start_year, start_month, 1)
+
+        created = await client.post(
+            "/v1/contracts",
+            json={
+                "property_id": str(property_id),
+                "renter_id": str(renter_id),
+                "currency": "ARS",
+                "initial_amount": "100000.00",
+                "start_date": start_date.isoformat(),
+                "end_date": (today + timedelta(days=365)).isoformat(),
+                "daily_late_fee_pct": "0.1",
+                "adjustment_frequency_months": 4,
+                "adjustment_index": "icl",
+                "historical_amounts": ["100000.00", "120000.00", "150000.00"],
+            },
+            headers=owner["headers"],
+        )
+        assert created.status_code == 201
+        contract_id = created.json()["data"]["id"]
+
+        response = await client.get(f"/v1/contracts/{contract_id}", headers=owner["headers"])
+
+        assert response.status_code == 200
+        rows = response.json()["data"]["monthly_amounts"]
+        by_period = {row["period"]: row["amount"] for row in rows}
+        current_month = date(today.year, today.month, 1).isoformat()
+        earliest_period = min(by_period)
+        assert by_period[current_month] == "150000.00"
+        assert by_period[earliest_period] == "100000.00"
+
+
 class TestCA0319GetTerminatedContractCutsSeries:
     """CA-03-19: contrato `terminated` corta `monthly_amounts[]` en el mes
     de la terminacion efectiva (evento `contract.terminated` de

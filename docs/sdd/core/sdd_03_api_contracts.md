@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.12
+version: 1.13
 fecha: 2026-08-28
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.12
+**Versión:** 1.13
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -245,7 +245,7 @@ DELETE /neighborhoods/:id                (soft; 409 ENTITY_HAS_DEPENDENCIES si t
 
 ```
 GET    /contracts                        (?status=&expiring_in_days=)
-POST   /contracts                        (valida CONTRACT_OVERLAP, RN-C02, RN-C06)
+POST   /contracts                        (valida CONTRACT_OVERLAP, RN-C02, RN-C06 v2 — historical_amounts[] | current_amount+since)
 GET    /contracts/:id                    (incluye monthly_amounts[] — issue #106, ver debajo)
 PATCH  /contracts/:id                    (solo notes/metadata; montos NUNCA — RN-C04)
 POST   /contracts/:id/activate           (draft → active; genera el rent_period del mes en curso si corresponde)
@@ -260,7 +260,17 @@ POST   /adjustments/:id/apply            (body: { pct }; pending → applied; re
 
 **`POST /contracts/:id/terminate` — issue #105, decisión #124 (RN-A, `spec_module_03`):** feedback #2 del PO — terminar un contrato pasa a ser exclusivo de `owner` (hasta ahora, `contract:manage` se lo permitía también a `admin`). Se agrega el permiso atómico dedicado `contract:terminate` al catálogo, sembrado SOLO en el rol `owner` (`admin` conserva `contract:manage` para el resto del ciclo de vida del contrato — crear, actualizar, activar). Mismo patrón que `landlord:set-commission` (decisión #116): migración de backfill agrega el permiso al rol `owner` de organizaciones ya existentes.
 
-**`POST /contracts` — issue #100, decisión #121 (RN-C06, `sdd_02` §3):** el body acepta dos campos opcionales adicionales, `current_amount` (decimal > 0) y `current_amount_since` (fecha), **solo válidos juntos** — enviar uno sin el otro es `400 VALIDATION_ERROR`. Aplican tanto a contratos ARS como USD. Si vienen: la respuesta trae `current_amount` igual al valor declarado (no a `initial_amount`) y el historial (`GET /contracts/:id/adjustments`) incluye el ajuste sintético `applied` de carga inicial (RN-C06). Validaciones de fecha (`current_amount_since`, ya normalizado al día 1 de su mes, debe ser `>= start_date` y `<= hoy`) responden `400 INVALID_DATE_RANGE` con `field: "current_amount_since"`.
+**`POST /contracts` — issue #107, decisión #126 (RN-C06 v2, `sdd_02` §3 — supersede parcialmente la decisión #121/issue #100):** el body acepta dos mecanismos de alta de contrato en curso, **mutuamente excluyentes** según si el contrato configura `adjustment_frequency_months` (siempre `null` para USD, opcional para ARS):
+
+- **Con `adjustment_frequency_months` (ARS con ajuste periódico):** campo opcional `historical_amounts` — lista ORDENADA de decimales `> 0`, uno por cada **tramo transcurrido** desde `start_date` (tramo `i` = `[start_date + i·frecuencia meses, start_date + (i+1)·frecuencia meses)`, fechas derivadas por el backend — el cliente nunca las envía). La cantidad esperada la calcula el backend desde `start_date` + `adjustment_frequency_months` + la fecha de hoy:
+  - Cantidad incorrecta → `400 VALIDATION_ERROR`, `field: "historical_amounts"`, mensaje indicando cuántos valores espera el sistema y el rango `[start, end)` de cada tramo esperado (en `details.expected_count` y `details.tramos`).
+  - `historical_amounts[0]` distinto de `initial_amount` → `400 VALIDATION_ERROR`, `field: "historical_amounts"`.
+  - Si el contrato recién arrancó (un solo tramo posible, ninguno "transcurrido" más allá del inicial) no corresponde enviarlo — enviarlo en ese caso también es `400 VALIDATION_ERROR` (equivale a un alta normal, sin declarar nada).
+  - `current_amount`/`current_amount_since` en el body de un contrato con `adjustment_frequency_months` → `400 VALIDATION_ERROR` (quedan superados por `historical_amounts` para este caso).
+  - Si `historical_amounts` viene con ≥ 2 elementos: la respuesta trae `current_amount` igual al ÚLTIMO valor de la lista, y el historial (`GET /contracts/:id/adjustments`) incluye una **cadena** de ajustes sintéticos `applied` de carga inicial (uno por tramo a partir del segundo, RN-C06 v2).
+- **Sin `adjustment_frequency_months` (USD siempre; ARS sin ajuste periódico):** se mantiene, sin cambios, el mecanismo del issue #100 — campos opcionales `current_amount` (decimal > 0) y `current_amount_since` (fecha), **solo válidos juntos** (enviar uno sin el otro es `400 VALIDATION_ERROR`). `current_amount_since`, normalizado al día 1 de su mes, debe ser `>= start_date` y `<= hoy` (`400 INVALID_DATE_RANGE`, `field: "current_amount_since"`). Si vienen: la respuesta trae `current_amount` igual al valor declarado y el historial incluye el único ajuste sintético `applied` correspondiente. `historical_amounts` en el body de un contrato sin `adjustment_frequency_months` → `400 VALIDATION_ERROR` (sin frecuencia no hay noción de "tramo").
+
+Los contratos ya dados de alta con el mecanismo del issue #100 (un único ajuste sintético) siguen siendo válidos — no requieren migración, son ajustes `applied` normales.
 
 **`GET /contracts/:id` — issue #106, decisión #125 (`spec_module_03` RF-06):** feedback #2 del PO — la ficha del contrato debe mostrar el valor del alquiler mes a mes (el actual primero, hacia atrás), **derivado en el backend** (el front no calcula lógica de negocio). La respuesta agrega `monthly_amounts[]`, lista de `{ "period": "YYYY-MM-01", "amount": "123.45" }` (mismo formato de `period` que `due_period` de `ContractAdjustment` — día 1 del mes calendario; `amount` como `NUMERIC`, nunca float), en **orden DESCENDENTE**. El rango va desde `start_date` hasta:
 - el mes actual, si el contrato sigue vigente (`draft`/`active`);
