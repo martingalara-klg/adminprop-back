@@ -74,7 +74,7 @@ La vista de detalle reúne todo lo de la propiedad:
 ## Validaciones
 
 - `address`: 5–300 caracteres, obligatoria.
-- `property_type`: catálogo cerrado (decisión #122, issue #103) — uno de `departamento`, `casa`, `duplex`, `local`, `cochera`, `otro`. Un valor fuera del catálogo devuelve `422 VALIDATION_ERROR`.
+- `property_type`: catálogo cerrado (decisión #122, issue #103) — uno de `departamento`, `casa`, `duplex`, `local`, `cochera`, `otro`. Un valor fuera del catálogo devuelve `400 VALIDATION_ERROR`.
 - `service_type`: uno de los 7 valores del enum.
 - `account_number`: 1–100 caracteres, obligatorio en cada cuenta.
 - `neighborhood_id` (issue #99): obligatorio en `POST /properties`; en `PATCH /properties/:id` obligatorio solo si el campo viene en el body (no puede enviarse `null`). Debe referenciar un barrio existente, del mismo tenant y no borrado — de lo contrario `404 NOT_FOUND` (`field: "neighborhood_id"`).
@@ -91,7 +91,7 @@ La vista de detalle reúne todo lo de la propiedad:
 - [ ] **CA-01-07** (issue #99): ABM de barrios funciona — alta, rename, listado del catálogo y baja lógica; un `name` duplicado (case-insensitive) en la misma organización devuelve `409 CONFLICT`; borrar un barrio con propiedades asociadas devuelve `409 ENTITY_HAS_DEPENDENCIES`.
 - [ ] **CA-01-08** (issue #99): Crear o editar una propiedad sin `neighborhood_id` devuelve `400 VALIDATION_ERROR`; con un `neighborhood_id` inexistente o de otra organización devuelve `404 NOT_FOUND`. Una propiedad legacy (creada antes de issue #99, `neighborhood_id = NULL` en DB) sigue siendo legible en listado y ficha, con `neighborhood: null`.
 - [ ] **CA-01-09** (issue #99): `GET /properties?neighborhood_id=<id>` devuelve solo las propiedades de ese barrio.
-- [ ] **CA-01-10** (issue #103): `duplex` es un valor válido de `property_type` — se puede crear y editar una propiedad con `property_type: "duplex"`; un valor fuera del catálogo cerrado (`departamento`/`casa`/`duplex`/`local`/`cochera`/`otro`) devuelve `422 VALIDATION_ERROR`.
+- [ ] **CA-01-10** (issue #103): `duplex` es un valor válido de `property_type` — se puede crear y editar una propiedad con `property_type: "duplex"`; un valor fuera del catálogo cerrado (`departamento`/`casa`/`duplex`/`local`/`cochera`/`otro`) devuelve `400 VALIDATION_ERROR`.
 
 ## Integraciones
 
