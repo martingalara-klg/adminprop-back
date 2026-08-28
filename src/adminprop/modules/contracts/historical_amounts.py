@@ -38,9 +38,7 @@ def _add_months(anchor: date, months: int) -> date:
     return date(year, month, 1)
 
 
-def expected_tramo_count(
-    *, start_date: date, adjustment_frequency_months: int, today: date
-) -> int:
+def expected_tramo_count(*, start_date: date, adjustment_frequency_months: int, today: date) -> int:
     """RN-C06 v2: cantidad de tramos transcurridos desde `start_date`
     (inclusive el que contiene el mes actual). Ej: `start_date` hace 10
     meses, `adjustment_frequency_months=4` -> tramo 0 (meses 1-4), tramo 1

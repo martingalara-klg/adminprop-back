@@ -577,9 +577,7 @@ class TestCA0309HistoricalAmountsOneElapsedTramo:
     `applied`; al activar, el rent_period del mes actual nace con el
     ultimo valor."""
 
-    async def test_ca_03_09_one_elapsed_tramo_creates_one_synthetic_adjustment(
-        self, client, seed
-    ):
+    async def test_ca_03_09_one_elapsed_tramo_creates_one_synthetic_adjustment(self, client, seed):
         _org, owner = await _seed_org_with_owner(seed)
         property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
         today = datetime.now(UTC).date()
@@ -704,9 +702,7 @@ class TestCA0311HistoricalAmountsNotAllowedWithZeroElapsedTramos:
     transcurridos mas alla del inicial) -- enviar `historical_amounts`
     de todos modos devuelve 400 VALIDATION_ERROR."""
 
-    async def test_ca_03_11_historical_amounts_rejected_when_no_tramo_elapsed(
-        self, client, seed
-    ):
+    async def test_ca_03_11_historical_amounts_rejected_when_no_tramo_elapsed(self, client, seed):
         _org, owner = await _seed_org_with_owner(seed)
         property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
         today = datetime.now(UTC).date()
@@ -741,9 +737,7 @@ class TestCA0312HistoricalAmountsWrongCount:
     distinta a la esperada devuelve 400 VALIDATION_ERROR con un mensaje
     que indica cuantos valores espera el sistema."""
 
-    async def test_ca_03_12_wrong_count_returns_400_with_expected_count_message(
-        self, client, seed
-    ):
+    async def test_ca_03_12_wrong_count_returns_400_with_expected_count_message(self, client, seed):
         _org, owner = await _seed_org_with_owner(seed)
         property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
         today = datetime.now(UTC).date()

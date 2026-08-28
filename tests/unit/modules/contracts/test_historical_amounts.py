@@ -87,9 +87,7 @@ class TestTramoRanges:
     el mensaje de error de cantidad incorrecta."""
 
     def test_ranges_match_frequency_windows(self):
-        ranges = tramo_ranges(
-            start_date=date(2025, 10, 1), adjustment_frequency_months=4, count=3
-        )
+        ranges = tramo_ranges(start_date=date(2025, 10, 1), adjustment_frequency_months=4, count=3)
 
         assert [(r.index, r.start, r.end) for r in ranges] == [
             (0, date(2025, 10, 1), date(2026, 2, 1)),
