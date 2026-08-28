@@ -659,7 +659,7 @@ class DebtService:
             by_contract.setdefault(entry.contract_id, []).append(entry)
 
         result: list[DebtEntry] = []
-        for contract_id, periods in by_contract.items():
+        for entry_contract_id, periods in by_contract.items():
             # RF-06: "periodos adeudados, saldo, dias de mora e interes
             # sugerido acumulado" -- saldo e interes se SUMAN entre
             # periodos; `days_late` toma el periodo mas antiguo (el de
@@ -667,7 +667,7 @@ class DebtService:
             worst_days_late = max(p.days_late for p in periods)
             first = periods[0]
             debt_entry = DebtEntry(
-                contract_id=contract_id,
+                contract_id=entry_contract_id,
                 property_id=first.property_id,
                 landlord_id=first.landlord_id,
                 renter_id=first.renter_id,

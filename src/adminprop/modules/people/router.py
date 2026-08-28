@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from adminprop.db.session import get_tenant_db_session
 from adminprop.modules.payments.schemas import DebtEntryData, RenterDebtResponse
 from adminprop.modules.people.models import Renter
-from adminprop.modules.people.repository import LandlordFields, RenterRepository
+from adminprop.modules.people.repository import LandlordFields
 from adminprop.modules.people.schemas import (
     LandlordCreate,
     LandlordDetail,

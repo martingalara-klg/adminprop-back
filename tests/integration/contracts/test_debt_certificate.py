@@ -212,7 +212,7 @@ class TestContractDebtCertificate:
         assert clean_response.content.startswith(b"%PDF-")
 
     async def test_debt_certificate_for_nonexistent_contract_returns_404(self, client, seed):
-        org, owner = await _seed_org_with_owner(seed)
+        _org, owner = await _seed_org_with_owner(seed)
 
         response = await client.post(
             f"/v1/contracts/{uuid.uuid4()}/debt-certificate", headers=owner["headers"]
