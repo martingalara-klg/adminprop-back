@@ -97,6 +97,11 @@ class GatheredSettlementData:
 # `pay.voided_at IS NULL` -- CLAUDE.md §"Fuentes de verdad": "EXCLUÍ
 # anulados". Ambos `destination` (agency_account/landlord_account): la
 # comision (RF-02) se calcula sobre los dos, `service.py` separa por tipo.
+# `pay.origin = 'manual'` (issue #119, RN-P09/RN-06 de spec_module_05):
+# excluye los cobros `initial_load` (carga inicial del alta de un
+# contrato en curso) de TODA la formula -- filtrar aca en la fuente evita
+# tocar `service.py.calculate_settlement` (ni el neto ni la base de
+# comision los ven).
 #
 # Issue #72 (RN-L06/CA-05-02): `currency` es la MONEDA DEL CONTRATO
 # (`c.currency`), NO `pay.payment_currency`. `payments.amount` esta
@@ -123,6 +128,7 @@ _PAYMENTS_SQL = """
       AND p.landlord_id = :landlord_id
       AND rp.period = :period
       AND pay.voided_at IS NULL
+      AND pay.origin = 'manual'
 """
 
 # Cargos del mes (rentas/muni/otro, RF-05) de las propiedades del

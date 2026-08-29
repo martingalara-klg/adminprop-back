@@ -298,6 +298,11 @@ class PaymentService:
             days_late=days_late,
             notes=notes,
             created_by=actor_user_id,
+            # RN-P09 (issue #119): todo cobro registrado por un operador
+            # via este endpoint nace `manual` -- `initial_load` solo lo
+            # asigna `contracts/rent_period_hook.py.
+            # generate_initial_load_history` (carga inicial del alta).
+            origin="manual",
         )
 
         # RF-03: "el periodo pasa a `partial`... paid cuando el capital
@@ -349,6 +354,14 @@ class PaymentService:
             raise NotFoundException()
         if payment.voided_at is not None:
             raise PaymentAlreadyVoidedException()
+        if payment.origin == "initial_load":
+            # RN-P09 (issue #119): un cobro de carga inicial es un
+            # registro historico, no una operacion corriente -- no admite
+            # anulacion (no hay nada que "corregir": no fue un cobro real
+            # ocurrido ante la administradora).
+            raise BusinessRuleViolationException(
+                message="No se puede anular un cobro de carga inicial (origin=initial_load)."
+            )
 
         rent_period = await self._repo.get_by_id(payment.rent_period_id, organization_id)
         if rent_period is None:  # pragma: no cover -- defensivo, integridad referencial de la DB
@@ -409,6 +422,13 @@ class PaymentService:
             # RF-07: "sobre un cobro anulado no se emite recibo".
             raise BusinessRuleViolationException(
                 message="No se puede emitir el recibo de un cobro anulado."
+            )
+        if context.origin == "initial_load":
+            # RN-P09 (issue #119): un cobro de carga inicial no fue un
+            # cobro real ocurrido ante la administradora -- no hay nada
+            # que documentar en un recibo.
+            raise BusinessRuleViolationException(
+                message="No se puede emitir el recibo de un cobro de carga inicial."
             )
 
         settings = await self._admin_repo.get_organization_settings(organization_id)
