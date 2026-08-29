@@ -459,10 +459,14 @@ def seed(rsa_keypair):
             charged_interest: str = "0.00",
             forgiven_interest: str = "0.00",
             days_late: int = 0,
+            origin: str = "manual",
         ) -> uuid.UUID:
             """Siembra un `payment` directamente en DB -- equivalente al
             resultado de `POST /rent-periods/:id/payments` (issue #22), sin
-            pasar por el endpoint completo en cada test de anulacion."""
+            pasar por el endpoint completo en cada test de anulacion.
+            `origin` (issue #119, RN-P09): 'manual' (default) |
+            'initial_load' -- para testear la exclusion de liquidaciones/
+            recibo/anulacion sin pasar por `POST /contracts`."""
             payment_id = uuid.uuid4()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
@@ -472,10 +476,10 @@ def seed(rsa_keypair):
                         "INSERT INTO payments "
                         "(id, organization_id, rent_period_id, payment_date, method, "
                         "payment_currency, amount, destination, suggested_interest, "
-                        "charged_interest, forgiven_interest, days_late, created_by) "
+                        "charged_interest, forgiven_interest, days_late, created_by, origin) "
                         "VALUES (:id, :org_id, :rent_period_id, :payment_date, :method, "
                         ":payment_currency, :amount, :destination, :suggested_interest, "
-                        ":charged_interest, :forgiven_interest, :days_late, :created_by)"
+                        ":charged_interest, :forgiven_interest, :days_late, :created_by, :origin)"
                     ),
                     {
                         "id": str(payment_id),
@@ -491,6 +495,7 @@ def seed(rsa_keypair):
                         "forgiven_interest": forgiven_interest,
                         "days_late": days_late,
                         "created_by": str(created_by),
+                        "origin": origin,
                     },
                 )
             return payment_id

@@ -431,7 +431,11 @@ def seed(rsa_keypair):
             destination: str = "agency_account",
             charged_interest: str = "0.00",
             voided_at: str | None = None,
+            origin: str = "manual",
         ) -> uuid.UUID:
+            """`origin` (issue #119, RN-P09/RN-06 de spec_module_05):
+            'manual' (default) | 'initial_load' -- para testear la
+            exclusion de liquidaciones sin pasar por `POST /contracts`."""
             payment_id = uuid.uuid4()
             session_factory = get_session_factory()
             async with session_factory() as session, session.begin():
@@ -441,10 +445,10 @@ def seed(rsa_keypair):
                         "INSERT INTO payments "
                         "(id, organization_id, rent_period_id, payment_date, method, "
                         "payment_currency, amount, exchange_rate, destination, "
-                        "charged_interest, voided_at, created_by) "
+                        "charged_interest, voided_at, created_by, origin) "
                         "VALUES (:id, :org_id, :rent_period_id, :payment_date, :method, "
                         ":payment_currency, :amount, :exchange_rate, :destination, "
-                        ":charged_interest, :voided_at, :created_by)"
+                        ":charged_interest, :voided_at, :created_by, :origin)"
                     ),
                     {
                         "id": str(payment_id),
@@ -459,6 +463,7 @@ def seed(rsa_keypair):
                         "charged_interest": charged_interest,
                         "voided_at": voided_at,
                         "created_by": str(created_by),
+                        "origin": origin,
                     },
                 )
             return payment_id
