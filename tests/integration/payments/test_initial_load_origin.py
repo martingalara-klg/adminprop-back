@@ -7,8 +7,6 @@ Implements: CA-04-13, CA-04-14, CA-04-15.
 
 from __future__ import annotations
 
-import uuid
-
 import pytest
 
 pytestmark = pytest.mark.asyncio
@@ -54,9 +52,7 @@ class TestCA0413PanelExposesOrigin:
     async def test_ca_04_13_rent_period_detail_exposes_initial_load_origin(self, client, seed):
         _org, owner, rent_period_id, payment_id = await _seed_initial_load_payment(seed)
 
-        response = await client.get(
-            f"/v1/rent-periods/{rent_period_id}", headers=owner["headers"]
-        )
+        response = await client.get(f"/v1/rent-periods/{rent_period_id}", headers=owner["headers"])
 
         assert response.status_code == 200
         data = response.json()["data"]
@@ -97,9 +93,7 @@ class TestCA0413PanelExposesOrigin:
             amount="1000.00",
         )
 
-        response = await client.get(
-            f"/v1/rent-periods/{rent_period_id}", headers=owner["headers"]
-        )
+        response = await client.get(f"/v1/rent-periods/{rent_period_id}", headers=owner["headers"])
         assert response.status_code == 200
         assert response.json()["data"]["payments"][0]["origin"] == "manual"
 

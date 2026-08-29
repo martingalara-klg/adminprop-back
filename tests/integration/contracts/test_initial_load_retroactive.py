@@ -86,9 +86,7 @@ class TestCA0326RetroactivePeriodsWithHistoricalAmounts:
     -> N periodos pasados `paid` con montos por tramo + N cobros
     `initial_load`."""
 
-    async def test_ca_03_26_three_elapsed_months_generate_three_paid_periods(
-        self, client, seed
-    ):
+    async def test_ca_03_26_three_elapsed_months_generate_three_paid_periods(self, client, seed):
         _org, owner = await _seed_org_with_owner(seed)
         property_id, renter_id = await _seed_property_and_renter(seed, owner["organization_id"])
         today = datetime.now(UTC).date()
