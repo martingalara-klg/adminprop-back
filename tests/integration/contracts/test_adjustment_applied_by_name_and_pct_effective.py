@@ -108,9 +108,7 @@ class TestCA0324PctEffectiveOnInitialLoad:
     """CA-03-24: el ajuste sintetico de carga inicial (`pct_applied = NULL`,
     issues #100/#107) expone `pct_effective` calculado."""
 
-    async def test_ca_03_24_pct_effective_calculated_on_initial_load_adjustment(
-        self, client, seed
-    ):
+    async def test_ca_03_24_pct_effective_calculated_on_initial_load_adjustment(self, client, seed):
         _org, owner, _admin = await _seed_org_with_owner_and_admin(seed)
         contract_id = await _seed_active_ars_contract(seed, owner["organization_id"])
         # RN-08/RN-C06 (issue #100): ajuste sintetico "Carga inicial" --
@@ -140,9 +138,7 @@ class TestCA0325PctEffectiveMatchesManualPctApplied:
     `pct_effective` que coincide con el `pct_applied` guardado (dentro del
     redondeo `ROUND_HALF_EVEN` a 2 decimales, RN-10)."""
 
-    async def test_ca_03_25_manual_adjustment_pct_effective_matches_pct_applied(
-        self, client, seed
-    ):
+    async def test_ca_03_25_manual_adjustment_pct_effective_matches_pct_applied(self, client, seed):
         _org, owner, _admin = await _seed_org_with_owner_and_admin(seed)
         contract_id = await _seed_active_ars_contract(
             seed, owner["organization_id"], current_amount="100000.00"
@@ -213,9 +209,7 @@ class TestCA0326PendingAdjustmentExposesNullNameAndPct:
         assert item["applied_by_name"] is None
         assert item["pct_effective"] is None
 
-    async def test_pending_inbox_item_also_exposes_null_name_and_pct_effective(
-        self, client, seed
-    ):
+    async def test_pending_inbox_item_also_exposes_null_name_and_pct_effective(self, client, seed):
         """Mismo schema en `GET /adjustments?status=pending` (la bandeja)."""
         _org, owner, _admin = await _seed_org_with_owner_and_admin(seed)
         contract_id = await _seed_active_ars_contract(seed, owner["organization_id"])
