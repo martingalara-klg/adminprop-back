@@ -161,7 +161,12 @@ class SuperAdminRepository:
                 "slug": slug,
                 "name": name,
                 "timezone": timezone,
-                "settings": json.dumps(settings),
+                # Issue #116: `type_=sa.JSON` ya serializa el valor Python a
+                # JSON -- pasarle `json.dumps(settings)` (un dict ya
+                # convertido a str) lo serializaba UNA SEGUNDA VEZ, dejando
+                # la columna JSONB con un escalar string en vez de un
+                # objeto. Pasar el dict crudo.
+                "settings": settings,
             },
         )
         row = result.mappings().one()
@@ -179,7 +184,11 @@ class SuperAdminRepository:
                 {
                     "organization_id": str(organization_id),
                     "name": role_name,
-                    "permissions": json.dumps(list(permissions)),
+                    # Issue #116: idem `settings` arriba -- `type_=sa.JSON`
+                    # ya serializa; pasarle `json.dumps(list(permissions))`
+                    # (un str ya serializado) producia doble-codificacion
+                    # (string JSON dentro de JSONB). Pasar la lista cruda.
+                    "permissions": list(permissions),
                 },
             )
 

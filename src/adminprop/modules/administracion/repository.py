@@ -434,7 +434,17 @@ class AdministracionRepository:
             """
         ).bindparams(sa.bindparam("settings", type_=sa.JSON))
         result = await self._session.execute(
-            stmt, {"organization_id": str(organization_id), "settings": json.dumps(settings)}
+            stmt,
+            {
+                "organization_id": str(organization_id),
+                # Issue #116: `type_=sa.JSON` ya serializa el valor Python a
+                # JSON -- pasarle `json.dumps(settings)` (un dict ya
+                # convertido a str) lo serializaba UNA SEGUNDA VEZ, dejando
+                # la columna JSONB con un escalar string en vez de un
+                # objeto (mismo bug que `superadmin/repository.py`). Pasar
+                # el dict crudo.
+                "settings": settings,
+            },
         )
         row = result.first()
         if row is None:  # pragma: no cover -- defensivo, la org del JWT siempre existe
