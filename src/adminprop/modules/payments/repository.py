@@ -73,6 +73,7 @@ class PaymentReceiptContext:
     destination: str
     charged_interest: Decimal
     voided_at: datetime | None
+    origin: str
     period: date
     contract_currency: str
     renter_name: str
@@ -133,6 +134,44 @@ class RentPeriodRepository:
                 period=period,
                 amount_due=amount_due,
                 currency=currency,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[RentPeriod.contract_id, RentPeriod.period],
+            )
+            .returning(RentPeriod.id)
+        )
+        result = await self._session.execute(stmt)
+        row = result.first()
+        return row.id if row is not None else None
+
+    async def insert_paid(
+        self,
+        *,
+        organization_id: UUID,
+        contract_id: UUID,
+        period: date,
+        amount_due: Decimal,
+        currency: str,
+    ) -> UUID | None:
+        """issue #119, RN-P09/RN-11: variante de `insert_pending` para el
+        `RentPeriod` retroactivo de un mes ya transcurrido al dar de alta
+        un contrato en curso (`contracts/rent_period_hook.py.
+        generate_initial_load_history`) -- nace directamente `paid` con
+        `paid_total = amount_due` (el CHECK `paid_total <= amount_due` de
+        la migracion #20 admite la igualdad). Mismo `ON CONFLICT DO
+        NOTHING` idempotente sobre `(contract_id, period)` que
+        `insert_pending` -- devuelve `None` si el periodo ya existiera
+        (defensivo: no deberia ocurrir para un contrato recien creado)."""
+        stmt = (
+            pg_insert(RentPeriod)
+            .values(
+                organization_id=organization_id,
+                contract_id=contract_id,
+                period=period,
+                amount_due=amount_due,
+                currency=currency,
+                status="paid",
+                paid_total=amount_due,
             )
             .on_conflict_do_nothing(
                 index_elements=[RentPeriod.contract_id, RentPeriod.period],
@@ -318,10 +357,15 @@ class PaymentRepository:
         days_late: int,
         notes: str | None,
         created_by: UUID,
+        origin: str = "manual",
     ) -> Payment:
         """RF-03/RF-04: persiste el cobro con los tres valores de interes
         (RN-P04) y el TC usado (RN-P06) -- inmutable una vez creado
-        (RN-06/RN-D04, la correccion es anular + recargar, issue #23)."""
+        (RN-06/RN-D04, la correccion es anular + recargar, issue #23).
+        `origin` (issue #119, RN-P09): 'manual' (default, todo cobro
+        registrado por un operador via `PaymentService.register_payment`)
+        vs. 'initial_load' (generado por
+        `contracts/rent_period_hook.py.generate_initial_load_history`)."""
         row = Payment(
             organization_id=organization_id,
             rent_period_id=rent_period_id,
@@ -337,6 +381,7 @@ class PaymentRepository:
             days_late=days_late,
             notes=notes,
             created_by=created_by,
+            origin=origin,
         )
         self._session.add(row)
         await self._session.flush()
@@ -413,6 +458,7 @@ class PaymentRepository:
                 pay.destination AS destination,
                 pay.charged_interest AS charged_interest,
                 pay.voided_at AS voided_at,
+                pay.origin AS origin,
                 rp.period AS period,
                 c.currency AS contract_currency,
                 r.name AS renter_name,

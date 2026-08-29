@@ -2,12 +2,12 @@
 name: AdminProp — Modelo de Dominio
 description: Entidades del dominio de gestión de alquileres, invariantes (RN-C, RN-P, RN-L, RN-A, RN-D), relaciones y glosario unificado
 type: project
-version: 1.7
-fecha: 2026-08-28
+version: 1.8
+fecha: 2026-08-29
 ---
 # AdminProp — Modelo de Dominio
 
-**Versión:** 1.7
+**Versión:** 1.8
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -275,12 +275,14 @@ La imputación de un pago de un inquilino contra un Período de Alquiler.
 | days_late | entero | Días de mora al momento del pago |
 | notes | texto | Observaciones |
 | voided_at / voided_by | timestamp / UUID | Anulación lógica (si el cobro se registró mal) |
+| origin | enum | `manual` (default) \| `initial_load` — issue #119: marca el cobro generado automáticamente al declarar la carga inicial de un contrato en curso (ver RN-P09) |
 
 **Invariantes:**
 - `exchange_rate` obligatorio y > 0 cuando la moneda del pago difiere de la del contrato (ver RN-P06).
 - `charged_interest` la decide el operador: el sistema **sugiere**, el operador imputa (ver RN-P04). Sugerido, cobrado y perdonado quedan siempre registrados.
 - Un cobro con `destination = landlord_account` cuenta como "dinero ya rendido" en la liquidación (ver RN-P07).
 - Un cobro anulado (`voided_at` no nulo) no suma a `paid_total` ni a liquidaciones; la anulación queda en el log de auditoría (ver RN-D04).
+- Un cobro con `origin = initial_load` está EXCLUIDO de toda liquidación (ni neto a rendir ni base de comisión — ese dinero ya fue rendido fuera del sistema antes del alta), no emite recibo y no puede anularse (ver RN-P09).
 
 ---
 
@@ -463,11 +465,12 @@ Registro append-only de las operaciones sensibles.
 - **RN-P06:** Si la moneda del pago difiere de la del contrato, el tipo de cambio se ingresa manualmente y es obligatorio.
 - **RN-P07:** Un cobro con destino "cuenta del propietario" es dinero ya rendido: no suma al neto a rendir, pero sí a la base de cálculo de la comisión.
 - **RN-P08:** El recibo de cobro se genera bajo demanda (opcional) y refleja exactamente lo imputado; el certificado de **libre deuda es por contrato** (issue #104, decisión #123, 2026-08-28: un inquilino puede tener 2 contratos y deber en uno solo) — se emite desde el contrato y verifica SOLO los períodos de ESE contrato (nunca los de otros contratos del mismo inquilino), y cada emisión queda auditada.
+- **RN-P09** (issue #119, 2026-08-29): al dar de alta un contrato en curso (`start_date` anterior al mes actual — el mismo disparador de `historical_amounts[]`/RN-C06, incluido el caso sin tramos de ajuste transcurridos, ej. inició el mes pasado), el sistema genera automáticamente un `RentPeriod` `paid` por cada mes transcurrido desde `start_date` hasta el mes ANTERIOR al actual (con el `amount_due` del tramo vigente ese mes, mismo criterio que `monthly_amounts[]`/RN-09) y un `Payment` `origin = initial_load` por el total (moneda del contrato, sin TC, interés 0). El mes actual sigue naciendo `pending` por la vía normal (activación/job mensual). Un cobro `initial_load` está EXCLUIDO de toda liquidación (RN-L02), no emite recibo (RF-07) y no admite anulación (`422 BUSINESS_RULE_VIOLATION` en ambos casos) — es un registro histórico, no una operación corriente. La carga queda auditada con un evento resumen (`contract.initial_load_generated`, cantidad de períodos/cobros).
 
 ### RN-L — Liquidaciones
 
 - **RN-L01:** Neto a rendir (en ARS) = cobros del período con destino administración − comisión − cargos del mes − reparaciones pagadas por la administración; el dinero ya rendido se lista informativamente.
-- **RN-L02:** La comisión = % del propietario × (alquileres del período + intereses de mora cobrados) de todas sus propiedades, **incluidos** los cobrados directo en su cuenta.
+- **RN-L02:** La comisión = % del propietario × (alquileres del período + intereses de mora cobrados) de todas sus propiedades, **incluidos** los cobrados directo en su cuenta; **excepto** los cobros `origin = initial_load` (issue #119, RN-P09), que quedan totalmente fuera de la fórmula (ni neto ni base de comisión) — ese dinero ya fue rendido fuera del sistema antes del alta del contrato.
 - **RN-L03:** Una liquidación emitida puede corregirse y regenerarse; cada corrección queda trazada en el log de auditoría (quién, cuándo, qué cambió). Nunca hay borrado físico.
 - **RN-L04:** Una reparación entra a la liquidación solo si `payer = agency` y estado `closed`; se descuenta una única vez y queda registrado en qué liquidación.
 - **RN-L05:** Un cambio en el % de comisión del propietario rige para liquidaciones futuras; nunca recalcula períodos ya liquidados.

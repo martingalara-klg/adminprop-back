@@ -2,12 +2,12 @@
 name: AdminProp — Módulo 3 — Contratos de Locación
 description: Contratos propiedad+inquilino con condiciones pactadas, ciclo de vida, ajustes por índice con ingreso manual del % y alertas de vencimiento
 type: project
-version: 1.4
+version: 1.5
 fecha: 2026-08-29
 ---
 # Módulo 3 — Contratos de Locación
 
-**Versión:** 1.4 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-29
+**Versión:** 1.5 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-29
 
 ## Propósito
 
@@ -40,6 +40,7 @@ Listado con filtros: estado, propiedad, inquilino, propietario (vía propiedad),
   - **Con `adjustment_frequency_months` (solo ARS):** campo opcional `historical_amounts[]` — lista ORDENADA de montos, uno por cada tramo transcurrido desde `start_date` (tramo = ventana de `adjustment_frequency_months` meses; el backend deriva las fechas, nunca el cliente). Cantidad esperada = tramos transcurridos hasta hoy, calculada por el backend; cantidad incorrecta es `400 VALIDATION_ERROR` con mensaje explícito. `current_amount`/`current_amount_since` **no se aceptan** en este caso (superados por `historical_amounts[]`).
   - **Sin `adjustment_frequency_months` (USD siempre; ARS sin ajuste):** se mantiene sin cambios el mecanismo del issue #100 — `current_amount` + `current_amount_since`, solo válidos **juntos** (`400 VALIDATION_ERROR` si viene uno sin el otro). `historical_amounts[]` **no se acepta** en este caso.
   - En ambos casos, si vienen, el contrato nace con `current_amount` en el monto vigente declarado (no en `initial_amount`, que queda como el monto histórico informativo del tramo/período inicial) y el sistema registra uno o más ajustes `applied` sintéticos de "carga inicial" (ver RF-04 y `sdd_02` §2.8) — sin tocar el flujo normal de ajustes manuales.
+  - **Cobros retroactivos del alta en curso (issue #119, RN-C07/RN-P09, feedback #3 del PO — 2026-08-29):** cuando `start_date` cae antes del mes actual — el mismo disparador que habilita `historical_amounts[]` (RN-08), incluido el caso sin ningún tramo transcurrido más allá del inicial (ej. el contrato arrancó el mes pasado, sin ajuste alguno) — el sistema, en la MISMA transacción del `POST /contracts`, genera un `RentPeriod` `paid` por cada mes desde `start_date` hasta el mes ANTERIOR al actual (con el monto de `monthly_amounts[]`/RN-09 de ese mes) más un `Payment` automático `origin = initial_load` por el total (moneda del contrato, interés 0, sin tipo de cambio, `notes: "Cobro registrado automáticamente al dar de alta el contrato en curso."`). El mes actual **no** se ve afectado — sigue naciendo `pending` por la vía normal (activación del contrato o el job mensual `generate_rent_periods`). Un alta normal (contrato que arranca este mes) no genera ningún período retroactivo. Ver Módulo 4 RF-03/RF-07 y Módulo 5 RF-02 para el efecto en cobranzas/liquidaciones.
 
 ### RF-03 — Ciclo de vida
 
@@ -91,6 +92,7 @@ Feedback #2 del PO (2026-08-28): la ficha del contrato (`GET /contracts/:id`) de
 - **RN-08** (v2, issue #107, = RN-C06 — supersede parcialmente el issue #100): Alta de contrato en curso. Con `adjustment_frequency_months` configurado (solo ARS): `historical_amounts[]` — uno por tramo transcurrido, cantidad exacta calculada por el backend; `current_amount` termina en el último valor de la lista y el sistema registra una cadena de ajustes sintéticos `applied` trazables (ver RF-02, RF-04 paso 6). Sin `adjustment_frequency_months` (USD siempre; ARS sin ajuste): `current_amount` + `current_amount_since`, opcionales pero solo válidos juntos (comportamiento del issue #100, sin cambios) — reemplaza a `initial_amount` como monto de arranque y registra un único ajuste sintético `applied`. Los dos mecanismos son mutuamente excluyentes según `adjustment_frequency_months`; RN-03/RN-C02 solo excluye a USD del ajuste periódico automático por índice, no de esta declaración puntual de carga inicial.
 - **RN-09** (issue #106): Serie mensual de valores locativos (RF-06) — cálculo determinístico desde `initial_amount` + ajustes `applied` (solo `applied`; `pending` no cuenta), orden descendente. Como `contracts` no persiste una fecha propia de terminación anticipada (RF-03 solo audita el motivo, no agrega columna), la fecha de corte de un contrato `terminated` se deriva del evento `contract.terminated` más reciente de ese contrato en `audit_logs` (misma transacción que la transición de estado — decisión de implementación, issue #106); si no existiera (defensivo), el fallback es `end_date`. Un contrato `expired` usa directamente `end_date` (vencimiento natural, sin ambigüedad).
 - **RN-10** (issue #118): `pct_effective` de un ajuste `applied` = `((new_amount − previous_amount) / previous_amount) × 100`, redondeado a 2 decimales con `ROUND_HALF_EVEN` (banker's rounding), siempre en `Decimal` — nunca `float`. Es la única fuente confiable del % para el ajuste sintético de carga inicial (`pct_applied` es `NULL` ahí, issues #100/#107); para los ajustes manuales normalmente coincide con `pct_applied` (que ya usa `ROUND_HALF_UP` al calcular `new_amount` en `POST /adjustments/:id/apply`), pero `pct_effective` es el valor recalculado y expuesto de forma uniforme en todos los casos. Ajustes `pending` → `null` (no hay `new_amount` todavía). `previous_amount = 0` → `null` (evita división por cero — defensivo, no debería ocurrir en la práctica dado RN-01, `initial_amount > 0`).
+- **RN-11** (= RN-C07, issue #119, feedback #3 del PO — 2026-08-29): Alta de contrato en curso (`start_date` anterior al mes actual) → cobros retroactivos automáticos. El sistema genera, en la MISMA transacción del alta, un `RentPeriod` `paid` + un `Payment` `origin = initial_load` por cada mes desde `start_date` hasta el mes anterior al actual, con el monto que le corresponde a cada mes según `monthly_amounts[]`/RN-09 (coherente con los tramos de `historical_amounts[]`/RN-08 cuando aplica; si no hay tramos — el contrato arrancó recién el mes pasado sin ajuste — el monto es plano `initial_amount`). El mes actual no se toca: sigue naciendo `pending` por la activación/job mensual (RF-03/Módulo 4 RF-01). Ver `sdd_02` §3 RN-P09 para el detalle de exclusión en liquidaciones/recibos/anulación (Módulo 4 RF-03/RF-07, Módulo 5 RF-02).
 
 ## Validaciones
 
@@ -124,6 +126,11 @@ Feedback #2 del PO (2026-08-28): la ficha del contrato (`GET /contracts/:id`) de
 - [ ] **CA-03-20** (issue #106): `GET /contracts/:id` de un contrato cuyo `start_date` cae en el mes actual devuelve `monthly_amounts` con exactamente 1 elemento.
 - [ ] **CA-03-21** (issue #106): `monthly_amounts[]` viene siempre en orden estrictamente descendente por `period`.
 - [ ] **CA-03-22** (issue #106): `GET /contracts/:id` de un contrato USD sin carga inicial devuelve una serie plana en `initial_amount` (RN-03/RN-C02, sin ajuste periódico automático).
+- [ ] **CA-03-26** (issue #119, RN-11): Un contrato iniciado hace N meses (con o sin `historical_amounts[]`) genera N `RentPeriod` `paid` (uno por mes desde `start_date` hasta el mes anterior al actual, con el monto por tramo) más N `Payment` `origin = initial_load`.
+- [ ] **CA-03-27** (issue #119, RN-11): Un contrato iniciado el mes pasado SIN tramos de ajuste transcurridos (sin `historical_amounts`/`current_amount`) genera igual 1 período retroactivo `paid` con `initial_amount`.
+- [ ] **CA-03-28** (issue #119, RN-11): El mes actual del contrato recién creado sigue naciendo `pending` al activarse — sin cambios respecto del comportamiento previo (RF-03).
+- [ ] **CA-03-29** (issue #119, RN-11): Un alta normal (contrato que arranca este mes) no genera ningún período ni cobro retroactivo.
+- [ ] **CA-03-30** (issue #119, RN-11): La carga retroactiva queda auditada con un evento resumen (`contract.initial_load_generated`) con la cantidad de períodos/cobros generados y el autor.
 - [ ] **CA-03-23** (issue #118): un ajuste `applied` expone `applied_by_name` con el `full_name` del usuario que lo aplicó (resuelto desde `users` por `applied_by` — no expone solo el UUID).
 - [ ] **CA-03-24** (issue #118): el ajuste sintético de carga inicial (`pct_applied = NULL`, issues #100/#107) expone `pct_effective` calculado — ejemplo: `previous_amount = 1.000.000`, `new_amount = 1.200.000` → `pct_effective = 20.00`.
 - [ ] **CA-03-25** (issue #118): un ajuste manual aplicado con un `pct` dado expone `pct_effective` que coincide con el `pct_applied` guardado (dentro del redondeo `ROUND_HALF_EVEN` a 2 decimales, RN-10).

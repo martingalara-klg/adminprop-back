@@ -19,6 +19,11 @@ PaymentMethod = Literal["cash", "transfer"]
 PaymentCurrency = Literal["ARS", "USD"]
 # RN-P07: destino del cobro -- "ya rendido" vs. entra a la administracion.
 PaymentDestination = Literal["agency_account", "landlord_account"]
+# RN-P09 (issue #119): 'manual' (default, operador) | 'initial_load'
+# (carga inicial de un contrato en curso -- excluido de liquidaciones,
+# recibo y anulacion). No se acepta en el body de `PaymentCreate` -- todo
+# cobro registrado vía `POST /rent-periods/:id/payments` nace `manual`.
+PaymentOrigin = Literal["manual", "initial_load"]
 
 
 class PaymentCreate(BaseModel):
@@ -73,6 +78,7 @@ class PaymentSummary(BaseModel):
     notes: str | None
     created_by: UUID
     created_at: datetime
+    origin: PaymentOrigin
 
 
 class PaymentResponse(BaseModel):

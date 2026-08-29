@@ -2,12 +2,12 @@
 name: AdminProp — Especificación del Modelo de Datos
 description: Tablas físicas PostgreSQL (23 tablas en 8 capas), RLS, índices, orden de migración, seed data y convenciones de nomenclatura
 type: project
-version: 1.3
-fecha: 2026-08-28
+version: 1.4
+fecha: 2026-08-29
 ---
 # AdminProp — Especificación del Modelo de Datos
 
-**Versión:** 1.3
+**Versión:** 1.4
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -330,6 +330,7 @@ ALTER TABLE contracts ADD CONSTRAINT contracts_no_overlap
 | voided_at | TIMESTAMPTZ | NULL | Anulación lógica (RN-D04) |
 | voided_by | UUID | NULL, FK → users | |
 | created_by | UUID | NOT NULL, FK → users | |
+| origin | TEXT | NOT NULL DEFAULT `'manual'` CHECK IN (`manual`,`initial_load`) | issue #119, RN-P09: `initial_load` = cobro automático generado al declarar la carga inicial de un contrato en curso (meses ya transcurridos) — EXCLUIDO de liquidaciones (ni neto ni base de comisión), sin recibo ni anulación |
 | created_at / updated_at | TIMESTAMPTZ | NOT NULL | |
 
 ---
