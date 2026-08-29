@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.13
-fecha: 2026-08-28
+version: 1.14
+fecha: 2026-08-29
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.13
+**Versión:** 1.14
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -278,6 +278,11 @@ Los contratos ya dados de alta con el mecanismo del issue #100 (un único ajuste
 - la **fecha de terminación efectiva**, si fue terminado anticipadamente (`status = "terminated"`) — `contracts` no tiene columna propia para esto (RF-03 solo persiste el motivo en `audit_logs`), así que se deriva del evento `contract.terminated` más reciente de ESE contrato en `audit_logs` (mismo timestamp que la transición de estado — misma transacción, `POST /contracts/:id/terminate`); si por algún motivo no existe (defensivo), el fallback es `end_date`.
 
 El monto de cada mes es determinístico: `initial_amount` hasta el primer ajuste `applied` cuyo `due_period <= mes`, luego el `new_amount` del **último** ajuste `applied` cuyo `due_period <= mes` (incluye el ajuste sintético "Carga inicial" del issue #100/RN-C06). Solo cuentan ajustes `applied` — los `pending` no afectan el histórico. Un contrato USD sin carga inicial declarada tiene una serie plana en `initial_amount` (RN-C02: sin ajuste periódico automático). Si el contrato aún no empezó (`start_date` futuro), `monthly_amounts` es `[]`.
+
+**Historial de ajustes — `applied_by_name` y `pct_effective` — issue #118, decisión #127 (RN-10 de `spec_module_03`):** feedback #3 del PO (2026-08-29) — el item de ajuste devuelto por `GET /contracts/:id/adjustments`, `GET /adjustments` y la respuesta de `POST /adjustments/:id/apply` (los tres comparten el mismo schema `AdjustmentSummary`) agrega dos campos:
+
+- `applied_by_name` (`str | null`): el `full_name` de `users` resuelto desde `applied_by` — antes el front solo tenía el UUID crudo. `null` mientras el ajuste sigue `pending` (no hay `applied_by` todavía).
+- `pct_effective` (`Decimal | null`): recalculado en el backend como `((new_amount − previous_amount) / previous_amount) × 100`, redondeado a 2 decimales con `ROUND_HALF_EVEN` (banker's rounding), siempre en `Decimal` — nunca `float`. Se calcula para TODO ajuste `applied`, incluido el ajuste sintético de "Carga inicial" (issues #100/#107) donde es la ÚNICA fuente confiable del % ya que ahí `pct_applied` queda `NULL` (RN-C06). Para los ajustes manuales normalmente coincide con `pct_applied` (que ya usa `ROUND_HALF_UP` al calcularse `new_amount` en `POST /adjustments/:id/apply`). `null` si el ajuste no está `applied` (`pending`) o si `previous_amount = 0` (evita división por cero).
 
 ## 9. Cobranzas (`/rent-periods`, `/payments`)
 
