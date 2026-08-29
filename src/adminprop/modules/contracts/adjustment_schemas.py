@@ -36,7 +36,13 @@ class AdjustmentApplyRequest(BaseModel):
 
 class AdjustmentSummary(BaseModel):
     """Item de GET /contracts/:id/adjustments, GET /adjustments y
-    respuesta de POST /adjustments/:id/apply."""
+    respuesta de POST /adjustments/:id/apply.
+
+    `applied_by_name`/`pct_effective` (issue #118, sdd_03 v1.14 §8,
+    spec_module_03 v1.4 RN-10): campos derivados, no persistidos --
+    `ContractAdjustmentService` los resuelve/calcula y construye este
+    schema explicitamente (no via `model_validate` directo sobre el ORM
+    `ContractAdjustment`, que no tiene ninguno de los dos)."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -49,7 +55,9 @@ class AdjustmentSummary(BaseModel):
     new_amount: Decimal | None
     notes: str | None
     applied_by: UUID | None
+    applied_by_name: str | None
     applied_at: datetime | None
+    pct_effective: Decimal | None
     created_at: datetime
     updated_at: datetime
 

@@ -16,7 +16,7 @@ El flujo completo de 5 pasos (RF-04):
 from __future__ import annotations
 
 from datetime import date
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_EVEN, ROUND_HALF_UP, Decimal
 from uuid import UUID
 
 from fastapi import Depends
@@ -25,6 +25,7 @@ from adminprop.modules.contracts.adjustment_repository import (
     ContractAdjustmentRepository,
     get_contract_adjustment_repository,
 )
+from adminprop.modules.contracts.adjustment_schemas import AdjustmentSummary
 from adminprop.modules.contracts.models import ContractAdjustment
 from adminprop.modules.contracts.rent_period_hook import (
     maybe_generate_rent_period_for_adjustment,
@@ -39,6 +40,49 @@ from adminprop.shared.errors.codes import (
 from adminprop.shared.notifications import service as notifications_service
 
 _TWO_DECIMALS = Decimal("0.01")
+
+
+def _compute_pct_effective(row: ContractAdjustment) -> Decimal | None:
+    """RN-10 (issue #118, spec_module_03 v1.4): `((new_amount -
+    previous_amount) / previous_amount) * 100`, redondeado a 2 decimales
+    con `ROUND_HALF_EVEN` (banker's rounding) -- SIEMPRE `Decimal`, nunca
+    `float`. Unica fuente confiable del % en el ajuste sintetico de carga
+    inicial (issues #100/#107), donde `pct_applied` queda `NULL`. `null`
+    si el ajuste no esta `applied` (pending -- no hay `new_amount`
+    todavia) o si `previous_amount == 0` (division por cero, defensivo --
+    RN-01 exige `initial_amount > 0`)."""
+    if row.status != "applied":
+        return None
+    if (
+        row.previous_amount is None or row.new_amount is None
+    ):  # pragma: no cover -- defensivo, un ajuste `applied` siempre tiene ambos (RF-04)
+        return None
+    if row.previous_amount == 0:
+        return None
+    raw_pct = (row.new_amount - row.previous_amount) / row.previous_amount * Decimal(100)
+    return raw_pct.quantize(_TWO_DECIMALS, rounding=ROUND_HALF_EVEN)
+
+
+def _to_summary(row: ContractAdjustment, applied_by_name: str | None) -> AdjustmentSummary:
+    """Issue #118: construye el schema de respuesta explicitamente (no via
+    `model_validate` directo del ORM) porque `applied_by_name`/
+    `pct_effective` no son columnas de `ContractAdjustment`."""
+    return AdjustmentSummary(
+        id=row.id,
+        contract_id=row.contract_id,
+        due_period=row.due_period,
+        status=row.status,
+        pct_applied=row.pct_applied,
+        previous_amount=row.previous_amount,
+        new_amount=row.new_amount,
+        notes=row.notes,
+        applied_by=row.applied_by,
+        applied_by_name=applied_by_name,
+        applied_at=row.applied_at,
+        pct_effective=_compute_pct_effective(row),
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
 
 
 def _add_months(anchor: date, months: int) -> date:
@@ -119,21 +163,31 @@ class ContractAdjustmentService:
 
     # ─── RF-04 paso 3/5: bandeja + historial ────────────────────────────────
 
+    async def _to_summaries(self, rows: list[ContractAdjustment]) -> list[AdjustmentSummary]:
+        """Issue #118: resuelve `applied_by_name` en batch (un solo
+        round-trip a `users` para toda la pagina/historial, no N+1) y
+        construye el schema de respuesta para cada fila."""
+        user_ids = {row.applied_by for row in rows if row.applied_by is not None}
+        names_by_id = await self._repo.get_full_names_by_ids(list(user_ids))
+        return [_to_summary(row, names_by_id.get(row.applied_by)) for row in rows]
+
     async def list_for_contract(
         self, contract_id: UUID, organization_id: UUID
-    ) -> list[ContractAdjustment]:
+    ) -> list[AdjustmentSummary]:
         """`GET /contracts/:id/adjustments`. RN-D01: el caller (router)
         primero valida que el contrato exista en el tenant -- cross-tenant
         u otro contrato inexistente ya es 404 antes de llegar aca."""
-        return await self._repo.list_by_contract(contract_id, organization_id)
+        rows = await self._repo.list_by_contract(contract_id, organization_id)
+        return await self._to_summaries(rows)
 
     async def list_pending(
         self, *, organization_id: UUID, cursor: str | None, limit: int
-    ) -> tuple[list[ContractAdjustment], str | None]:
+    ) -> tuple[list[AdjustmentSummary], str | None]:
         """`GET /adjustments?status=pending` -- bandeja de ajustes que tocan."""
-        return await self._repo.list_pending(
+        rows, next_cursor = await self._repo.list_pending(
             organization_id=organization_id, cursor=cursor, limit=limit
         )
+        return await self._to_summaries(rows), next_cursor
 
     # ─── RF-04 paso 4: aplicacion manual ────────────────────────────────────
 
@@ -144,7 +198,7 @@ class ContractAdjustmentService:
         *,
         pct: Decimal | None,
         actor_user_id: UUID,
-    ) -> ContractAdjustment:
+    ) -> AdjustmentSummary:
         """RN-C03: `pending -> applied`. `new_amount = previous ×
         (1 + pct/100)`, redondeado a 2 decimales (NUMERIC(14,2)).
         Actualiza `current_amount` del contrato y deja historial completo
@@ -223,7 +277,12 @@ class ContractAdjustmentService:
         )
 
         await self._repo.commit()
-        return updated
+
+        # Issue #118: `applied_by_name` del propio actor que acaba de
+        # aplicar el ajuste -- un solo lookup, mismo helper batch que
+        # `_to_summaries` (lista de 1 elemento).
+        names_by_id = await self._repo.get_full_names_by_ids([actor_user_id])
+        return _to_summary(updated, names_by_id.get(actor_user_id))
 
 
 def get_contract_adjustment_service(
