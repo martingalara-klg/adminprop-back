@@ -368,7 +368,7 @@ class TestCA0509InitialLoadExclusion:
     de `landlord_account`, ver `TestCa0504AlreadySettledEndToEnd` arriba,
     que SI integra la base de comision)."""
 
-    async def test_initial_load_payment_is_excluded_from_net_and_commission(self, seed):
+    async def test_ca_05_09_initial_load_payment_is_excluded_from_net_and_commission(self, seed):
         ctx = await _Ctx(seed).build(commission_pct="10.00")
         rent_period_a = await seed.create_rent_period_row(
             organization_id=ctx["org_id"],
