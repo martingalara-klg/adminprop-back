@@ -17,7 +17,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from fastapi import Depends
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adminprop.db.session import get_tenant_db_session
@@ -177,6 +177,24 @@ class ContractAdjustmentRepository:
         await self._session.flush()
         await self._session.refresh(row)
         return row
+
+    # ─── issue #118 (RN-10): resolucion de `applied_by_name` ───────────────
+
+    async def get_full_names_by_ids(self, user_ids: list[UUID]) -> dict[UUID, str]:
+        """`users` es identidad global (sin `organization_id`, sin RLS --
+        modules/auth/repository.py) -- no requiere filtro de tenant, el
+        `ContractAdjustment` que referencia a `applied_by` ya esta filtrado
+        por `organization_id`. Mismo patron SQL crudo con `ANY(:ids)` que
+        `modules/settlements/repository.py.list_property_labels`. Batch en
+        vez de N+1 -- `list_by_contract`/`list_pending` pueden traer varios
+        ajustes `applied` con distinto `applied_by`."""
+        if not user_ids:
+            return {}
+        result = await self._session.execute(
+            text("SELECT id, full_name FROM users WHERE id = ANY(:ids)"),
+            {"ids": [str(i) for i in user_ids]},
+        )
+        return {row[0]: row[1] for row in result.all()}
 
     # ─── RF-04 paso 3/5: bandeja + aplicacion + historial ──────────────────
 

@@ -2,12 +2,12 @@
 name: AdminProp — Módulo 3 — Contratos de Locación
 description: Contratos propiedad+inquilino con condiciones pactadas, ciclo de vida, ajustes por índice con ingreso manual del % y alertas de vencimiento
 type: project
-version: 1.3
-fecha: 2026-08-28
+version: 1.4
+fecha: 2026-08-29
 ---
 # Módulo 3 — Contratos de Locación
 
-**Versión:** 1.3 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-28
+**Versión:** 1.4 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-29
 
 ## Propósito
 
@@ -63,6 +63,8 @@ El flujo completo del ajuste (RN-C03 del dominio):
 
    El ÚLTIMO ajuste sintético queda como el ancla del paso 1 (`get_last_applied_adjustment_due_period`) para el próximo ajuste periódico ARS — el paso 1 no cambia su lógica, solo encuentra un `applied` más reciente.
 
+7. **Historial expone nombre y % efectivo (issue #118):** feedback #3 del PO (2026-08-29) — el item de ajuste devuelto por `GET /contracts/:id/adjustments`, `GET /adjustments` y `POST /adjustments/:id/apply` agrega `applied_by_name` (`full_name` de `users` resuelto desde `applied_by`; `null` mientras el ajuste sigue `pending`) y `pct_effective` (recalculado en el backend con `Decimal`/`ROUND_HALF_EVEN`; `null` si el ajuste no está `applied` o si `previous_amount = 0` — ver RN-10). Resuelve dos huecos de UI: el "Aplicado por" mostraba el UUID crudo, y la columna % quedaba vacía en los ajustes de carga inicial (`pct_applied = NULL`).
+
 ### RF-05 — Alertas de vencimiento
 
 - El job diario `detect_expiring_contracts` notifica (in-app + email) los contratos que vencen dentro de `contract_expiry_notice_days` (default 60, configurable — Módulo 7). Una sola notificación por contrato y umbral.
@@ -88,6 +90,7 @@ Feedback #2 del PO (2026-08-28): la ficha del contrato (`GET /contracts/:id`) de
 - **RN-07:** Un contrato `expired`/`terminated` no genera nuevos períodos; sus deudas siguen cobrables (= RN-C05).
 - **RN-08** (v2, issue #107, = RN-C06 — supersede parcialmente el issue #100): Alta de contrato en curso. Con `adjustment_frequency_months` configurado (solo ARS): `historical_amounts[]` — uno por tramo transcurrido, cantidad exacta calculada por el backend; `current_amount` termina en el último valor de la lista y el sistema registra una cadena de ajustes sintéticos `applied` trazables (ver RF-02, RF-04 paso 6). Sin `adjustment_frequency_months` (USD siempre; ARS sin ajuste): `current_amount` + `current_amount_since`, opcionales pero solo válidos juntos (comportamiento del issue #100, sin cambios) — reemplaza a `initial_amount` como monto de arranque y registra un único ajuste sintético `applied`. Los dos mecanismos son mutuamente excluyentes según `adjustment_frequency_months`; RN-03/RN-C02 solo excluye a USD del ajuste periódico automático por índice, no de esta declaración puntual de carga inicial.
 - **RN-09** (issue #106): Serie mensual de valores locativos (RF-06) — cálculo determinístico desde `initial_amount` + ajustes `applied` (solo `applied`; `pending` no cuenta), orden descendente. Como `contracts` no persiste una fecha propia de terminación anticipada (RF-03 solo audita el motivo, no agrega columna), la fecha de corte de un contrato `terminated` se deriva del evento `contract.terminated` más reciente de ese contrato en `audit_logs` (misma transacción que la transición de estado — decisión de implementación, issue #106); si no existiera (defensivo), el fallback es `end_date`. Un contrato `expired` usa directamente `end_date` (vencimiento natural, sin ambigüedad).
+- **RN-10** (issue #118): `pct_effective` de un ajuste `applied` = `((new_amount − previous_amount) / previous_amount) × 100`, redondeado a 2 decimales con `ROUND_HALF_EVEN` (banker's rounding), siempre en `Decimal` — nunca `float`. Es la única fuente confiable del % para el ajuste sintético de carga inicial (`pct_applied` es `NULL` ahí, issues #100/#107); para los ajustes manuales normalmente coincide con `pct_applied` (que ya usa `ROUND_HALF_UP` al calcular `new_amount` en `POST /adjustments/:id/apply`), pero `pct_effective` es el valor recalculado y expuesto de forma uniforme en todos los casos. Ajustes `pending` → `null` (no hay `new_amount` todavía). `previous_amount = 0` → `null` (evita división por cero — defensivo, no debería ocurrir en la práctica dado RN-01, `initial_amount > 0`).
 
 ## Validaciones
 
@@ -121,6 +124,10 @@ Feedback #2 del PO (2026-08-28): la ficha del contrato (`GET /contracts/:id`) de
 - [ ] **CA-03-20** (issue #106): `GET /contracts/:id` de un contrato cuyo `start_date` cae en el mes actual devuelve `monthly_amounts` con exactamente 1 elemento.
 - [ ] **CA-03-21** (issue #106): `monthly_amounts[]` viene siempre en orden estrictamente descendente por `period`.
 - [ ] **CA-03-22** (issue #106): `GET /contracts/:id` de un contrato USD sin carga inicial devuelve una serie plana en `initial_amount` (RN-03/RN-C02, sin ajuste periódico automático).
+- [ ] **CA-03-23** (issue #118): un ajuste `applied` expone `applied_by_name` con el `full_name` del usuario que lo aplicó (resuelto desde `users` por `applied_by` — no expone solo el UUID).
+- [ ] **CA-03-24** (issue #118): el ajuste sintético de carga inicial (`pct_applied = NULL`, issues #100/#107) expone `pct_effective` calculado — ejemplo: `previous_amount = 1.000.000`, `new_amount = 1.200.000` → `pct_effective = 20.00`.
+- [ ] **CA-03-25** (issue #118): un ajuste manual aplicado con un `pct` dado expone `pct_effective` que coincide con el `pct_applied` guardado (dentro del redondeo `ROUND_HALF_EVEN` a 2 decimales, RN-10).
+- [ ] **CA-03-26** (issue #118): un ajuste `pending` (sin aplicar) expone `applied_by_name: null` y `pct_effective: null`.
 
 ## Integraciones
 
