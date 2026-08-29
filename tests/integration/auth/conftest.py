@@ -8,7 +8,6 @@ claves RS256 efimero generado por test (nunca se commitea).
 """
 
 import hashlib
-import json
 import secrets
 import uuid
 from collections.abc import AsyncGenerator
@@ -203,7 +202,14 @@ def seed():
                         "id": str(role_id),
                         "org_id": str(organization_id),
                         "name": name,
-                        "permissions": json.dumps(permissions),
+                        # Issue #116: `type_=sa.JSON` ya serializa -- pasar
+                        # `json.dumps(permissions)` doble-codificaba la
+                        # columna (mismo bug que `superadmin/repository.py`
+                        # antes del fix). Esta fixture alimenta login real
+                        # via HTTP en `test_login_permissions.py`, que
+                        # ejercita `_parse_permissions` de punta a punta --
+                        # debe reflejar la forma correcta post-fix.
+                        "permissions": permissions,
                     },
                 )
             return role_id
