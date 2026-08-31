@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from adminprop.db.session import get_tenant_db_session
 from adminprop.modules.contracts.models import Contract
 from adminprop.modules.people.models import Renter
-from adminprop.modules.properties.models import Property
+from adminprop.modules.properties.models import Neighborhood, Property
 
 # spec_data_model.md §"Estrategia de Seed Data" (modules/superadmin/provisioning.py.
 # DEFAULT_ORGANIZATION_SETTINGS): piso de seguridad si `organizations.settings`
@@ -42,6 +42,19 @@ def _decode_cursor(cursor: str) -> tuple[datetime, UUID]:
     raw = base64.urlsafe_b64decode(cursor.encode("ascii")).decode("utf-8")
     created_at_raw, row_id_raw = raw.split("|", 1)
     return datetime.fromisoformat(created_at_raw), UUID(row_id_raw)
+
+
+@dataclass(frozen=True)
+class ContractDisplayFields:
+    """RN-12 (issue #123, `sdd_03` v1.16 §8): campos denormalizados de
+    SOLO LECTURA de `ContractSummary`, resueltos por JOIN en el mismo
+    query del repository (sin N+1 -- mismo criterio que la decision
+    #127/issue #118). `property_neighborhood` es `None` si la propiedad
+    no tiene barrio asignado (`neighborhood_id` nullable, issue #99)."""
+
+    property_address: str
+    property_neighborhood: str | None
+    renter_name: str
 
 
 @dataclass(frozen=True)
@@ -173,9 +186,35 @@ class ContractRepository:
         cursor: str | None,
         limit: int,
         filters: ContractFilters,
-    ) -> tuple[list[Contract], str | None]:
-        stmt = select(Contract).where(
-            Contract.organization_id == organization_id, Contract.deleted_at.is_(None)
+    ) -> tuple[list[tuple[Contract, ContractDisplayFields]], str | None]:
+        """RN-12 (issue #123): cada fila del listado viene enriquecida con
+        `ContractDisplayFields` resuelto por JOIN en ESTE query -- un solo
+        round-trip por pagina, sin N+1 (mismo criterio que la decision
+        #127/issue #118). `properties`/`renters` se unen con INNER JOIN
+        (FKs NOT NULL de la migracion #16 -- siempre existen) y
+        `neighborhoods` con LEFT JOIN (`neighborhood_id` nullable, issue
+        #99). Cada tabla unida repite el filtro explicito de
+        `organization_id` en el ON (defense in depth sobre RLS, RN-D01).
+        Sin filtro de `deleted_at` en las tablas unidas: el contrato
+        sigue existiendo y muestra su referencia aunque el registro
+        referenciado este soft-deleted (RN-12)."""
+        stmt = (
+            select(Contract, Property.address, Neighborhood.name, Renter.name)
+            .join(
+                Property,
+                (Property.id == Contract.property_id)
+                & (Property.organization_id == organization_id),
+            )
+            .outerjoin(
+                Neighborhood,
+                (Neighborhood.id == Property.neighborhood_id)
+                & (Neighborhood.organization_id == organization_id),
+            )
+            .join(
+                Renter,
+                (Renter.id == Contract.renter_id) & (Renter.organization_id == organization_id),
+            )
+            .where(Contract.organization_id == organization_id, Contract.deleted_at.is_(None))
         )
         if filters.status is not None:
             stmt = stmt.where(Contract.status == filters.status)
@@ -201,14 +240,67 @@ class ContractRepository:
         stmt = stmt.order_by(Contract.created_at.desc(), Contract.id.desc()).limit(limit + 1)
 
         result = await self._session.execute(stmt)
-        rows = list(result.scalars().all())
+        rows = [
+            (
+                contract,
+                ContractDisplayFields(
+                    property_address=property_address,
+                    property_neighborhood=neighborhood_name,
+                    renter_name=renter_name,
+                ),
+            )
+            for contract, property_address, neighborhood_name, renter_name in result.all()
+        ]
 
         has_more = len(rows) > limit
         page = rows[:limit]
         next_cursor = (
-            _encode_cursor(page[-1].created_at, page[-1].id) if has_more and page else None
+            _encode_cursor(page[-1][0].created_at, page[-1][0].id) if has_more and page else None
         )
         return page, next_cursor
+
+    async def get_display_fields(
+        self, contract_id: UUID, organization_id: UUID
+    ) -> ContractDisplayFields | None:
+        """RN-12 (issue #123): resuelve los campos denormalizados de UN
+        contrato -- usado por los endpoints de a un contrato (`POST`/
+        `PATCH`/`activate`/`terminate`/`GET /contracts/:id`), que
+        devuelven el mismo `ContractSummary` que el listado. Mismos JOIN
+        y criterios que `list()` (ver docstring de arriba). `None` si el
+        contrato no existe en el tenant (RN-D01)."""
+        stmt = (
+            select(Property.address, Neighborhood.name, Renter.name)
+            .select_from(Contract)
+            .join(
+                Property,
+                (Property.id == Contract.property_id)
+                & (Property.organization_id == organization_id),
+            )
+            .outerjoin(
+                Neighborhood,
+                (Neighborhood.id == Property.neighborhood_id)
+                & (Neighborhood.organization_id == organization_id),
+            )
+            .join(
+                Renter,
+                (Renter.id == Contract.renter_id) & (Renter.organization_id == organization_id),
+            )
+            .where(
+                Contract.id == contract_id,
+                Contract.organization_id == organization_id,
+                Contract.deleted_at.is_(None),
+            )
+        )
+        result = await self._session.execute(stmt)
+        row = result.first()
+        if row is None:
+            return None
+        property_address, neighborhood_name, renter_name = row
+        return ContractDisplayFields(
+            property_address=property_address,
+            property_neighborhood=neighborhood_name,
+            renter_name=renter_name,
+        )
 
     async def update(
         self, contract_id: UUID, organization_id: UUID, *, fields: dict[str, object]

@@ -171,7 +171,15 @@ class ContractTerminateRequest(BaseModel):
 
 
 class ContractSummary(BaseModel):
-    """Item de GET /v1/contracts y respuesta de POST/PATCH/activate/terminate."""
+    """Item de GET /v1/contracts y respuesta de POST/PATCH/activate/terminate.
+
+    RN-12 (issue #123, `sdd_03` v1.16 §8): `property_address`/
+    `property_neighborhood`/`renter_name` son denormalizados de SOLO
+    LECTURA, resueltos por JOIN en el repository (nunca persistidos en
+    `contracts` ni aceptados en un body -- `ContractCreate`/
+    `ContractUpdate` los rechazan via `extra="forbid"`, CA-03-35).
+    `property_neighborhood` es `null` si la propiedad no tiene barrio
+    asignado (CA-03-32)."""
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -189,6 +197,9 @@ class ContractSummary(BaseModel):
     adjustment_index_notes: str | None
     status: str
     notes: str | None
+    property_address: str
+    property_neighborhood: str | None
+    renter_name: str
     created_at: datetime
     updated_at: datetime
 

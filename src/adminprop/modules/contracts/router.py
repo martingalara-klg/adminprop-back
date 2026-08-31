@@ -34,7 +34,6 @@ from adminprop.modules.contracts.schemas import (
     ContractDetailResponse,
     ContractListResponse,
     ContractResponse,
-    ContractSummary,
     ContractTerminateRequest,
     ContractUpdate,
 )
@@ -87,7 +86,10 @@ async def create_contract(
         historical_amounts=dto.historical_amounts,
         actor_user_id=payload.sub,
     )
-    return ContractResponse(data=contract)
+    # RN-12 (issue #123), CA-03-33: la respuesta expone los campos
+    # denormalizados de display (property_address/property_neighborhood/
+    # renter_name) -- mismo ContractSummary que el listado.
+    return ContractResponse(data=await service.to_summary(contract, organization_id))
 
 
 @router.get(
@@ -143,7 +145,9 @@ async def get_contract(
     monthly_amounts = await service.get_monthly_amounts(
         contract, organization_id, today=datetime.now(UTC).date()
     )
-    summary = ContractSummary.model_validate(contract)
+    # RN-12 (issue #123), CA-03-34: el detalle hereda los campos
+    # denormalizados de display del ContractSummary enriquecido.
+    summary = await service.to_summary(contract, organization_id)
     detail = ContractDetail(**summary.model_dump(), monthly_amounts=monthly_amounts)
     return ContractDetailResponse(data=detail)
 
@@ -170,7 +174,8 @@ async def update_contract(
         actor_user_id=payload.sub,
         fields_set=dto.model_fields_set,
     )
-    return ContractResponse(data=updated)
+    # RN-12 (issue #123), CA-03-33.
+    return ContractResponse(data=await service.to_summary(updated, organization_id))
 
 
 @router.post(
@@ -186,7 +191,8 @@ async def activate_contract(
     """RF-03 + CA-03-01/02, CA-01-04: `draft -> active`; revalida
     solapamiento (RN-01/RN-C01) y pone la propiedad en `rented`."""
     updated = await service.activate(contract_id, organization_id, actor_user_id=payload.sub)
-    return ContractResponse(data=updated)
+    # RN-12 (issue #123), CA-03-33.
+    return ContractResponse(data=await service.to_summary(updated, organization_id))
 
 
 @router.post(
@@ -213,7 +219,8 @@ async def terminate_contract(
     updated = await service.terminate(
         contract_id, organization_id, reason=dto.reason, actor_user_id=payload.sub
     )
-    return ContractResponse(data=updated)
+    # RN-12 (issue #123), CA-03-33.
+    return ContractResponse(data=await service.to_summary(updated, organization_id))
 
 
 @router.get(
