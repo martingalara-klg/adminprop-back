@@ -44,10 +44,12 @@ from adminprop.modules.contracts.rent_period_hook import (
     maybe_generate_current_month_rent_period,
 )
 from adminprop.modules.contracts.repository import (
+    ContractDisplayFields,
     ContractFilters,
     ContractRepository,
     get_contract_repository,
 )
+from adminprop.modules.contracts.schemas import ContractSummary
 from adminprop.modules.properties.repository import (
     PropertyRepository,
     get_property_repository,
@@ -63,6 +65,34 @@ from adminprop.shared.errors.codes import (
     ValidationError,
 )
 from adminprop.shared.notifications import service as notifications_service
+
+
+def _to_summary(contract: Contract, display: ContractDisplayFields) -> ContractSummary:
+    """RN-12 (issue #123): construye el schema de respuesta explicitamente
+    (no via `model_validate` directo del ORM) porque `property_address`/
+    `property_neighborhood`/`renter_name` no son columnas de `Contract`
+    -- mismo criterio que `adjustment_service.py._to_summary` (issue #118)."""
+    return ContractSummary(
+        id=contract.id,
+        property_id=contract.property_id,
+        renter_id=contract.renter_id,
+        currency=contract.currency,
+        initial_amount=contract.initial_amount,
+        current_amount=contract.current_amount,
+        start_date=contract.start_date,
+        end_date=contract.end_date,
+        daily_late_fee_pct=contract.daily_late_fee_pct,
+        adjustment_frequency_months=contract.adjustment_frequency_months,
+        adjustment_index=contract.adjustment_index,
+        adjustment_index_notes=contract.adjustment_index_notes,
+        status=contract.status,
+        notes=contract.notes,
+        property_address=display.property_address,
+        property_neighborhood=display.property_neighborhood,
+        renter_name=display.renter_name,
+        created_at=contract.created_at,
+        updated_at=contract.updated_at,
+    )
 
 
 class ContractService:
@@ -363,10 +393,25 @@ class ContractService:
         cursor: str | None,
         limit: int,
         filters: ContractFilters,
-    ) -> tuple[list, str | None]:
-        return await self._repo.list(
+    ) -> tuple[list[ContractSummary], str | None]:
+        """RN-12 (issue #123): el repository ya resuelve los campos
+        denormalizados por JOIN en el mismo query del listado (sin N+1,
+        CA-03-31) -- aca solo se arma el schema de respuesta."""
+        rows, next_cursor = await self._repo.list(
             organization_id=organization_id, cursor=cursor, limit=limit, filters=filters
         )
+        return [_to_summary(contract, display) for contract, display in rows], next_cursor
+
+    async def to_summary(self, contract: Contract, organization_id: UUID) -> ContractSummary:
+        """RN-12 (issue #123), CA-03-33/34: enriquece la respuesta de los
+        endpoints de a un contrato (`POST`/`PATCH`/`activate`/`terminate`
+        y la base de `GET /contracts/:id`) con los mismos campos
+        denormalizados del listado -- un unico query extra por request
+        (`get_display_fields`, JOIN identico al del listado)."""
+        display = await self._repo.get_display_fields(contract.id, organization_id)
+        if display is None:  # pragma: no cover -- defensivo: el contrato ya fue resuelto
+            raise NotFoundException()
+        return _to_summary(contract, display)
 
     async def update(
         self,
