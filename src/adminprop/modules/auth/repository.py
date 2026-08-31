@@ -17,6 +17,7 @@ modelos, este repositorio se puede migrar sin cambiar su interfaz publica.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -26,6 +27,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adminprop.db.session import get_db_session, get_superadmin_db_session
+from adminprop.shared.errors.codes import InternalError
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -63,12 +67,80 @@ class InvitationDetailRecord:
     expires_at: datetime
 
 
+def _parse_permission_json_array(value: object) -> list[object] | None:
+    """Si `value` es un string que a su vez es JSON de un array, lo parsea
+    y devuelve esa lista; `None` si no aplica (no es string, o no es JSON
+    de un array)."""
+    if not isinstance(value, str):
+        return None
+    try:
+        nested = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    return nested if isinstance(nested, list) else None
+
+
 def _parse_permissions(raw: object) -> list[str]:
-    if isinstance(raw, list):
-        return [str(item) for item in raw]
-    if isinstance(raw, str):
-        return [str(item) for item in json.loads(raw)]
-    return []
+    """Normaliza `roles.permissions` (o `role_permissions` de invitaciones)
+    a una lista plana de strings.
+
+    Issue #116: un bug historico de doble-codificacion en la escritura
+    (`INSERT`/`UPDATE` con `bindparam(type_=sa.JSON)` recibiendo un valor
+    ya serializado con `json.dumps`) podia dejar la columna en alguna de
+    estas formas:
+    - escalar string con el array serializado adentro (asyncpg ya
+      decodifica un nivel de JSON -- la rama `isinstance(raw, str)` de
+      abajo hace el segundo `json.loads` necesario).
+    - array con UN elemento string que a su vez es JSON de un array +
+      el resto de elementos ya planos (la forma que producia la migracion
+      `permissions || '[...]'::jsonb` del issue #105 al concatenar sobre
+      un valor ya doble-codificado).
+    - (forma correcta, post-fix del bug de escritura) array de strings
+      simples.
+
+    Esta funcion aplana cualquier elemento string que a su vez sea JSON
+    de un array (unico nivel de anidamiento observado en produccion,
+    ver evidencia del issue #116), dedupea preservando el orden, y valida
+    que el resultado final sea `list[str]`. Ante una forma que no puede
+    normalizarse de forma segura, loguea el error y levanta
+    `InternalError` en vez de devolver una lista corrupta silenciosamente
+    (CLAUDE.md §8 "ante algo no especificado: detenerse y reportar" /
+    issue #116 "fallar ruidosamente").
+    """
+    value: object = raw
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            logger.error(
+                "roles.permissions con forma invalida: string no es JSON valido",
+                extra={"raw_permissions": raw},
+            )
+            raise InternalError(message="El formato de permisos del rol es invalido.") from None
+
+    if not isinstance(value, list):
+        logger.error(
+            "roles.permissions con forma invalida: se esperaba una lista",
+            extra={"raw_permissions": raw},
+        )
+        raise InternalError(message="El formato de permisos del rol es invalido.")
+
+    flat: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        nested = _parse_permission_json_array(item)
+        candidates: list[object] = nested if nested is not None else [item]
+        for candidate in candidates:
+            if not isinstance(candidate, str):
+                logger.error(
+                    "roles.permissions con elemento no-string tras aplanar",
+                    extra={"raw_permissions": raw, "offending_item": candidate},
+                )
+                raise InternalError(message="El formato de permisos del rol es invalido.")
+            if candidate not in seen:
+                seen.add(candidate)
+                flat.append(candidate)
+    return flat
 
 
 class AuthRepository:

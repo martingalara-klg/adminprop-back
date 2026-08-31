@@ -134,7 +134,13 @@ def calculate_settlement(
     lectura literal de CA-05-04/CA-04-08 ("descuenta del neto") se
     interpreta como "no incrementa lo que la administracion le debe al
     propietario" -- consistente con la formula RF-02, que es la fuente
-    mas precisa (documentado como decision de implementacion del PR)."""
+    mas precisa (documentado como decision de implementacion del PR).
+
+    Los cobros `origin = initial_load` (issue #119, RN-P09/RN-06) ya
+    quedaron excluidos de `data.payments` -- `SettlementRepository.
+    _PAYMENTS_SQL` filtra `pay.origin = 'manual'` en la fuente -- por lo
+    que este bucle NUNCA los ve: no suman al neto, no integran
+    `commission_base` y no generan linea `already_settled`."""
     line_items: list[SettlementLineItemData] = []
     total_collected = Decimal("0.00")
     already_settled_total = Decimal("0.00")

@@ -2,12 +2,12 @@
 name: AdminProp — Módulo 5 — Liquidaciones a Propietarios
 description: Cargos del mes por propiedad, generación asíncrona de la rendición mensual por propietario (todo en ARS, TC manual si hay USD), regeneración auditada y exports Excel/PDF
 type: project
-version: 1.0
-fecha: 2026-08-06
+version: 1.1
+fecha: 2026-08-29
 ---
 # Módulo 5 — Liquidaciones a Propietarios
 
-**Versión:** 1.0 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-06
+**Versión:** 1.1 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-06
 
 ## Propósito
 
@@ -52,6 +52,7 @@ neto a rendir = Σ cobros del período con destino administración (capital + in
 
 - Los cobros `landlord_account` se listan como **"ya rendido"**: no suman al neto, sí a la base de comisión (RN-P07).
 - Los **intereses de mora cobrados** integran lo que se rinde al propietario, y **pagan comisión igual que el alquiler** (la base de comisión es capital + intereses cobrados).
+- **Exclusión de carga inicial (issue #119, RN-06/RN-P09):** los cobros `origin = initial_load` (generados automáticamente al dar de alta un contrato en curso, Módulo 3 RF-02/RN-11) quedan TOTALMENTE fuera de la fórmula — ni suman al neto, ni a la base de comisión, ni aparecen como línea "ya rendido" — a diferencia de `landlord_account`, que sí integra la base de comisión (RN-P07). Ese dinero ya fue rendido fuera del sistema antes de que el contrato existiera en AdminProp, por lo que no corresponde cobrar comisión sobre él.
 - `commission_pct_used` congela el % usado (RN-L05).
 - Line items por tipo: `rent_collected` / `commission` / `tax_charge` / `repair` / `already_settled`, cada uno con referencia a su origen (cobro, cargo, pedido) y propiedad.
 
@@ -89,6 +90,7 @@ Flujo guiado del frontend (`flow-implementation.md`):
 - **RN-03:** Regeneración libre pero siempre auditada; nunca se borra una liquidación (= RN-L03, RN-D02).
 - **RN-04:** Una reparación se descuenta una sola vez, en una sola liquidación (= RN-L04; `settled_in_settlement_id`).
 - **RN-05:** Una liquidación por propietario y período; correcciones = regeneración, no duplicado.
+- **RN-06** (issue #119, = RN-P09 de `sdd_02`): los cobros `origin = initial_load` (carga inicial del alta de contrato en curso, Módulo 3/4) están EXCLUIDOS de la fórmula de liquidación — ni neto ni base de comisión.
 
 ## Validaciones
 
@@ -105,6 +107,7 @@ Flujo guiado del frontend (`flow-implementation.md`):
 - [ ] **CA-05-06:** Anular un cobro de una liquidación emitida la marca "requiere regeneración"; al regenerar, los totales se recomputan, `regenerated_count` incrementa y la auditoría registra el cambio.
 - [ ] **CA-05-07:** El export Excel y el PDF agrupan por propiedad con subtotales (`scope=per_property`) y quedan descargables desde el detalle y desde la ficha del propietario.
 - [ ] **CA-05-08:** `GET /charge-entries?period=` muestra las propiedades con cargos cargados y las que faltan; cargar dos veces el mismo concepto+mes devuelve `409 CHARGE_ENTRY_ALREADY_EXISTS`.
+- [ ] **CA-05-09** (issue #119, RN-06): generar la liquidación de un período que incluye cobros `origin = initial_load` (carga inicial del alta de un contrato en curso) los EXCLUYE por completo del cálculo — no suman al neto ni a la base de comisión, y no aparecen como línea `already_settled`.
 
 ## Integraciones
 

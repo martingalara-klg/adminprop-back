@@ -55,6 +55,7 @@ _PAYMENTS_COLUMNS = {
     "voided_at",
     "voided_by",
     "created_by",
+    "origin",
     "created_at",
     "updated_at",
 }

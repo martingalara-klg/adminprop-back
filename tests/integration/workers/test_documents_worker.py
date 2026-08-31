@@ -359,3 +359,73 @@ class TestCa0504AlreadySettledEndToEnd:
         assert Decimal(row["total_collected"]) == Decimal("0.00")
         assert Decimal(row["already_settled_total"]) == Decimal("50000.00")
         assert Decimal(row["commission_total"]) == Decimal("5000.00")
+
+
+class TestCA0509InitialLoadExclusion:
+    """CA-05-09 (issue #119, RN-06 de spec_module_05): un cobro
+    `origin = initial_load` queda TOTALMENTE fuera de la formula -- ni
+    neto, ni base de comision, ni linea `already_settled` (a diferencia
+    de `landlord_account`, ver `TestCa0504AlreadySettledEndToEnd` arriba,
+    que SI integra la base de comision)."""
+
+    async def test_ca_05_09_initial_load_payment_is_excluded_from_net_and_commission(self, seed):
+        ctx = await _Ctx(seed).build(commission_pct="10.00")
+        rent_period_a = await seed.create_rent_period_row(
+            organization_id=ctx["org_id"],
+            contract_id=ctx["contract_a"],
+            period="2026-06-01",
+            status="paid",
+        )
+        rent_period_b = await seed.create_rent_period_row(
+            organization_id=ctx["org_id"],
+            contract_id=ctx["contract_b"],
+            period="2026-06-01",
+            status="paid",
+        )
+        # Cobro manual normal -- SI entra en la formula.
+        await seed.create_payment_row(
+            organization_id=ctx["org_id"],
+            rent_period_id=rent_period_a,
+            created_by=ctx["user_id"],
+            amount="100000.00",
+        )
+        # Cobro de carga inicial (issue #119) -- NO debe sumar ni al neto
+        # ni a la base de comision, ni aparecer como linea alguna.
+        await seed.create_payment_row(
+            organization_id=ctx["org_id"],
+            rent_period_id=rent_period_b,
+            created_by=ctx["user_id"],
+            amount="90000.00",
+            destination="landlord_account",
+            origin="initial_load",
+        )
+
+        settlement_id = await _create_placeholder_settlement(
+            ctx["org_id"],
+            ctx["landlord_id"],
+            generated_by=ctx["user_id"],
+            commission_pct=Decimal("10.00"),
+        )
+
+        await _generate_settlement_async(settlement_id, ctx["org_id"], "req-ca-05-09")
+
+        row = await seed.get_settlement_row(settlement_id)
+        # Si el initial_load NO se excluyera, total_collected seria 100000
+        # + comision se calcularia sobre 190000 -- ambos deben reflejar
+        # SOLO el cobro manual (100000).
+        assert Decimal(row["total_collected"]) == Decimal("100000.00")
+        assert Decimal(row["commission_total"]) == Decimal("10000.00")
+        assert Decimal(row["already_settled_total"]) == Decimal("0.00")
+        assert Decimal(row["net_amount"]) == Decimal("90000.00")
+
+        session_factory = get_session_factory()
+        async with session_factory() as session:
+            await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
+            result = await session.execute(
+                sa.text(
+                    "SELECT count(*) FROM settlement_line_items "
+                    "WHERE settlement_id = :id AND property_id = :property_id"
+                ),
+                {"id": str(settlement_id), "property_id": str(ctx["property_b"])},
+            )
+            assert result.scalar_one() == 0

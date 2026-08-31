@@ -2,12 +2,12 @@
 name: AdminProp — Módulo 4 — Cobranzas y Mora
 description: Generación mensual de alquileres pendientes, registro de cobros (medio, moneda, TC, destino), mora sugerida con perdón total/parcial, pagos parciales y estado de deuda
 type: project
-version: 1.2
-fecha: 2026-08-28
+version: 1.3
+fecha: 2026-08-29
 ---
 # Módulo 4 — Cobranzas y Mora
 
-**Versión:** 1.2 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-06
+**Versión:** 1.3 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-06
 
 ## Propósito
 
@@ -32,6 +32,7 @@ El flujo de plata que entra: cada mes el sistema genera los alquileres pendiente
 - El job `generate_rent_periods` (Beat, 1° de cada mes, `sdd_04` §1.3) crea el rent_period de cada contrato `active` con el monto vigente, en estado `pending`. **Idempotente** (el UNIQUE por contrato+período garantiza no duplicar).
 - Excepción: contrato con ajuste `pending` para ese período → el rent_period se genera recién al aplicarse el % (RN-P01, ver Módulo 3 RF-04).
 - Al activarse un contrato a mitad de mes, su rent_period del mes en curso se genera en el acto (Módulo 3 RF-03).
+- **Alta de contrato en curso (issue #119, RN-08/RN-P09):** si el contrato se da de alta con `start_date` anterior al mes actual, el `POST /contracts` (Módulo 3 RF-02/RN-11) genera además, en el acto, un `RentPeriod` `paid` por cada mes ya transcurrido (con su `Payment origin = initial_load` asociado) — no espera al job mensual ni a la activación. El mes actual sigue este RF-01 sin cambios.
 
 ### RF-02 — Panel de cobranzas del mes
 
@@ -57,6 +58,7 @@ El flujo de plata que entra: cada mes el sistema genera los alquileres pendiente
 
 - `POST /payments/:id/void` con motivo: anulación **lógica** (RN-D04) — el cobro queda visible con marca de anulado, el saldo del período se recompone, y la anulación se audita con autor y motivo.
 - Un cobro ya anulado → `409 PAYMENT_ALREADY_VOIDED`. Un cobro incluido en una liquidación emitida puede anularse igual: la liquidación afectada queda marcada para regeneración (Módulo 5 RF-03).
+- **Exclusión de carga inicial (issue #119, RN-P09):** un cobro `origin = initial_load` (Módulo 3 RF-02/RN-11) no puede anularse — `422 BUSINESS_RULE_VIOLATION` — es un registro histórico de la carga inicial, no una operación corriente que se corrija anulando y recargando.
 
 ### RF-06 — Estado de deuda global
 
@@ -68,6 +70,7 @@ El flujo de plata que entra: cada mes el sistema genera los alquileres pendiente
 - El PDF generado queda como Adjunto del cobro.
 - Sobre un cobro anulado no se emite recibo (`422 BUSINESS_RULE_VIOLATION`).
 - Es **opcional**: la UI ofrece "Descargar recibo" después de registrar el cobro; no es un paso obligatorio del flujo (RN-P08).
+- **Exclusión de carga inicial (issue #119, RN-P09):** un cobro `origin = initial_load` tampoco emite recibo (`422 BUSINESS_RULE_VIOLATION`, mismo código que el cobro anulado) — no hubo un cobro real ocurrido ante la administradora que documentar.
 
 ### RF-08 — Certificado de libre deuda (POR CONTRATO)
 
@@ -85,6 +88,7 @@ El flujo de plata que entra: cada mes el sistema genera los alquileres pendiente
 - **RN-05:** El capital imputado nunca supera el monto del período (los intereses cobrados van aparte, no reducen capital).
 - **RN-06:** Cobros inmutables una vez registrados: los errores se corrigen anulando (lógico) y recargando (= RN-D04).
 - **RN-07:** Todos los importes del cobro se expresan en la moneda del contrato; el TC solo documenta la conversión del pago recibido.
+- **RN-08** (issue #119, = RN-P09/RN-C07 de `sdd_02`/Módulo 3): al dar de alta un contrato en curso, el sistema genera automáticamente los `rent_periods` `paid` de los meses transcurridos + un `payment` `origin = initial_load` por cada uno (interés 0, sin TC). Un cobro `initial_load` está EXCLUIDO de toda liquidación (Módulo 5 RF-02), no emite recibo (RF-07) y no admite anulación (RF-05) — es un registro histórico, no una operación corriente.
 
 ## Validaciones
 
@@ -106,6 +110,9 @@ El flujo de plata que entra: cada mes el sistema genera los alquileres pendiente
 - [ ] **CA-04-10:** Tras registrar un cobro se puede descargar su recibo PDF con capital, interés, TC (si aplicó) y el encabezado de la administradora; un cobro anulado no emite recibo.
 - [ ] **CA-04-11:** Un contrato sin deuda obtiene su certificado de libre deuda en PDF, y la emisión queda auditada.
 - [ ] **CA-04-12:** Un contrato con períodos impagos o saldos parciales recibe `422 CONTRACT_HAS_DEBT` con el detalle de lo adeudado. Un inquilino con 2 contratos, con deuda en uno solo, obtiene el libre deuda del contrato sin deuda; el otro contrato sigue rechazando.
+- [ ] **CA-04-13** (issue #119, RN-08): el panel de cobranzas (`GET /rent-periods?period=`) de un mes pasado muestra el período retroactivo como `paid`; `GET /rent-periods/:id` expone en `payments[]` el cobro con `origin: "initial_load"`.
+- [ ] **CA-04-14** (issue #119, RN-08): `GET /payments/:id/receipt` sobre un cobro `origin = initial_load` devuelve `422 BUSINESS_RULE_VIOLATION`.
+- [ ] **CA-04-15** (issue #119, RN-08): `POST /payments/:id/void` sobre un cobro `origin = initial_load` devuelve `422 BUSINESS_RULE_VIOLATION`.
 
 ## Integraciones
 

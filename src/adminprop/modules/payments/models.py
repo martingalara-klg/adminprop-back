@@ -116,6 +116,12 @@ class Payment(Base):
     voided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     voided_by: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     created_by: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    # issue #119, RN-P09: 'manual' (default, cobro registrado por un
+    # operador) | 'initial_load' (generado automaticamente al declarar la
+    # carga inicial de un contrato en curso -- ver
+    # `contracts/rent_period_hook.py.generate_initial_load_history`).
+    # Fuente de verdad para excluir de liquidaciones/recibos/anulacion.
+    origin: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'manual'"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

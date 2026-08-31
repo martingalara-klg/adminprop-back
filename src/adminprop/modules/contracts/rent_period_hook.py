@@ -27,7 +27,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from adminprop.modules.contracts.models import ContractAdjustment
-from adminprop.modules.payments.repository import RentPeriodRepository
+from adminprop.modules.contracts.monthly_amounts import MonthlyAmountRow
+from adminprop.modules.payments.repository import (
+    PaymentRepository,
+    RentPeriodRepository,
+)
 
 
 async def maybe_generate_current_month_rent_period(
@@ -116,3 +120,82 @@ async def maybe_generate_rent_period_for_adjustment(
         amount_due=amount_due,
         currency=currency,
     )
+
+
+# RN-P09 (issue #119): "Cobro registrado automaticamente al dar de alta
+# el contrato en curso." -- texto LITERAL del issue, no reescribir.
+_INITIAL_LOAD_NOTES = "Cobro registrado automáticamente al dar de alta el contrato en curso."
+
+
+async def generate_initial_load_history(
+    session: AsyncSession,
+    *,
+    contract_id: UUID,
+    organization_id: UUID,
+    currency: str,
+    past_periods: list[MonthlyAmountRow],
+    actor_user_id: UUID,
+) -> int:
+    """RN-11/RN-P09 (issue #119, feedback #3 del PO): al dar de alta un
+    contrato en curso (`start_date` anterior al mes actual), genera un
+    `RentPeriod` `paid` + un `Payment` `origin='initial_load'` por cada
+    mes YA TRANSCURRIDO (nunca el mes actual -- el caller,
+    `ContractService.create`, ya filtro `past_periods` para excluirlo).
+    `amount_due`/monto del cobro = el monto vigente de CADA mes segun
+    `monthly_amounts.compute_monthly_amounts` (coherente con
+    `historical_amounts[]`/RN-08 cuando el contrato declara tramos; si no
+    hay tramos -- ej. arranco el mes pasado sin ajuste -- es
+    `initial_amount` plano).
+
+    Cobro sintetico: moneda del contrato, sin TC (`exchange_rate=None`),
+    interes 0 (`suggested_interest`/`charged_interest`/`forgiven_interest`
+    = 0, `days_late=0`), `payment_date` = dia 1 del periodo (no hay una
+    fecha real de cobro que preservar -- es un registro retroactivo,
+    decision de implementacion), `destination='landlord_account'` (el
+    dinero ya lo cobro el propietario directamente, por fuera del sistema,
+    antes del alta -- distinto del CHECK de exclusion de liquidaciones,
+    que es `origin`, no `destination`: ver `settlements/repository.py.
+    _PAYMENTS_SQL`).
+
+    Llamado en la MISMA transaccion que el INSERT del contrato (el
+    caller hace el `commit()` final) -- si algo falla, nada de esto queda
+    a medias. Idempotente via `RentPeriodRepository.insert_paid` (si el
+    periodo ya existiera -- no deberia pasar para un contrato recien
+    creado -- no duplica el `Payment` asociado). Devuelve la cantidad de
+    pares periodo+cobro generados (para el evento de auditoria resumen,
+    ver `ContractService.create`)."""
+    rent_period_repo = RentPeriodRepository(session)
+    payment_repo = PaymentRepository(session)
+
+    created = 0
+    for row in past_periods:
+        rent_period_id = await rent_period_repo.insert_paid(
+            organization_id=organization_id,
+            contract_id=contract_id,
+            period=row.period,
+            amount_due=row.amount,
+            currency=currency,
+        )
+        if rent_period_id is None:  # pragma: no cover -- defensivo, ver docstring
+            continue
+
+        await payment_repo.insert(
+            organization_id=organization_id,
+            rent_period_id=rent_period_id,
+            payment_date=row.period,
+            method="transfer",
+            payment_currency=currency,
+            amount=row.amount,
+            exchange_rate=None,
+            destination="landlord_account",
+            suggested_interest=Decimal("0.00"),
+            charged_interest=Decimal("0.00"),
+            forgiven_interest=Decimal("0.00"),
+            days_late=0,
+            notes=_INITIAL_LOAD_NOTES,
+            created_by=actor_user_id,
+            origin="initial_load",
+        )
+        created += 1
+
+    return created

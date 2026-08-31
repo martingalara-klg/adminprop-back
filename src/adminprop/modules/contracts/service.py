@@ -40,6 +40,7 @@ from adminprop.modules.contracts.monthly_amounts import (
     compute_monthly_amounts,
 )
 from adminprop.modules.contracts.rent_period_hook import (
+    generate_initial_load_history,
     maybe_generate_current_month_rent_period,
 )
 from adminprop.modules.contracts.repository import (
@@ -136,6 +137,11 @@ class ContractService:
         # mecanismo).
         final_current_amount = current_amount
         synthetic_chain: list[tuple[date, Decimal, Decimal]] = []
+        # RN-11/RN-P09 (issue #119): "hoy" unico para todo `create()` --
+        # tanto las validaciones de fecha de los dos mecanismos de carga
+        # inicial (abajo) como el calculo de cobros retroactivos
+        # (despues del INSERT) usan el MISMO valor.
+        today = datetime.now(UTC).date()
 
         if current_amount is not None and current_amount_since is not None:
             # Camino sin `adjustment_frequency_months` (USD siempre; ARS
@@ -153,7 +159,6 @@ class ContractService:
                         "start_date": start_date.isoformat(),
                     },
                 )
-            today = datetime.now(UTC).date()
             if current_amount_since > today:
                 raise InvalidDateRangeException(
                     field="current_amount_since",
@@ -179,7 +184,6 @@ class ContractService:
             # CA-03-09/10/11/12: cantidad exacta de tramos transcurridos
             # (necesita "hoy" -- por eso se valida aca, no en Pydantic,
             # mismo criterio que `current_amount_since <= hoy`).
-            today = datetime.now(UTC).date()
             expected_count = expected_tramo_count(
                 start_date=start_date,
                 adjustment_frequency_months=adjustment_frequency_months,
@@ -266,6 +270,59 @@ class ContractService:
                 },
                 user_id=actor_user_id,
             )
+
+        # RN-11/RN-P09 (issue #119, feedback #3 del PO): alta de contrato
+        # en curso -- los meses YA TRANSCURRIDOS (desde `start_date` hasta
+        # el mes ANTERIOR al actual) nacen `paid` con un cobro
+        # `initial_load` automatico. Dispara para CUALQUIER `start_date`
+        # anterior al mes actual, con o sin `synthetic_chain` (RN-08): el
+        # caso "arranco el mes pasado sin ningun tramo de ajuste" tambien
+        # cuenta -- `compute_monthly_amounts` ya resuelve ambos casos
+        # (serie plana en `initial_amount` si no hay ajustes `applied`).
+        # El mes actual NUNCA entra aca (se filtra abajo): sigue naciendo
+        # `pending` por la via normal (`activate`/job mensual, sin
+        # cambios).
+        applied_for_calc = [
+            AppliedAdjustment(due_period=due_period, new_amount=new_amount)
+            for due_period, _previous_amount, new_amount in synthetic_chain
+        ]
+        monthly_rows = compute_monthly_amounts(
+            status="draft",
+            start_date=start_date,
+            end_date=end_date,
+            initial_amount=initial_amount,
+            applied_adjustments=applied_for_calc,
+            today=today,
+            terminated_at=None,
+        )
+        current_period = date(today.year, today.month, 1)
+        past_rows = [r for r in reversed(monthly_rows) if r.period < current_period]
+
+        if past_rows:
+            periods_generated = await generate_initial_load_history(
+                self._repo.session,
+                contract_id=row.id,
+                organization_id=organization_id,
+                currency=currency,
+                past_periods=past_rows,
+                actor_user_id=actor_user_id,
+            )
+            if periods_generated:
+                # RN-11: evento resumen de la carga masiva (cantidad de
+                # periodos/cobros generados), no uno por periodo.
+                await audit(
+                    self._repo.session,
+                    organization_id=organization_id,
+                    action="contract.initial_load_generated",
+                    entity_type="contract",
+                    entity_id=row.id,
+                    after={
+                        "periods_generated": periods_generated,
+                        "first_period": past_rows[0].period.isoformat(),
+                        "last_period": past_rows[-1].period.isoformat(),
+                    },
+                    user_id=actor_user_id,
+                )
 
         await self._repo.commit()
         return row

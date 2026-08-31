@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.13
-fecha: 2026-08-28
+version: 1.15
+fecha: 2026-08-29
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.13
+**Versión:** 1.15
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -279,6 +279,11 @@ Los contratos ya dados de alta con el mecanismo del issue #100 (un único ajuste
 
 El monto de cada mes es determinístico: `initial_amount` hasta el primer ajuste `applied` cuyo `due_period <= mes`, luego el `new_amount` del **último** ajuste `applied` cuyo `due_period <= mes` (incluye el ajuste sintético "Carga inicial" del issue #100/RN-C06). Solo cuentan ajustes `applied` — los `pending` no afectan el histórico. Un contrato USD sin carga inicial declarada tiene una serie plana en `initial_amount` (RN-C02: sin ajuste periódico automático). Si el contrato aún no empezó (`start_date` futuro), `monthly_amounts` es `[]`.
 
+**Historial de ajustes — `applied_by_name` y `pct_effective` — issue #118, decisión #127 (RN-10 de `spec_module_03`):** feedback #3 del PO (2026-08-29) — el item de ajuste devuelto por `GET /contracts/:id/adjustments`, `GET /adjustments` y la respuesta de `POST /adjustments/:id/apply` (los tres comparten el mismo schema `AdjustmentSummary`) agrega dos campos:
+
+- `applied_by_name` (`str | null`): el `full_name` de `users` resuelto desde `applied_by` — antes el front solo tenía el UUID crudo. `null` mientras el ajuste sigue `pending` (no hay `applied_by` todavía).
+- `pct_effective` (`Decimal | null`): recalculado en el backend como `((new_amount − previous_amount) / previous_amount) × 100`, redondeado a 2 decimales con `ROUND_HALF_EVEN` (banker's rounding), siempre en `Decimal` — nunca `float`. Se calcula para TODO ajuste `applied`, incluido el ajuste sintético de "Carga inicial" (issues #100/#107) donde es la ÚNICA fuente confiable del % ya que ahí `pct_applied` queda `NULL` (RN-C06). Para los ajustes manuales normalmente coincide con `pct_applied` (que ya usa `ROUND_HALF_UP` al calcularse `new_amount` en `POST /adjustments/:id/apply`). `null` si el ajuste no está `applied` (`pending`) o si `previous_amount = 0` (evita división por cero).
+
 ## 9. Cobranzas (`/rent-periods`, `/payments`)
 
 ```
@@ -293,7 +298,9 @@ GET    /debt                             (?landlord_id=&renter_id=&min_days= —
 
 - `POST payments` valida: `amount` > 0 y ≤ saldo (`PAYMENT_EXCEEDS_CONTRACT_BALANCE`), `exchange_rate` si moneda difiere (`EXCHANGE_RATE_REQUIRED`), y registra `suggested_interest` / `charged_interest` / `forgiven_interest`.
 - La generación mensual de rent_periods es un job de Celery Beat (1° de cada mes, `sdd_04` §1.3), no un endpoint.
-- `GET /rent-periods/:id` (v1.7, issue #87) además de los campos del panel (§RF-02) incluye `payments[]` — el historial de cobros del período, ordenado por `payment_date` ascendente. Cada item trae `id`, `payment_date`, `method`, `payment_currency`, `amount`, `exchange_rate`, `destination`, `suggested_interest`, `charged_interest`, `forgiven_interest`, `notes`, `voided_at`, `voided_by`, `created_at`. **Los cobros anulados se incluyen** (con `voided_at`/`voided_by` poblados) — es la vía por la que CA-04-07 ("el cobro queda visible con marca de anulado") se verifica por API, no solo a nivel DB. El **motivo** de la anulación no viaja acá — vive en `audit_logs` (acción `payment.voided`, decisión #23) y se consulta vía `GET /audit-logs?entity_type=payment&entity_id=<id>` (visor de auditoría, permiso `audit:read`). `GET /rent-periods` (panel/listado, §RF-02) **no cambia** — sigue sin `payments[]`, liviano para el panel mensual.
+- `GET /rent-periods/:id` (v1.7, issue #87) además de los campos del panel (§RF-02) incluye `payments[]` — el historial de cobros del período, ordenado por `payment_date` ascendente. Cada item trae `id`, `payment_date`, `method`, `payment_currency`, `amount`, `exchange_rate`, `destination`, `suggested_interest`, `charged_interest`, `forgiven_interest`, `notes`, `voided_at`, `voided_by`, `created_at`, `origin` (v1.15, issue #119). **Los cobros anulados se incluyen** (con `voided_at`/`voided_by` poblados) — es la vía por la que CA-04-07 ("el cobro queda visible con marca de anulado") se verifica por API, no solo a nivel DB. El **motivo** de la anulación no viaja acá — vive en `audit_logs` (acción `payment.voided`, decisión #23) y se consulta vía `GET /audit-logs?entity_type=payment&entity_id=<id>` (visor de auditoría, permiso `audit:read`). `GET /rent-periods` (panel/listado, §RF-02) **no cambia** — sigue sin `payments[]`, liviano para el panel mensual.
+
+**`payments.origin` — issue #119, decisión #128 (RN-P09 de `sdd_02`):** feedback #3 del PO (2026-08-29) — al dar de alta un contrato en curso (`start_date` anterior al mes actual), el backend genera automáticamente los `rent_periods` `paid` de los meses transcurridos y un `payment` por cada uno con `origin: "initial_load"` (vs. `"manual"` para todo cobro registrado por un operador vía `POST /rent-periods/:id/payments` — este endpoint sigue sin aceptar `origin` en el body, siempre nace `manual`). `origin` se agrega al shape `PaymentSummary`/`PaymentDetail` (respuesta de `POST /rent-periods/:id/payments`, `POST /payments/:id/void` y `payments[]` de `GET /rent-periods/:id`). Un cobro `initial_load` es un registro histórico, no una operación corriente: `GET /payments/:id/receipt` y `POST /payments/:id/void` devuelven `422 BUSINESS_RULE_VIOLATION` sobre él (mismo código que ya usaban sobre un cobro anulado/inexistente-recibo). No hay `error.code` nuevo.
 
 ## 10. Cargos del mes (`/recurring-charges`, `/charge-entries`)
 
