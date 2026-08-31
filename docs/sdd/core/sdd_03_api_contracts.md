@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.15
-fecha: 2026-08-29
+version: 1.16
+fecha: 2026-08-31
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.15
+**Versión:** 1.16
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -283,6 +283,14 @@ El monto de cada mes es determinístico: `initial_amount` hasta el primer ajuste
 
 - `applied_by_name` (`str | null`): el `full_name` de `users` resuelto desde `applied_by` — antes el front solo tenía el UUID crudo. `null` mientras el ajuste sigue `pending` (no hay `applied_by` todavía).
 - `pct_effective` (`Decimal | null`): recalculado en el backend como `((new_amount − previous_amount) / previous_amount) × 100`, redondeado a 2 decimales con `ROUND_HALF_EVEN` (banker's rounding), siempre en `Decimal` — nunca `float`. Se calcula para TODO ajuste `applied`, incluido el ajuste sintético de "Carga inicial" (issues #100/#107) donde es la ÚNICA fuente confiable del % ya que ahí `pct_applied` queda `NULL` (RN-C06). Para los ajustes manuales normalmente coincide con `pct_applied` (que ya usa `ROUND_HALF_UP` al calcularse `new_amount` en `POST /adjustments/:id/apply`). `null` si el ajuste no está `applied` (`pending`) o si `previous_amount = 0` (evita división por cero).
+
+**`ContractSummary` enriquecido — `property_address`, `property_neighborhood` y `renter_name` — issue #123, decisión #129 (RN-12 de `spec_module_03`):** feedback #4 del PO (2026-08-31) — el shape `ContractSummary` (item de `GET /contracts` y respuesta de `POST /contracts`, `PATCH /contracts/:id`, `POST /contracts/:id/activate` y `POST /contracts/:id/terminate`; `GET /contracts/:id` lo hereda vía `ContractDetail`) agrega tres campos denormalizados de SOLO LECTURA, para que el front agrupe el listado de contratos por barrio mostrando dirección e inquilino sin resolver referencias por su cuenta:
+
+- `property_address` (`str`): `properties.address` de la propiedad del contrato.
+- `property_neighborhood` (`str | null`): `neighborhoods.name` resuelto vía `properties.neighborhood_id`; `null` si la propiedad no tiene barrio asignado (columna nullable — datos legacy, issue #99).
+- `renter_name` (`str`): `renters.name` del inquilino del contrato.
+
+Los tres se resuelven por JOIN en el SQL del repository — un solo query por página del listado, sin N+1 (mismo criterio que la decisión #127/issue #118: la resolución de referencias para display es del backend). Son campos derivados, no persistidos en `contracts` — sin migración. No se aceptan en ningún body: enviarlos en `POST /contracts` o `PATCH /contracts/:id` es `400 VALIDATION_ERROR` (solo lectura). La resolución NO filtra `deleted_at` de `properties`/`renters`/`neighborhoods`: el contrato sigue existiendo y muestra su referencia aunque el registro referenciado esté soft-deleted (RN-06 ya impide borrar una propiedad o inquilino con contrato activo; el caso solo aplica a contratos históricos). El JOIN mantiene el filtro explícito de `organization_id` en cada tabla unida (defense in depth, RN-D01).
 
 ## 9. Cobranzas (`/rent-periods`, `/payments`)
 

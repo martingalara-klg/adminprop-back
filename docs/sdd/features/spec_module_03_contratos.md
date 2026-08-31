@@ -2,12 +2,12 @@
 name: AdminProp — Módulo 3 — Contratos de Locación
 description: Contratos propiedad+inquilino con condiciones pactadas, ciclo de vida, ajustes por índice con ingreso manual del % y alertas de vencimiento
 type: project
-version: 1.5
-fecha: 2026-08-29
+version: 1.6
+fecha: 2026-08-31
 ---
 # Módulo 3 — Contratos de Locación
 
-**Versión:** 1.5 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-29
+**Versión:** 1.6 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-31
 
 ## Propósito
 
@@ -30,6 +30,8 @@ El corazón del negocio: el contrato vincula propiedad + inquilino con las condi
 ### RF-01 — Listado y consulta
 
 Listado con filtros: estado, propiedad, inquilino, propietario (vía propiedad), moneda, `expiring_in_days`. El detalle muestra condiciones, monto vigente, historial de ajustes y los períodos de alquiler generados.
+
+- **Listado enriquecido (issue #123):** feedback #4 del PO (2026-08-31) — cada item del listado (`ContractSummary`, compartido con las respuestas de `POST`/`PATCH`/`activate`/`terminate` y heredado por el detalle) expone `property_address`, `property_neighborhood` (`null` si la propiedad no tiene barrio asignado) y `renter_name`, denormalizados de solo lectura y resueltos por JOIN en el repository (sin N+1) — el front agrupa el listado por barrio mostrando dirección e inquilino sin llamadas extra (ver RN-12 y `sdd_03` §8).
 
 ### RF-02 — Alta de Contrato
 
@@ -92,6 +94,7 @@ Feedback #2 del PO (2026-08-28): la ficha del contrato (`GET /contracts/:id`) de
 - **RN-08** (v2, issue #107, = RN-C06 — supersede parcialmente el issue #100): Alta de contrato en curso. Con `adjustment_frequency_months` configurado (solo ARS): `historical_amounts[]` — uno por tramo transcurrido, cantidad exacta calculada por el backend; `current_amount` termina en el último valor de la lista y el sistema registra una cadena de ajustes sintéticos `applied` trazables (ver RF-02, RF-04 paso 6). Sin `adjustment_frequency_months` (USD siempre; ARS sin ajuste): `current_amount` + `current_amount_since`, opcionales pero solo válidos juntos (comportamiento del issue #100, sin cambios) — reemplaza a `initial_amount` como monto de arranque y registra un único ajuste sintético `applied`. Los dos mecanismos son mutuamente excluyentes según `adjustment_frequency_months`; RN-03/RN-C02 solo excluye a USD del ajuste periódico automático por índice, no de esta declaración puntual de carga inicial.
 - **RN-09** (issue #106): Serie mensual de valores locativos (RF-06) — cálculo determinístico desde `initial_amount` + ajustes `applied` (solo `applied`; `pending` no cuenta), orden descendente. Como `contracts` no persiste una fecha propia de terminación anticipada (RF-03 solo audita el motivo, no agrega columna), la fecha de corte de un contrato `terminated` se deriva del evento `contract.terminated` más reciente de ese contrato en `audit_logs` (misma transacción que la transición de estado — decisión de implementación, issue #106); si no existiera (defensivo), el fallback es `end_date`. Un contrato `expired` usa directamente `end_date` (vencimiento natural, sin ambigüedad).
 - **RN-10** (issue #118): `pct_effective` de un ajuste `applied` = `((new_amount − previous_amount) / previous_amount) × 100`, redondeado a 2 decimales con `ROUND_HALF_EVEN` (banker's rounding), siempre en `Decimal` — nunca `float`. Es la única fuente confiable del % para el ajuste sintético de carga inicial (`pct_applied` es `NULL` ahí, issues #100/#107); para los ajustes manuales normalmente coincide con `pct_applied` (que ya usa `ROUND_HALF_UP` al calcular `new_amount` en `POST /adjustments/:id/apply`), pero `pct_effective` es el valor recalculado y expuesto de forma uniforme en todos los casos. Ajustes `pending` → `null` (no hay `new_amount` todavía). `previous_amount = 0` → `null` (evita división por cero — defensivo, no debería ocurrir en la práctica dado RN-01, `initial_amount > 0`).
+- **RN-12** (issue #123, feedback #4 del PO — 2026-08-31): `property_address`/`property_neighborhood`/`renter_name` de `ContractSummary` son denormalizados de SOLO LECTURA, derivados por JOIN (`properties` → LEFT `neighborhoods`, `renters`) en el mismo query del repository — nunca persistidos en `contracts` ni aceptados en un body (`400 VALIDATION_ERROR`). `property_neighborhood = null` cuando `properties.neighborhood_id` es `NULL`. La resolución no filtra `deleted_at` de las tablas referenciadas (un contrato histórico sigue mostrando dirección/inquilino aunque estén soft-deleted — RN-06 ya impide borrar referencias con contrato activo). Cada tabla unida mantiene el filtro explícito de `organization_id` (defense in depth, RN-D01).
 - **RN-11** (= RN-C07, issue #119, feedback #3 del PO — 2026-08-29): Alta de contrato en curso (`start_date` anterior al mes actual) → cobros retroactivos automáticos. El sistema genera, en la MISMA transacción del alta, un `RentPeriod` `paid` + un `Payment` `origin = initial_load` por cada mes desde `start_date` hasta el mes anterior al actual, con el monto que le corresponde a cada mes según `monthly_amounts[]`/RN-09 (coherente con los tramos de `historical_amounts[]`/RN-08 cuando aplica; si no hay tramos — el contrato arrancó recién el mes pasado sin ajuste — el monto es plano `initial_amount`). El mes actual no se toca: sigue naciendo `pending` por la activación/job mensual (RF-03/Módulo 4 RF-01). Ver `sdd_02` §3 RN-P09 para el detalle de exclusión en liquidaciones/recibos/anulación (Módulo 4 RF-03/RF-07, Módulo 5 RF-02).
 
 ## Validaciones
@@ -135,6 +138,11 @@ Feedback #2 del PO (2026-08-28): la ficha del contrato (`GET /contracts/:id`) de
 - [ ] **CA-03-24** (issue #118): el ajuste sintético de carga inicial (`pct_applied = NULL`, issues #100/#107) expone `pct_effective` calculado — ejemplo: `previous_amount = 1.000.000`, `new_amount = 1.200.000` → `pct_effective = 20.00`.
 - [ ] **CA-03-25** (issue #118): un ajuste manual aplicado con un `pct` dado expone `pct_effective` que coincide con el `pct_applied` guardado (dentro del redondeo `ROUND_HALF_EVEN` a 2 decimales, RN-10).
 - [ ] **CA-03-26** (issue #118): un ajuste `pending` (sin aplicar) expone `applied_by_name: null` y `pct_effective: null`.
+- [ ] **CA-03-31** (issue #123, RN-12): cada item de `GET /contracts` expone `property_address` y `renter_name` con los valores de la propiedad y el inquilino del contrato, y `property_neighborhood` con el nombre del barrio de la propiedad — resueltos en el mismo query del listado (JOIN, sin N+1).
+- [ ] **CA-03-32** (issue #123, RN-12): un contrato cuya propiedad no tiene barrio asignado (`neighborhood_id` `NULL`) expone `property_neighborhood: null`, con `property_address` y `renter_name` igualmente poblados.
+- [ ] **CA-03-33** (issue #123, RN-12): las respuestas de `POST /contracts`, `PATCH /contracts/:id`, `POST /contracts/:id/activate` y `POST /contracts/:id/terminate` exponen los tres campos (mismo `ContractSummary`).
+- [ ] **CA-03-34** (issue #123, RN-12): `GET /contracts/:id` (`ContractDetail`) también expone los tres campos, junto con `monthly_amounts[]`.
+- [ ] **CA-03-35** (issue #123, RN-12): enviar `property_address`, `property_neighborhood` o `renter_name` en el body de `POST /contracts` o `PATCH /contracts/:id` devuelve `400 VALIDATION_ERROR` (campos de solo lectura).
 
 ## Integraciones
 
