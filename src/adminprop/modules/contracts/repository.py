@@ -58,6 +58,35 @@ class ContractDisplayFields:
 
 
 @dataclass(frozen=True)
+class ActiveContractRef:
+    """RN-D05 (issue #124, decision #130): referencia de un contrato
+    `active` que bloquea la baja de una propiedad o un inquilino -- va
+    serializada en `details.active_contracts[]` del 422
+    ENTITY_HAS_ACTIVE_CONTRACT (sdd_03 v1.17 §"Codigos de Error
+    Globales") para que el front arme un mensaje legible (precedente
+    CONTRACT_HAS_DEBT/issue #104)."""
+
+    contract_id: UUID
+    property_id: UUID
+    property_address: str
+    renter_id: UUID
+    renter_name: str
+    start_date: date
+    end_date: date
+
+    def to_details(self) -> dict[str, str]:
+        return {
+            "contract_id": str(self.contract_id),
+            "property_id": str(self.property_id),
+            "property_address": self.property_address,
+            "renter_id": str(self.renter_id),
+            "renter_name": self.renter_name,
+            "start_date": self.start_date.isoformat(),
+            "end_date": self.end_date.isoformat(),
+        }
+
+
+@dataclass(frozen=True)
 class ContractFilters:
     """RF-01: "Listado con filtros: estado, propiedad, inquilino, moneda,
     expiring_in_days". `propietario` (via propiedad) queda fuera de
@@ -313,6 +342,77 @@ class ContractRepository:
         await self._session.flush()
         await self._session.refresh(row)
         return row
+
+    async def soft_delete(self, contract_id: UUID, organization_id: UUID) -> Contract | None:
+        """RN-C08/RN-13 (issue #124): baja logica (`deleted_at`, RN-D02) --
+        nunca DELETE fisico. Devuelve `None` si no existe/ya esta
+        eliminado/es de otra organizacion (404, RN-D01). A partir de aca
+        TODA query operativa de este repository lo excluye via el filtro
+        `deleted_at IS NULL` que ya aplican (`_get_row`, `list`,
+        `list_active*`, `find_overlapping_active_contract`, etc.)."""
+        row = await self._get_row(contract_id, organization_id)
+        if row is None:
+            return None
+        row.deleted_at = datetime.now(UTC)
+        await self._session.flush()
+        return row
+
+    async def list_active_contract_refs(
+        self,
+        organization_id: UUID,
+        *,
+        property_id: UUID | None = None,
+        renter_id: UUID | None = None,
+    ) -> list[ActiveContractRef]:
+        """RN-D05 (issue #124): contratos `active` (no eliminados) que
+        bloquean la baja de una propiedad o un inquilino, con las
+        referencias de display resueltas por JOIN en el MISMO query
+        (sin N+1, mismo criterio que `list()`/RN-12). Cada tabla unida
+        repite el filtro explicito de `organization_id` (defense in
+        depth sobre RLS, RN-D01)."""
+        stmt = (
+            select(
+                Contract.id,
+                Contract.property_id,
+                Property.address,
+                Contract.renter_id,
+                Renter.name,
+                Contract.start_date,
+                Contract.end_date,
+            )
+            .join(
+                Property,
+                (Property.id == Contract.property_id)
+                & (Property.organization_id == organization_id),
+            )
+            .join(
+                Renter,
+                (Renter.id == Contract.renter_id) & (Renter.organization_id == organization_id),
+            )
+            .where(
+                Contract.organization_id == organization_id,
+                Contract.status == "active",
+                Contract.deleted_at.is_(None),
+            )
+            .order_by(Contract.start_date.asc(), Contract.id.asc())
+        )
+        if property_id is not None:
+            stmt = stmt.where(Contract.property_id == property_id)
+        if renter_id is not None:
+            stmt = stmt.where(Contract.renter_id == renter_id)
+        result = await self._session.execute(stmt)
+        return [
+            ActiveContractRef(
+                contract_id=row[0],
+                property_id=row[1],
+                property_address=row[2],
+                renter_id=row[3],
+                renter_name=row[4],
+                start_date=row[5],
+                end_date=row[6],
+            )
+            for row in result.all()
+        ]
 
     async def has_active_contract_for_property(
         self, property_id: UUID, organization_id: UUID

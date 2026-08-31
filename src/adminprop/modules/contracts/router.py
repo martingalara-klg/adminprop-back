@@ -223,6 +223,29 @@ async def terminate_contract(
     return ContractResponse(data=await service.to_summary(updated, organization_id))
 
 
+@router.delete(
+    "/{contract_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_contract(
+    contract_id: UUID,
+    organization_id: UUID = Depends(get_current_tenant),
+    # RN-C08/RN-13 + sdd_03 v1.17, decision #130 (issue #124, feedback #4
+    # del PO): eliminar un contrato es exclusivo de `owner` -- permiso
+    # atomico dedicado `contract:delete` (mismo patron que
+    # `contract:terminate`, decision #124/issue #105). Un `admin` con
+    # `contract:manage` recibe 403 FORBIDDEN (CA-03-36).
+    payload: JWTPayload = Depends(requires_permission("contract:delete")),
+    service: ContractService = Depends(get_contract_service),
+) -> None:
+    """RF-07 + CA-03-37/38/39/40: borrado LOGICO en cualquier estado
+    (incluso `active`); si estaba activo, la propiedad vuelve a
+    `available` y se detiene la generacion de periodos futuros; los
+    cobros/liquidaciones ya emitidos quedan intactos. Auditado
+    (`contract.deleted`)."""
+    await service.delete(contract_id, organization_id, actor_user_id=payload.sub)
+
+
 @router.get(
     "/{contract_id}/adjustments",
     response_model=AdjustmentListResponse,

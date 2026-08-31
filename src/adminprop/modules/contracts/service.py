@@ -579,6 +579,64 @@ class ContractService:
         await self._repo.commit()
         return updated
 
+    async def delete(
+        self,
+        contract_id: UUID,
+        organization_id: UUID,
+        *,
+        actor_user_id: UUID,
+    ) -> None:
+        """RF-07 + CA-03-37/38 (issue #124, decision #130): borrado LOGICO
+        de un contrato, en CUALQUIER estado -- incluso `active` (decision
+        del PO). El router ya exige el permiso atomico `contract:delete`
+        (solo owner, CA-03-36).
+
+        # RN-C08/RN-13: efectos del borrado logico:
+        - El contrato desaparece de listados/paneles y su detalle es 404
+          (el filtro `deleted_at IS NULL` ya lo aplican todas las queries
+          operativas -- repository de contratos, panel de cobranzas,
+          deuda, bandeja de ajustes y jobs Beat).
+        - Si estaba `active`: la propiedad vuelve a `available` (mismo
+          efecto que terminate/expired -- se preserva el invariante
+          `rented <=> contrato active no eliminado`, RF-04 del Modulo 1)
+          y se detiene la generacion de periodos futuros (el job mensual
+          `generate_rent_periods` usa `list_active`, que excluye
+          eliminados).
+        - Los cobros y liquidaciones ya emitidos quedan intactos
+          (CA-03-40): este metodo no toca `payments`/`settlements`.
+
+        Auditado con `contract.deleted` (autor + estado previo), en la
+        MISMA transaccion que el UPDATE de `deleted_at`.
+        """
+        contract = await self._repo.get_by_id(contract_id, organization_id)
+        if contract is None:
+            # RN-D01: inexistente, ya eliminado o cross-tenant -> 404.
+            raise NotFoundException()
+
+        previous_status = contract.status
+        deleted = await self._repo.soft_delete(contract_id, organization_id)
+        if deleted is None:  # pragma: no cover -- defensivo, ya se valido existencia arriba
+            raise NotFoundException()
+
+        if previous_status == "active":
+            # RN-C08 + CA-03-38: la propiedad vuelve a `available`.
+            await self._property_repo.update(
+                contract.property_id, organization_id, fields={"status": "available"}
+            )
+
+        await audit(
+            self._repo.session,
+            organization_id=organization_id,
+            action="contract.deleted",
+            entity_type="contract",
+            entity_id=contract_id,
+            before={"status": previous_status},
+            after={"deleted_at": deleted.deleted_at.isoformat()},
+            user_id=actor_user_id,
+        )
+
+        await self._repo.commit()
+
     # ─── RF-03/RF-05 (issue #19): job diario `detect_expiring_contracts` ──
 
     async def detect_expiring_and_expired(

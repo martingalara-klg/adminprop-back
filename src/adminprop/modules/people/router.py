@@ -407,14 +407,14 @@ async def update_renter(
 @renters_router.delete(
     "/{renter_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(requires_permission("renter:manage"))],
 )
 async def delete_renter(
     renter_id: UUID,
     organization_id: UUID = Depends(get_current_tenant),
+    payload: JWTPayload = Depends(requires_permission("renter:manage")),
     service: RenterService = Depends(get_renter_service),
 ) -> None:
-    """RF-03 + CA-02-06: baja logica. `409 ENTITY_HAS_DEPENDENCIES` si el
-    inquilino tiene contrato vigente (chequeo extensible, ver
-    `repository.py` -- siempre `False` hoy)."""
-    await service.delete(renter_id, organization_id)
+    """RF-03 + CA-02-06/08/09 (issue #124, RN-D05): baja logica auditada
+    (`renter.deleted`); con contrato `active` -> `422
+    ENTITY_HAS_ACTIVE_CONTRACT` con `details.active_contracts[]`."""
+    await service.delete(renter_id, organization_id, actor_user_id=payload.sub)
