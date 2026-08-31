@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 import sqlalchemy as sa
@@ -386,6 +386,54 @@ def seed(rsa_keypair):
                     },
                 )
             return property_id
+
+        async def create_contract_row(
+            self,
+            *,
+            organization_id: uuid.UUID,
+            property_id: uuid.UUID,
+            renter_id: uuid.UUID,
+            currency: str = "ARS",
+            initial_amount: str = "100000.00",
+            start_date: str = "2026-01-01",
+            end_date: str = "2027-01-01",
+            daily_late_fee_pct: str = "0.1",
+            status: str = "draft",
+        ) -> uuid.UUID:
+            """Issue #124 (RN-D05): siembra un `contract` directamente en
+            DB -- usado por los tests de CA-01-12/14 que necesitan un
+            contrato inactivo (`terminated`) sin pasar por el ciclo de
+            vida completo del API. Mismo helper que
+            `tests/integration/contracts/conftest.py` (duplicacion
+            deliberada, criterio del encabezado de este archivo)."""
+            contract_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO contracts "
+                        "(id, organization_id, property_id, renter_id, currency, "
+                        "initial_amount, current_amount, start_date, end_date, "
+                        "daily_late_fee_pct, status) "
+                        "VALUES (:id, :org_id, :property_id, :renter_id, :currency, "
+                        ":initial_amount, :initial_amount, :start_date, :end_date, "
+                        ":daily_late_fee_pct, :status)"
+                    ),
+                    {
+                        "id": str(contract_id),
+                        "org_id": str(organization_id),
+                        "property_id": str(property_id),
+                        "renter_id": str(renter_id),
+                        "currency": currency,
+                        "initial_amount": initial_amount,
+                        "start_date": date.fromisoformat(start_date),
+                        "end_date": date.fromisoformat(end_date),
+                        "daily_late_fee_pct": daily_late_fee_pct,
+                        "status": status,
+                    },
+                )
+            return contract_id
 
         async def audit_rows(self, organization_id: uuid.UUID, action: str) -> list[dict]:
             session_factory = get_session_factory()
