@@ -320,6 +320,24 @@ def seed(rsa_keypair):
                 )
             return renter_id
 
+        async def create_neighborhood_row(
+            self, *, organization_id: uuid.UUID, name: str = "Barrio de prueba"
+        ) -> uuid.UUID:
+            """issue #123 (RN-12): siembra un barrio para poblar
+            `property_neighborhood` del `ContractSummary` enriquecido."""
+            neighborhood_id = uuid.uuid4()
+            session_factory = get_session_factory()
+            async with session_factory() as session, session.begin():
+                await session.execute(sa.text("SET LOCAL ROLE adminprop_superadmin"))
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO neighborhoods (id, organization_id, name) "
+                        "VALUES (:id, :org_id, :name)"
+                    ),
+                    {"id": str(neighborhood_id), "org_id": str(organization_id), "name": name},
+                )
+            return neighborhood_id
+
         async def create_property_row(
             self,
             *,
@@ -327,6 +345,7 @@ def seed(rsa_keypair):
             landlord_id: uuid.UUID,
             address: str = "Av. Test 123",
             status: str = "available",
+            neighborhood_id: uuid.UUID | None = None,
         ) -> uuid.UUID:
             property_id = uuid.uuid4()
             session_factory = get_session_factory()
@@ -335,13 +354,16 @@ def seed(rsa_keypair):
                 await session.execute(
                     sa.text(
                         "INSERT INTO properties "
-                        "(id, organization_id, landlord_id, address, property_type, status) "
-                        "VALUES (:id, :org_id, :landlord_id, :address, 'departamento', :status)"
+                        "(id, organization_id, landlord_id, neighborhood_id, address, "
+                        "property_type, status) "
+                        "VALUES (:id, :org_id, :landlord_id, :neighborhood_id, :address, "
+                        "'departamento', :status)"
                     ),
                     {
                         "id": str(property_id),
                         "org_id": str(organization_id),
                         "landlord_id": str(landlord_id),
+                        "neighborhood_id": str(neighborhood_id) if neighborhood_id else None,
                         "address": address,
                         "status": status,
                     },

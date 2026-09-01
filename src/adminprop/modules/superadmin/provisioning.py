@@ -30,6 +30,7 @@ ALL_PERMISSIONS: tuple[str, ...] = (
     "contract:read",
     "contract:manage",
     "contract:terminate",
+    "contract:delete",
     "adjustment:apply",
     "rent-period:read",
     "payment:create",
@@ -78,6 +79,10 @@ _ADMIN_EXCLUDED_PERMISSIONS = frozenset(
         "organization:configure",
         "landlord:set-commission",
         "contract:terminate",
+        # Issue #124, decision #130 (RN-C08): eliminar un contrato --
+        # borrado logico, cualquier estado -- es exclusivo de owner;
+        # mismo patron que contract:terminate (issue #105, decision #124).
+        "contract:delete",
     }
 )
 

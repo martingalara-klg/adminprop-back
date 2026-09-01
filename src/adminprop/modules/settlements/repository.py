@@ -178,7 +178,11 @@ _REPAIRS_SQL = """
 """
 
 # CA-05-03: periodos `pending`/`partial` del propietario en el mes --
-# advertencia de "periodos impagos".
+# advertencia de "periodos impagos". RN-C08/RN-13 (issue #124):
+# `c.deleted_at IS NULL` -- la deuda de un contrato ELIMINADO deja de
+# computarse, tampoco como advertencia de liquidacion (los cobros ya
+# emitidos de ese contrato siguen liquidandose via `_PAYMENTS_SQL`, que
+# deliberadamente NO filtra `c.deleted_at`: quedan intactos, CA-03-40).
 _UNPAID_RENT_PERIODS_SQL = """
     SELECT
         rp.id AS rent_period_id,
@@ -191,6 +195,7 @@ _UNPAID_RENT_PERIODS_SQL = """
       AND p.landlord_id = :landlord_id
       AND rp.period = :period
       AND rp.status IN ('pending', 'partial')
+      AND c.deleted_at IS NULL
 """
 
 # CA-05-03: conceptos `is_active` sin `charge_entry` en el mes --
@@ -259,13 +264,14 @@ class SettlementRepository:
     ) -> bool:
         """RF-02 §Validaciones: "no se puede generar la liquidacion de un
         periodo si el propietario no tiene ninguna propiedad con contrato
-        activo ni movimientos en ese mes"."""
+        activo ni movimientos en ese mes". RN-C08 (issue #124): un
+        contrato eliminado no cuenta como activo (`deleted_at IS NULL`)."""
         result = await self._session.execute(
             text(
                 "SELECT 1 FROM contracts c "
                 "JOIN properties p ON p.id = c.property_id AND p.organization_id = :org_id "
                 "WHERE c.organization_id = :org_id AND p.landlord_id = :landlord_id "
-                "AND c.status = 'active' LIMIT 1"
+                "AND c.status = 'active' AND c.deleted_at IS NULL LIMIT 1"
             ),
             {"org_id": str(organization_id), "landlord_id": str(landlord_id)},
         )

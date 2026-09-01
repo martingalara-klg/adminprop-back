@@ -454,6 +454,26 @@ class EntityHasDependenciesException(AdminPropException):
     message = "El recurso tiene dependencias activas y no puede eliminarse."
 
 
+class EntityHasActiveContractException(AdminPropException):
+    """sdd_03 v1.17 §"Codigos de Error Globales" -- 422 ENTITY_HAS_ACTIVE_CONTRACT.
+
+    Issue #124 (decision #130, RN-D05): baja de una `property` o un
+    `renter` vinculado a un contrato `active` (no eliminado) -- reemplaza
+    el 409 ENTITY_HAS_DEPENDENCIES que estos dos casos devolvian hasta
+    sdd_03 v1.16 (el 409 queda para `landlords`/`neighborhoods`).
+    `details` estructurado para que el front arme el mensaje (precedente
+    CONTRACT_HAS_DEBT/issue #104): `entity_type`, `entity_id` y
+    `active_contracts[]` (cada item con `contract_id`, `property_id`,
+    `property_address`, `renter_id`, `renter_name`, `start_date`,
+    `end_date`). El caller arma `details` con los `ActiveContractRef` de
+    `modules/contracts/repository.py`.
+    """
+
+    status_code = 422
+    error_code = "ENTITY_HAS_ACTIVE_CONTRACT"
+    message = "No se puede eliminar: tiene un contrato activo vinculado."
+
+
 class ContractHasDebtException(AdminPropException):
     """sdd_03 §"Codigos de Error Globales" -- 422 CONTRACT_HAS_DEBT.
 

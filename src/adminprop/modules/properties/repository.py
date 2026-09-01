@@ -219,6 +219,21 @@ class PropertyRepository:
         contracts_repo = ContractRepository(self._session)
         return await contracts_repo.has_active_contract_for_property(property_id, organization_id)
 
+    async def list_active_contracts(self, property_id: UUID, organization_id: UUID) -> list:
+        """RN-D05 (issue #124, CA-01-12): contratos `active` (no
+        eliminados) que bloquean la baja de la propiedad, con las
+        referencias de display para `details.active_contracts[]` del 422
+        ENTITY_HAS_ACTIVE_CONTRACT. Delega en
+        `ContractRepository.list_active_contract_refs` (misma `session`,
+        misma transaccion) -- import diferido por el mismo motivo que
+        `has_active_dependencies` (arriba)."""
+        from adminprop.modules.contracts.repository import ContractRepository
+
+        contracts_repo = ContractRepository(self._session)
+        return await contracts_repo.list_active_contract_refs(
+            organization_id, property_id=property_id
+        )
+
     async def _get_row(self, property_id: UUID, organization_id: UUID) -> Property | None:
         stmt = select(Property).where(
             Property.id == property_id,

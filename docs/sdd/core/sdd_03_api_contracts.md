@@ -2,12 +2,12 @@
 name: AdminProp — Contratos de API
 description: Endpoints REST, convenciones, formato de error, códigos de error globales, catálogo de permisos y autorización por recurso. Contrato vinculante entre backend y frontend
 type: project
-version: 1.15
-fecha: 2026-08-29
+version: 1.17
+fecha: 2026-08-31
 ---
 # AdminProp — Contratos de API
 
-**Versión:** 1.15
+**Versión:** 1.17
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -57,6 +57,9 @@ El frontend discrimina por `error.code`, muestra `error.message`, asocia `error.
 **Transversales:**
 `VALIDATION_ERROR` (400) · `INVALID_DATE_RANGE` (400) · `UNAUTHORIZED` (401) · `ACCOUNT_LOCKED` (403, con countdown en `details.retry_after_seconds`) · `FORBIDDEN` (403) · `ROLE_REQUIRED` (403) · `SUPERADMIN_REQUIRED` (403) · `MEMBERSHIP_INACTIVE` (403) · `NOT_FOUND` (404) · `CONFLICT` (409) · `ENTITY_HAS_DEPENDENCIES` (409) · `BUSINESS_RULE_VIOLATION` (422) · `INVALID_STATUS_TRANSITION` (422) · `RATE_LIMIT_EXCEEDED` (429, con header `Retry-After`) · `INTERNAL_ERROR` (500)
 
+**Personas y propiedades:**
+`ENTITY_HAS_ACTIVE_CONTRACT` (422, `DELETE /properties/:id` y `DELETE /renters/:id` — issue #124, decisión #130: la entidad está vinculada a un contrato `active` y no puede eliminarse; `details` estructurado para que el front arme el mensaje — mismo criterio que `CONTRACT_HAS_DEBT`/issue #104: `details.entity_type` (`"property"` | `"renter"`), `details.entity_id` y `details.active_contracts[]`, cada item con `contract_id`, `property_id`, `property_address`, `renter_id`, `renter_name`, `start_date`, `end_date`)
+
 **Auth y usuarios:**
 `INVITATION_NOT_FOUND` (404) · `INVITATION_EXPIRED` (410) · `INVITATION_ALREADY_ACCEPTED` (409) · `INVITATION_PENDING_EXISTS` (409) · `USER_ALREADY_MEMBER` (409) · `LAST_OWNER_REQUIRED` (422) · `ROLE_NOT_FOUND` (404) · `SYSTEM_ROLE_IMMUTABLE` (422) · `RESET_TOKEN_EXPIRED` (410, agregado issue #8 — `GET/POST /auth/reset-password/:token`; token existió pero venció su ventana de 1h. El caso "nunca existió / ya usado" usa el `NOT_FOUND` genérico de arriba)
 
@@ -80,11 +83,13 @@ El frontend discrimina por `error.code`, muestra `error.message`, asocia `error.
 
 Permisos atómicos (`recurso:acción`) portados en `permissions[]` del JWT:
 
-`landlord:read` `landlord:manage` `landlord:set-commission` · `renter:read` `renter:manage` · `property:read` `property:manage` · `contract:read` `contract:manage` `contract:terminate` · `adjustment:apply` · `rent-period:read` · `payment:create` `payment:void` · `charge:manage` · `settlement:read` `settlement:generate` `settlement:issue` · `work-order:read` `work-order:create` `work-order:quote` `work-order:approve` `work-order:close` `work-order:cancel` · `attachment:manage` · `user:manage` `role:read` `organization:configure` · `audit:read` · `notification:read`
+`landlord:read` `landlord:manage` `landlord:set-commission` · `renter:read` `renter:manage` · `property:read` `property:manage` · `contract:read` `contract:manage` `contract:terminate` `contract:delete` · `adjustment:apply` · `rent-period:read` · `payment:create` `payment:void` · `charge:manage` · `settlement:read` `settlement:generate` `settlement:issue` · `work-order:read` `work-order:create` `work-order:quote` `work-order:approve` `work-order:close` `work-order:cancel` · `attachment:manage` · `user:manage` `role:read` `organization:configure` · `audit:read` · `notification:read`
 
 > `landlord:set-commission` (agregado v1.5, issue #51): permiso atómico exclusivo de `owner` para cambiar `commission_pct` de un propietario — reemplaza el chequeo previo por nombre de rol (`payload.role`). `admin` conserva `landlord:manage` (ABM completo salvo este campo).
 
 > `contract:terminate` (agregado v1.11, issue #105, decisión #124): permiso atómico exclusivo de `owner` para terminar un contrato (`POST /contracts/:id/terminate`). `admin` conserva `contract:manage` (ABM completo del contrato salvo terminarlo) — mismo patrón que `landlord:set-commission`: un endpoint/acción completa exigido por `Depends(requires_permission("contract:terminate"))` en el router, en vez del chequeo condicional por campo que usa `landlord:set-commission`.
+
+> `contract:delete` (agregado v1.17, issue #124, decisión #130): permiso atómico exclusivo de `owner` para eliminar (lógicamente) un contrato (`DELETE /contracts/:id`), en CUALQUIER estado — incluso `active`. Mismo patrón que `contract:terminate` (decisión #124): sembrado SOLO en el rol `owner`, migración de backfill para las organizaciones ya existentes (con la lección del issue #116: el UPDATE solo toca filas cuyo `permissions` es realmente un array JSONB — `jsonb_typeof(permissions) = 'array'` — y concatena con `|| '[...]'::jsonb`, nunca como string). `admin` conserva `contract:manage` para el resto del ciclo de vida.
 
 ## Resumen de Autorización por Recurso
 
@@ -195,6 +200,11 @@ POST   /renters                          PATCH  /renters/:id
 DELETE /renters/:id                      GET    /renters/:id/debt            (estado de deuda del inquilino)
 ```
 
+**`DELETE /renters/:id` — issue #124, decisión #130 (RN-D05):** baja lógica (`deleted_at`, RN-D02), `204 No Content`, permiso `renter:manage`.
+- Con al menos un contrato `active` vinculado → `422 ENTITY_HAS_ACTIVE_CONTRACT` con `details.active_contracts[]` (ver §Códigos de Error Globales). Contratos `draft`/`expired`/`terminated` NO bloquean.
+- Sin contrato activo (contratos inactivos o ninguno): baja lógica auditada (`renter.deleted`). El inquilino desaparece de `GET /renters` y deja de ser elegible para contratos nuevos (`POST /contracts` con su id → `404 NOT_FOUND`, RN-06); `GET /renters/:id` y `GET /renters/:id/debt` → `404 NOT_FOUND`.
+- Trazabilidad intacta: sus contratos históricos, cobros, liquidaciones y auditoría siguen referenciándolo, y `renter_name` sigue resolviéndose en `ContractSummary` y en el recibo de cobro (RN-12: la resolución de display no filtra `deleted_at`). La deuda de sus contratos históricos NO eliminados sigue computándose y cobrable (RN-C05) — solo la eliminación del CONTRATO detiene el cómputo (§8).
+
 ## 7. Propiedades (`/properties`)
 
 ```
@@ -211,22 +221,10 @@ GET    /properties/:id/recurring-charges                POST   /properties/:id/r
 - `POST /properties` y `PATCH /properties/:id` requieren `neighborhood_id` (`VALIDATION_ERROR` si falta en el `POST`; en `PATCH` solo si el campo viene en el body — parcial). `neighborhood_id` inexistente o de otra organización → `404 NOT_FOUND` con `field: "neighborhood_id"` (mismo criterio que `landlord_id`, RN-D01).
 - `GET /properties` y `GET /properties/:id` embeben el barrio como `neighborhood: { id, name }` (o `null` para propiedades legacy sin barrio, preexistentes a issue #99).
 
-### 7.1 Barrios (`/neighborhoods`) — catálogo parametrizable por organización (issue #99)
-
-```
-GET    /neighborhoods                    (listado del catálogo de la org, sin paginación — catálogo acotado)
-POST   /neighborhoods                    (body: { name })
-PATCH  /neighborhoods/:id                (rename; body: { name })
-DELETE /neighborhoods/:id                (soft; 409 ENTITY_HAS_DEPENDENCIES si tiene propiedades)
-```
-
-- Permiso: lectura con `property:read`; alta/edición/baja con `property:manage` — **sin permisos nuevos** (decisión del PO, issue #99).
-- `POST`/`PATCH` validan `name` único por organización, case-insensitive → `409 CONFLICT` si ya existe.
-- `DELETE` con propiedades asociadas (no borradas) → `409 ENTITY_HAS_DEPENDENCIES` con `details.entity_type = "neighborhood"`.
-
-- `GET /properties` acepta `?neighborhood_id=` como filtro adicional (issue #99).
-- `POST /properties` y `PATCH /properties/:id` requieren `neighborhood_id` (`VALIDATION_ERROR` si falta en el `POST`; en `PATCH` solo si el campo viene en el body — parcial). `neighborhood_id` inexistente o de otra organización → `404 NOT_FOUND` con `field: "neighborhood_id"` (mismo criterio que `landlord_id`, RN-D01).
-- `GET /properties` y `GET /properties/:id` embeben el barrio como `neighborhood: { id, name }` (o `null` para propiedades legacy sin barrio, preexistentes a issue #99).
+**`DELETE /properties/:id` — issue #124, decisión #130 (RN-D05):** baja lógica (`deleted_at`, RN-D02), `204 No Content`, permiso `property:manage`.
+- Con un contrato `active` sobre la propiedad → `422 ENTITY_HAS_ACTIVE_CONTRACT` con `details.active_contracts[]` (ver §Códigos de Error Globales — reemplaza el `409 ENTITY_HAS_DEPENDENCIES` que este caso devolvía hasta v1.16; el 409 queda para las dependencias de `landlords` y `neighborhoods`). Contratos `draft`/`expired`/`terminated` NO bloquean.
+- Sin contrato activo: baja lógica auditada (`property.deleted`). La propiedad desaparece de `GET /properties` y deja de ser elegible para contratos nuevos (`POST /contracts` con su id → `404 NOT_FOUND`, RN-06) y para pedidos de reparación nuevos (`POST /work-orders` → `404 NOT_FOUND`); `GET /properties/:id` y sus sub-recursos (`/service-accounts`, `/recurring-charges`, `/work-orders` de la ficha) → `404 NOT_FOUND`.
+- Trazabilidad intacta: contratos históricos, cobros, liquidaciones, pedidos de reparación y auditoría siguen referenciándola — `property_address` sigue resolviéndose en `ContractSummary`, en el recibo de cobro y en los listados top-level de mantenimiento (`GET /work-orders`, que siguen legibles; RN-12: la resolución de display no filtra `deleted_at`). La deuda de sus contratos históricos NO eliminados sigue computándose y cobrable (RN-C05).
 
 ### 7.1 Barrios (`/neighborhoods`) — catálogo parametrizable por organización (issue #99)
 
@@ -250,6 +248,7 @@ GET    /contracts/:id                    (incluye monthly_amounts[] — issue #1
 PATCH  /contracts/:id                    (solo notes/metadata; montos NUNCA — RN-C04)
 POST   /contracts/:id/activate           (draft → active; genera el rent_period del mes en curso si corresponde)
 POST   /contracts/:id/terminate          (active → terminated; body: { reason }; permiso contract:terminate, solo owner)
+DELETE /contracts/:id                    (borrado LÓGICO en cualquier estado; sin body; permiso contract:delete, solo owner)
 GET    /contracts/:id/adjustments        (historial de ajustes)
 POST   /contracts/:id/debt-certificate   (emite el certificado de libre deuda en PDF — RN-P08; verifica SOLO los períodos de ESE contrato; con deuda → 422 CONTRACT_HAS_DEBT con el detalle en details; permiso contract:read)
 GET    /adjustments                      (?status=pending — bandeja de ajustes que tocan)
@@ -259,6 +258,14 @@ POST   /adjustments/:id/apply            (body: { pct }; pending → applied; re
 **`POST /contracts/:id/debt-certificate` — issue #104, decisión #123 (RN-P08, `spec_module_04` RF-08):** reemplaza a `POST /renters/:id/debt-certificate` (eliminado). Decisión del PO (2026-08-28): el libre deuda es conceptualmente **por contrato** — un inquilino puede alquilar 2 propiedades (ej: comercial) y deber en una sí y en otra no, así que el certificado se emite desde el contrato y verifica SOLO los períodos de ESE contrato (nunca los de otros contratos del mismo inquilino). El PDF (sincrónico) incluye encabezado de la administradora, inquilino, propiedad y fecha de emisión del contrato puntual. Permiso `contract:read` (no `renter:read`): mismo criterio que el resto de los endpoints de lectura de `/contracts/:id`. El error pasa de `RENTER_HAS_DEBT` a `CONTRACT_HAS_DEBT` (renombrado, no reutilizado con semántica nueva — ver §Códigos de Error Globales).
 
 **`POST /contracts/:id/terminate` — issue #105, decisión #124 (RN-A, `spec_module_03`):** feedback #2 del PO — terminar un contrato pasa a ser exclusivo de `owner` (hasta ahora, `contract:manage` se lo permitía también a `admin`). Se agrega el permiso atómico dedicado `contract:terminate` al catálogo, sembrado SOLO en el rol `owner` (`admin` conserva `contract:manage` para el resto del ciclo de vida del contrato — crear, actualizar, activar). Mismo patrón que `landlord:set-commission` (decisión #116): migración de backfill agrega el permiso al rol `owner` de organizaciones ya existentes.
+
+**`DELETE /contracts/:id` — issue #124, decisión #130 (RN-C08, `spec_module_03` RF-07):** feedback #4 del PO (2026-08-31) — el `owner` puede eliminar CUALQUIER contrato, incluso `active` (decisión del PO vía AskUserQuestion). Borrado LÓGICO siempre (`deleted_at`, RN-D02), `204 No Content`, sin body (a diferencia de `terminate`, no exige `reason` — el evento de auditoría `contract.deleted` registra autor y estado previo). Permiso atómico `contract:delete`, exclusivo de `owner` (ver §Catálogo de Permisos); un `admin` recibe `403 FORBIDDEN`. Contrato inexistente, ya eliminado o cross-tenant → `404 NOT_FOUND` (RN-D01). Efectos:
+
+- El contrato desaparece de `GET /contracts` y de todo panel; `GET /contracts/:id`, `PATCH`, `activate`, `terminate`, `GET .../adjustments` y `POST .../debt-certificate` sobre él → `404 NOT_FOUND`.
+- Si estaba `active`: su propiedad vuelve a `available` (mismo efecto que `terminate`/`expired` — el invariante `rented ⟺ contrato active no eliminado` de `spec_module_01` RF-04 se mantiene) y se DETIENE la generación de períodos futuros — el job mensual `generate_rent_periods`, el hook de activación y `detect_due_adjustments`/`detect_expiring_contracts` ignoran contratos eliminados (RN-C08).
+- La deuda del contrato deja de computarse: sus `rent_periods` desaparecen del panel de cobranzas (`GET /rent-periods`), del estado de deuda (`GET /debt`, `GET /renters/:id/debt`) y de la advertencia de períodos impagos de liquidaciones; `GET /rent-periods/:id` de un período suyo → `404 NOT_FOUND` y no admite cobros nuevos (`POST .../payments` → `404`).
+- Un ajuste `pending` del contrato eliminado desaparece de la bandeja (`GET /adjustments?status=pending`) y `POST /adjustments/:id/apply` sobre él → `404 NOT_FOUND`.
+- Los cobros y liquidaciones YA emitidos quedan intactos: `payments`, `settlements` y sus line items no se tocan, el recibo de un cobro existente (`GET /payments/:id/receipt`) sigue descargable, y la auditoría del contrato sigue consultable (`GET /audit-logs`). La resolución de display (RN-12) sigue mostrando sus referencias.
 
 **`POST /contracts` — issue #107, decisión #126 (RN-C06 v2, `sdd_02` §3 — supersede parcialmente la decisión #121/issue #100):** el body acepta dos mecanismos de alta de contrato en curso, **mutuamente excluyentes** según si el contrato configura `adjustment_frequency_months` (siempre `null` para USD, opcional para ARS):
 
@@ -283,6 +290,14 @@ El monto de cada mes es determinístico: `initial_amount` hasta el primer ajuste
 
 - `applied_by_name` (`str | null`): el `full_name` de `users` resuelto desde `applied_by` — antes el front solo tenía el UUID crudo. `null` mientras el ajuste sigue `pending` (no hay `applied_by` todavía).
 - `pct_effective` (`Decimal | null`): recalculado en el backend como `((new_amount − previous_amount) / previous_amount) × 100`, redondeado a 2 decimales con `ROUND_HALF_EVEN` (banker's rounding), siempre en `Decimal` — nunca `float`. Se calcula para TODO ajuste `applied`, incluido el ajuste sintético de "Carga inicial" (issues #100/#107) donde es la ÚNICA fuente confiable del % ya que ahí `pct_applied` queda `NULL` (RN-C06). Para los ajustes manuales normalmente coincide con `pct_applied` (que ya usa `ROUND_HALF_UP` al calcularse `new_amount` en `POST /adjustments/:id/apply`). `null` si el ajuste no está `applied` (`pending`) o si `previous_amount = 0` (evita división por cero).
+
+**`ContractSummary` enriquecido — `property_address`, `property_neighborhood` y `renter_name` — issue #123, decisión #129 (RN-12 de `spec_module_03`):** feedback #4 del PO (2026-08-31) — el shape `ContractSummary` (item de `GET /contracts` y respuesta de `POST /contracts`, `PATCH /contracts/:id`, `POST /contracts/:id/activate` y `POST /contracts/:id/terminate`; `GET /contracts/:id` lo hereda vía `ContractDetail`) agrega tres campos denormalizados de SOLO LECTURA, para que el front agrupe el listado de contratos por barrio mostrando dirección e inquilino sin resolver referencias por su cuenta:
+
+- `property_address` (`str`): `properties.address` de la propiedad del contrato.
+- `property_neighborhood` (`str | null`): `neighborhoods.name` resuelto vía `properties.neighborhood_id`; `null` si la propiedad no tiene barrio asignado (columna nullable — datos legacy, issue #99).
+- `renter_name` (`str`): `renters.name` del inquilino del contrato.
+
+Los tres se resuelven por JOIN en el SQL del repository — un solo query por página del listado, sin N+1 (mismo criterio que la decisión #127/issue #118: la resolución de referencias para display es del backend). Son campos derivados, no persistidos en `contracts` — sin migración. No se aceptan en ningún body: enviarlos en `POST /contracts` o `PATCH /contracts/:id` es `400 VALIDATION_ERROR` (solo lectura). La resolución NO filtra `deleted_at` de `properties`/`renters`/`neighborhoods`: el contrato sigue existiendo y muestra su referencia aunque el registro referenciado esté soft-deleted (RN-06 ya impide borrar una propiedad o inquilino con contrato activo; el caso solo aplica a contratos históricos). El JOIN mantiene el filtro explícito de `organization_id` en cada tabla unida (defense in depth, RN-D01).
 
 ## 9. Cobranzas (`/rent-periods`, `/payments`)
 

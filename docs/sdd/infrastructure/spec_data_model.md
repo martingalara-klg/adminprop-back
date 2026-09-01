@@ -2,12 +2,12 @@
 name: AdminProp — Especificación del Modelo de Datos
 description: Tablas físicas PostgreSQL (23 tablas en 8 capas), RLS, índices, orden de migración, seed data y convenciones de nomenclatura
 type: project
-version: 1.4
-fecha: 2026-08-29
+version: 1.5
+fecha: 2026-08-31
 ---
 # AdminProp — Especificación del Modelo de Datos
 
-**Versión:** 1.4
+**Versión:** 1.5
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -603,7 +603,7 @@ FKs entre capas: siempre de capa posterior a capa anterior, salvo `work_orders.s
 
 1. **Roles de sistema** (3 filas en `roles`, `is_system_role=true`):
    - `owner`: todos los permisos.
-   - `admin`: todo excepto `user:manage`, `role:manage`, `organization:configure`, `landlord:set-commission` (issue #51: cambio de `commission_pct` de un propietario es exclusivo de `owner`).
+   - `admin`: todo excepto `user:manage`, `role:manage`, `organization:configure`, `landlord:set-commission` (issue #51: cambio de `commission_pct` de un propietario es exclusivo de `owner`), `contract:terminate` (issue #105, decisión #124) y `contract:delete` (issue #124, decisión #130: eliminar un contrato — lógico, cualquier estado — es exclusivo de `owner`; las organizaciones existentes reciben el permiso por migración de backfill que solo toca filas con `jsonb_typeof(permissions) = 'array'` — lección del issue #116).
    - `maintenance`: solo `work-order:read`, `work-order:quote`, `work-order:close`, `attachment:manage` (scoped a work orders).
 2. **Settings default** en `organizations.settings`: `grace_day: 10`, `contract_expiry_notice_days: 60`.
 
@@ -630,6 +630,8 @@ FKs entre capas: siempre de capa posterior a capa anterior, salvo `work_orders.s
 | Entidad | Mecanismo | Nota |
 |---|---|---|
 | landlords, renters, properties, neighborhoods, contracts, property_service_accounts, recurring_charges, work_orders, attachments | `deleted_at` | Nunca DELETE físico (RN-D02) |
+
+> **Semántica de `contracts.deleted_at` (issue #124, RN-C08):** las columnas `deleted_at` ya existían en todas estas tablas desde sus migraciones de creación — el issue #124 no agrega columnas, define las REGLAS de eliminación: propiedades/inquilinos con contrato `active` no se eliminan (`422 ENTITY_HAS_ACTIVE_CONTRACT`); un contrato eliminado (solo `owner`, permiso `contract:delete`) queda excluido por el filtro `deleted_at IS NULL` de TODA query operativa (listados, panel de cobranzas, deuda, jobs Beat, validación de solapamiento y checks de dependencias), mientras que las queries de lectura histórica (display RN-12, recibos, liquidaciones ya generadas, auditoría) NO filtran `deleted_at` de las tablas referenciadas.
 | payments | `voided_at` + `voided_by` | Anulación con autor, auditada (RN-D04) |
 | rent_periods, charge_entries, settlements, settlement_line_items | Sin delete | Se corrigen/regeneran, nunca se borran |
 | contract_adjustments `applied` | Inmutables | Corrección = nuevo ajuste con nota |

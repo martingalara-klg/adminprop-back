@@ -44,10 +44,12 @@ from adminprop.modules.contracts.rent_period_hook import (
     maybe_generate_current_month_rent_period,
 )
 from adminprop.modules.contracts.repository import (
+    ContractDisplayFields,
     ContractFilters,
     ContractRepository,
     get_contract_repository,
 )
+from adminprop.modules.contracts.schemas import ContractSummary
 from adminprop.modules.properties.repository import (
     PropertyRepository,
     get_property_repository,
@@ -63,6 +65,34 @@ from adminprop.shared.errors.codes import (
     ValidationError,
 )
 from adminprop.shared.notifications import service as notifications_service
+
+
+def _to_summary(contract: Contract, display: ContractDisplayFields) -> ContractSummary:
+    """RN-12 (issue #123): construye el schema de respuesta explicitamente
+    (no via `model_validate` directo del ORM) porque `property_address`/
+    `property_neighborhood`/`renter_name` no son columnas de `Contract`
+    -- mismo criterio que `adjustment_service.py._to_summary` (issue #118)."""
+    return ContractSummary(
+        id=contract.id,
+        property_id=contract.property_id,
+        renter_id=contract.renter_id,
+        currency=contract.currency,
+        initial_amount=contract.initial_amount,
+        current_amount=contract.current_amount,
+        start_date=contract.start_date,
+        end_date=contract.end_date,
+        daily_late_fee_pct=contract.daily_late_fee_pct,
+        adjustment_frequency_months=contract.adjustment_frequency_months,
+        adjustment_index=contract.adjustment_index,
+        adjustment_index_notes=contract.adjustment_index_notes,
+        status=contract.status,
+        notes=contract.notes,
+        property_address=display.property_address,
+        property_neighborhood=display.property_neighborhood,
+        renter_name=display.renter_name,
+        created_at=contract.created_at,
+        updated_at=contract.updated_at,
+    )
 
 
 class ContractService:
@@ -363,10 +393,25 @@ class ContractService:
         cursor: str | None,
         limit: int,
         filters: ContractFilters,
-    ) -> tuple[list, str | None]:
-        return await self._repo.list(
+    ) -> tuple[list[ContractSummary], str | None]:
+        """RN-12 (issue #123): el repository ya resuelve los campos
+        denormalizados por JOIN en el mismo query del listado (sin N+1,
+        CA-03-31) -- aca solo se arma el schema de respuesta."""
+        rows, next_cursor = await self._repo.list(
             organization_id=organization_id, cursor=cursor, limit=limit, filters=filters
         )
+        return [_to_summary(contract, display) for contract, display in rows], next_cursor
+
+    async def to_summary(self, contract: Contract, organization_id: UUID) -> ContractSummary:
+        """RN-12 (issue #123), CA-03-33/34: enriquece la respuesta de los
+        endpoints de a un contrato (`POST`/`PATCH`/`activate`/`terminate`
+        y la base de `GET /contracts/:id`) con los mismos campos
+        denormalizados del listado -- un unico query extra por request
+        (`get_display_fields`, JOIN identico al del listado)."""
+        display = await self._repo.get_display_fields(contract.id, organization_id)
+        if display is None:  # pragma: no cover -- defensivo: el contrato ya fue resuelto
+            raise NotFoundException()
+        return _to_summary(contract, display)
 
     async def update(
         self,
@@ -533,6 +578,64 @@ class ContractService:
 
         await self._repo.commit()
         return updated
+
+    async def delete(
+        self,
+        contract_id: UUID,
+        organization_id: UUID,
+        *,
+        actor_user_id: UUID,
+    ) -> None:
+        """RF-07 + CA-03-37/38 (issue #124, decision #130): borrado LOGICO
+        de un contrato, en CUALQUIER estado -- incluso `active` (decision
+        del PO). El router ya exige el permiso atomico `contract:delete`
+        (solo owner, CA-03-36).
+
+        # RN-C08/RN-13: efectos del borrado logico:
+        - El contrato desaparece de listados/paneles y su detalle es 404
+          (el filtro `deleted_at IS NULL` ya lo aplican todas las queries
+          operativas -- repository de contratos, panel de cobranzas,
+          deuda, bandeja de ajustes y jobs Beat).
+        - Si estaba `active`: la propiedad vuelve a `available` (mismo
+          efecto que terminate/expired -- se preserva el invariante
+          `rented <=> contrato active no eliminado`, RF-04 del Modulo 1)
+          y se detiene la generacion de periodos futuros (el job mensual
+          `generate_rent_periods` usa `list_active`, que excluye
+          eliminados).
+        - Los cobros y liquidaciones ya emitidos quedan intactos
+          (CA-03-40): este metodo no toca `payments`/`settlements`.
+
+        Auditado con `contract.deleted` (autor + estado previo), en la
+        MISMA transaccion que el UPDATE de `deleted_at`.
+        """
+        contract = await self._repo.get_by_id(contract_id, organization_id)
+        if contract is None:
+            # RN-D01: inexistente, ya eliminado o cross-tenant -> 404.
+            raise NotFoundException()
+
+        previous_status = contract.status
+        deleted = await self._repo.soft_delete(contract_id, organization_id)
+        if deleted is None:  # pragma: no cover -- defensivo, ya se valido existencia arriba
+            raise NotFoundException()
+
+        if previous_status == "active":
+            # RN-C08 + CA-03-38: la propiedad vuelve a `available`.
+            await self._property_repo.update(
+                contract.property_id, organization_id, fields={"status": "available"}
+            )
+
+        await audit(
+            self._repo.session,
+            organization_id=organization_id,
+            action="contract.deleted",
+            entity_type="contract",
+            entity_id=contract_id,
+            before={"status": previous_status},
+            after={"deleted_at": deleted.deleted_at.isoformat()},
+            user_id=actor_user_id,
+        )
+
+        await self._repo.commit()
 
     # ─── RF-03/RF-05 (issue #19): job diario `detect_expiring_contracts` ──
 

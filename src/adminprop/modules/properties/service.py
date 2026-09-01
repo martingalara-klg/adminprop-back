@@ -28,6 +28,7 @@ from adminprop.modules.properties.repository import (
 from adminprop.shared.audit.service import audit
 from adminprop.shared.errors.codes import (
     ConflictException,
+    EntityHasActiveContractException,
     EntityHasDependenciesException,
     InvalidStatusTransitionException,
     NotFoundException,
@@ -202,20 +203,46 @@ class PropertyService:
         await self._repo.commit()
         return updated
 
-    async def delete(self, property_id: UUID, organization_id: UUID) -> None:
-        """RF-01 + CA-01-03: soft delete; `409 ENTITY_HAS_DEPENDENCIES` si
-        hay contrato `active` (ver `PropertyRepository.has_active_dependencies`
-        -- siempre `False` hasta que exista el modulo `contracts`, issue #17)."""
+    async def delete(
+        self, property_id: UUID, organization_id: UUID, *, actor_user_id: UUID
+    ) -> None:
+        """RF-01 + CA-01-03/12/13 (issue #124, decision #130): soft delete
+        (RN-D02/RN-D05). Con contrato `active` (no eliminado) -> `422
+        ENTITY_HAS_ACTIVE_CONTRACT` con `details.active_contracts[]`
+        (reemplaza el 409 ENTITY_HAS_DEPENDENCIES que este caso devolvia
+        hasta sdd_03 v1.16); contratos `draft`/`expired`/`terminated` NO
+        bloquean. Sin contrato activo: baja logica auditada
+        (`property.deleted`) -- la trazabilidad queda intacta (CA-01-14):
+        contratos historicos, cobros, liquidaciones y reparaciones siguen
+        referenciandola."""
         existing = await self._repo.get_by_id(property_id, organization_id)
         if existing is None:
             raise NotFoundException()
 
-        if await self._repo.has_active_dependencies(property_id, organization_id):
-            raise EntityHasDependenciesException(
-                details={"entity_type": "property", "entity_id": str(property_id)}
+        # RN-D05: solo un contrato `active` bloquea la baja.
+        active_contracts = await self._repo.list_active_contracts(property_id, organization_id)
+        if active_contracts:
+            raise EntityHasActiveContractException(
+                details={
+                    "entity_type": "property",
+                    "entity_id": str(property_id),
+                    "active_contracts": [ref.to_details() for ref in active_contracts],
+                }
             )
 
         await self._repo.soft_delete(property_id, organization_id)
+        # RN-D05: baja logica auditada, en la MISMA transaccion que el
+        # UPDATE de `deleted_at` (mismo criterio que `contract.deleted`).
+        await audit(
+            self._repo.session,
+            organization_id=organization_id,
+            action="property.deleted",
+            entity_type="property",
+            entity_id=property_id,
+            before={"status": existing.status},
+            after={"deleted": True},
+            user_id=actor_user_id,
+        )
         await self._repo.commit()
 
 

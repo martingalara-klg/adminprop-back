@@ -2,12 +2,12 @@
 name: AdminProp — Modelo de Dominio
 description: Entidades del dominio de gestión de alquileres, invariantes (RN-C, RN-P, RN-L, RN-A, RN-D), relaciones y glosario unificado
 type: project
-version: 1.8
-fecha: 2026-08-29
+version: 1.9
+fecha: 2026-08-31
 ---
 # AdminProp — Modelo de Dominio
 
-**Versión:** 1.8
+**Versión:** 1.9
 **Estado:** Borrador para revisión
 **Fecha:** 2026-08-05
 
@@ -197,6 +197,7 @@ El contrato de locación: vincula propiedad + inquilino con las condiciones pact
 - `draft` → `active`: el contrato entra en vigencia (a partir de `start_date`).
 - `active` → `expired`: se cumplió `end_date` sin renovación.
 - `active` → `terminated`: rescisión anticipada.
+- Cualquier estado → **eliminado lógicamente** (`deleted_at`, RN-C08 — issue #124): no es una transición de `status` sino una marca ortogonal; solo el `owner` (`contract:delete`). Un contrato eliminado desaparece de listados/paneles, no genera períodos futuros y su deuda deja de computarse; los cobros y liquidaciones ya emitidos quedan intactos.
 
 **Invariantes:**
 - Una propiedad no puede tener dos contratos `active` con vigencias superpuestas (ver RN-C01).
@@ -454,6 +455,7 @@ Registro append-only de las operaciones sensibles.
   - **Con `adjustment_frequency_months` configurado (solo ARS):** el campo es `historical_amounts[]` — lista ORDENADA de montos, uno por cada **tramo transcurrido** desde `start_date`. Tramo `i` = `[start_date + i·frecuencia meses, start_date + (i+1)·frecuencia meses)`, día 1 de mes; el último tramo transcurrido es el que contiene el mes actual (inclusive). La cantidad esperada se calcula en el backend (`start_date` + `adjustment_frequency_months` + hoy) — enviar una cantidad distinta es `400 VALIDATION_ERROR` con un mensaje que indica cuántos valores espera el sistema y el rango de fechas de cada tramo. `historical_amounts[0]` debe ser igual a `initial_amount` (400 VALIDATION_ERROR si difiere) — es el monto del tramo 0, ya declarado por ese campo. Si el contrato recién empezó (0 tramos transcurridos más allá del 0, es decir 1 solo tramo posible) no corresponde enviar `historical_amounts` — equivale a un alta normal; enviarlo en ese caso es `400 VALIDATION_ERROR`. Si vienen ≥ 2 elementos: `contracts.current_amount` nace en el **último** valor de la lista, y el sistema registra una **cadena** de `ContractAdjustment` sintéticos en estado `applied` — uno por cada tramo a partir del segundo — con `due_period` = inicio de ese tramo, `previous_amount`/`new_amount` encadenados con el tramo anterior/siguiente, `pct_applied = NULL` y `notes` prefijado `"Carga inicial:"`. El ÚLTIMO de esos ajustes sintéticos es el ancla que usa `detect_due_adjustments` (RN-C03, cuenta desde el `due_period` del último `applied`) sin necesidad de tocar esa lógica. `current_amount`/`current_amount_since` **no se aceptan** en este caso (400 VALIDATION_ERROR) — quedan superados por `historical_amounts[]`.
   - **Sin `adjustment_frequency_months` configurado (USD siempre; ARS sin ajuste periódico):** se mantiene el mecanismo de un único valor vigente del issue #100, sin cambios — `current_amount` + `current_amount_since` opcionales, solo válidos **juntos**; `current_amount_since` se normaliza al día 1 de su mes y debe ser `>= start_date` y `<= hoy`. Si vienen: `contracts.current_amount` nace en `current_amount` (no en `initial_amount`, que queda como referencia histórica informativa) y el sistema registra un único `ContractAdjustment` sintético `applied` con `due_period = current_amount_since`, `previous_amount = initial_amount`, `new_amount = current_amount`, `pct_applied = NULL`, `notes` prefijado `"Carga inicial:"`. `historical_amounts[]` **no se acepta** en este caso (400 VALIDATION_ERROR) — sin frecuencia configurada no hay noción de "tramo".
   - Los datos ya cargados por el issue #100 (contratos con un único ajuste sintético "Carga inicial") siguen siendo válidos — son ajustes `applied` normales, indistinguibles en DB de una cadena v2 de un solo eslabón.
+- **RN-C08** (issue #124, decisión #130 — feedback #4 del PO, 2026-08-31): Eliminación de contratos. Solo el `owner` puede eliminar un contrato (permiso atómico `contract:delete`, exclusivo), en CUALQUIER estado — incluso `active`. El borrado es SIEMPRE lógico (`deleted_at`, RN-D02). Efectos: el contrato desaparece de listados y paneles (detalle → 404); si estaba `active`, su propiedad vuelve a `available` y se detiene la generación de períodos futuros (el job mensual `generate_rent_periods`, el hook de activación y los jobs `detect_due_adjustments`/`detect_expiring_contracts` ignoran contratos eliminados); su deuda deja de computarse (los `rent_periods` del contrato salen del panel de cobranzas, del estado de deuda y de las advertencias de liquidación, y no admiten cobros nuevos); un ajuste `pending` suyo sale de la bandeja. Los cobros y liquidaciones YA emitidos quedan intactos y la auditoría conserva todo el historial (evento `contract.deleted`).
 
 ### RN-P — Pagos y Cobranzas
 
@@ -489,6 +491,7 @@ Registro append-only de las operaciones sensibles.
 - **RN-D02:** Toda eliminación es lógica (soft delete); no hay DELETE físico de datos operativos.
 - **RN-D03:** El log de auditoría es append-only e inmutable.
 - **RN-D04:** Las correcciones de cobros y liquidaciones siempre quedan trazadas en el log de auditoría con valor anterior y nuevo.
+- **RN-D05** (issue #124, decisión #130): Reglas de eliminación de propiedades e inquilinos. Una propiedad o un inquilino vinculado a un contrato `active` (no eliminado) NO puede eliminarse → `422 ENTITY_HAS_ACTIVE_CONTRACT` con el detalle de los contratos activos en `details` (contratos `draft`/`expired`/`terminated` no bloquean). Sin contrato activo, la baja es lógica (`deleted_at`, RN-D02) y auditada (`property.deleted`/`renter.deleted`): la entidad desaparece de listados y selects (deja de ser elegible para contratos o pedidos de reparación nuevos; su detalle → 404), pero la trazabilidad queda intacta — contratos históricos, cobros, liquidaciones, pedidos de reparación y auditoría siguen referenciándola, la resolución de display no filtra `deleted_at` (RN-12 de `spec_module_03`), y la deuda de sus contratos históricos NO eliminados sigue computándose y cobrable (RN-C05): solo la eliminación del CONTRATO detiene el cómputo de su deuda (RN-C08).
 
 ---
 
