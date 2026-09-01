@@ -237,6 +237,15 @@ class RentPeriodRepository:
     # -- no alcanza con filtrarlo solo en `rent_periods`. SQL crudo: ver
     # motivo (evitar el ciclo de import `properties`<->`people`) en el
     # docstring del modulo.
+    #
+    # RN-C08/RN-13 (issue #124): `c.deleted_at IS NULL` -- la deuda de un
+    # contrato ELIMINADO deja de computarse: sus periodos salen del panel
+    # (`GET /rent-periods`), del estado de deuda (`GET /debt`,
+    # `GET /renters/:id/debt`) y del libre deuda, su detalle es 404 y no
+    # admite cobros nuevos (CA-03-39). Deliberadamente NO se filtra
+    # `p.deleted_at`: la deuda de los contratos historicos (no eliminados)
+    # de una propiedad/inquilino soft-deleted sigue computandose y
+    # cobrable (RN-D05 + RN-C05).
     _CANDIDATE_SQL = """
         SELECT
             rp.id AS id,
@@ -255,6 +264,7 @@ class RentPeriodRepository:
         JOIN contracts c ON c.id = rp.contract_id AND c.organization_id = :org_id
         JOIN properties p ON p.id = c.property_id AND p.organization_id = :org_id
         WHERE rp.organization_id = :org_id
+          AND c.deleted_at IS NULL
     """
 
     async def list_candidates(

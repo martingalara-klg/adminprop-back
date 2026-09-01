@@ -312,13 +312,20 @@ class RenterRepository:
         await self._session.flush()
         return True
 
-    async def has_active_dependencies(self, renter_id: UUID, organization_id: UUID) -> bool:
-        """CA-02-06: `409 ENTITY_HAS_DEPENDENCIES` si el inquilino tiene
-        contrato vigente. Mismo criterio de extensibilidad que
-        `LandlordRepository.has_active_dependencies`: el modulo
-        `contracts` no existe todavia -- siempre `False` hasta entonces.
-        """
-        return False
+    async def list_active_contracts(self, renter_id: UUID, organization_id: UUID) -> list:
+        """RN-D05 (issue #124, CA-02-08 -- reemplaza el placeholder
+        `has_active_dependencies` que quedo en `False` desde el issue
+        #13): contratos `active` (no eliminados) que bloquean la baja del
+        inquilino, con las referencias de display para
+        `details.active_contracts[]` del 422 ENTITY_HAS_ACTIVE_CONTRACT.
+        Delega en `ContractRepository.list_active_contract_refs` (misma
+        `session`, misma transaccion) -- import diferido, mismo criterio
+        que `PropertyRepository.has_active_dependencies` (el modulo
+        `contracts` importa modelos de este paquete)."""
+        from adminprop.modules.contracts.repository import ContractRepository
+
+        contracts_repo = ContractRepository(self._session)
+        return await contracts_repo.list_active_contract_refs(organization_id, renter_id=renter_id)
 
     async def _get_row(self, renter_id: UUID, organization_id: UUID) -> Renter | None:
         stmt = select(Renter).where(

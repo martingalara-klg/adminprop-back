@@ -2,12 +2,12 @@
 name: AdminProp — Módulo 2 — Personas (Propietarios e Inquilinos)
 description: ABM de propietarios (con % de comisión propio y datos bancarios cifrados) e inquilinos (con su estado de deuda). Registros sin login
 type: project
-version: 1.0
-fecha: 2026-08-06
+version: 1.1
+fecha: 2026-08-31
 ---
 # Módulo 2 — Personas (Propietarios e Inquilinos)
 
-**Versión:** 1.0 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-06
+**Versión:** 1.1 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-31
 
 ## Propósito
 
@@ -44,7 +44,7 @@ Los actores del negocio que no usan el sistema: los **propietarios** (a quienes 
 ### RF-03 — ABM de Inquilinos
 
 - Alta con: nombre (obligatorio), DNI/CUIT, teléfono, email, notas.
-- Baja: soft delete; con contratos vigentes → `409 ENTITY_HAS_DEPENDENCIES`.
+- Baja: **soft delete** (RN-D02/RN-D05 — issue #124, decisión #130, reemplaza el `409 ENTITY_HAS_DEPENDENCIES` que este caso devolvía hasta v1.0). Con al menos un contrato `active` (no eliminado) → `422 ENTITY_HAS_ACTIVE_CONTRACT` con `details.active_contracts[]` (contratos `draft`/`expired`/`terminated` NO bloquean). Sin contrato activo, la baja es lógica y auditada (`renter.deleted`): el inquilino desaparece del listado y de los selects (no es elegible para contratos nuevos → `404`), su ficha y `GET /renters/:id/debt` devuelven `404`, y la trazabilidad queda intacta — contratos históricos, cobros, liquidaciones y auditoría siguen referenciándolo (RN-12), y la deuda de sus contratos históricos no eliminados sigue computándose y cobrable (RN-C05).
 
 ### RF-04 — Ficha del Inquilino y Estado de Deuda
 
@@ -72,8 +72,10 @@ Los actores del negocio que no usan el sistema: los **propietarios** (a quienes 
 - [ ] **CA-02-03:** El cambio de % de comisión no altera liquidaciones ya generadas: la liquidación siguiente usa el % nuevo (verificable por `commission_pct_used`).
 - [ ] **CA-02-04:** `bank_info` se persiste cifrado (verificable a nivel DB) y jamás aparece en logs ni en respuestas de listado (solo en el detalle para owner/admin).
 - [ ] **CA-02-05:** La ficha del inquilino muestra sus contratos y su estado de deuda con: períodos adeudados, saldo, días de mora e interés sugerido acumulado.
-- [ ] **CA-02-06:** Borrar un propietario con propiedades activas o un inquilino con contrato vigente devuelve `409 ENTITY_HAS_DEPENDENCIES`; sin dependencias, la baja es lógica.
+- [ ] **CA-02-06** (v1.1, issue #124 — el caso inquilino antes devolvía `409 ENTITY_HAS_DEPENDENCIES`): Borrar un propietario con propiedades activas devuelve `409 ENTITY_HAS_DEPENDENCIES`; borrar un inquilino con contrato `active` devuelve `422 ENTITY_HAS_ACTIVE_CONTRACT`; sin dependencias, la baja es lógica.
 - [ ] **CA-02-07:** Un usuario `maintenance` recibe `403`/`404` (según sdd_03) en todos los endpoints de propietarios e inquilinos.
+- [ ] **CA-02-08** (issue #124, RN-D05): `DELETE /renters/:id` con un contrato `active` devuelve `422 ENTITY_HAS_ACTIVE_CONTRACT` con `details.entity_type = "renter"`, `details.entity_id` y `details.active_contracts[]` (cada item con `contract_id`, `property_address`, `renter_name`, `start_date`, `end_date`); un contrato `terminated`/`expired`/`draft` no bloquea la baja.
+- [ ] **CA-02-09** (issue #124, RN-D05): la baja lógica de un inquilino queda auditada (`renter.deleted`); el inquilino desaparece de `GET /renters`, su `GET /renters/:id` devuelve `404`, `POST /contracts` que lo referencie devuelve `404 NOT_FOUND`, y sus contratos históricos siguen exponiendo `renter_name` (RN-12).
 
 ## Integraciones
 

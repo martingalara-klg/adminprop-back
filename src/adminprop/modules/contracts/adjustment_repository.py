@@ -253,10 +253,25 @@ class ContractAdjustmentRepository:
         self, *, organization_id: UUID, cursor: str | None, limit: int
     ) -> tuple[list[ContractAdjustment], str | None]:
         """`GET /adjustments?status=pending` -- la bandeja de ajustes que
-        tocan (sdd_03 §8)."""
-        stmt = select(ContractAdjustment).where(
-            ContractAdjustment.organization_id == organization_id,
-            ContractAdjustment.status == "pending",
+        tocan (sdd_03 §8). RN-C08/RN-13 (issue #124): un ajuste `pending`
+        de un contrato ELIMINADO sale de la bandeja (JOIN con `contracts`
+        filtrando `deleted_at IS NULL`; el ON repite el filtro explicito
+        de `organization_id` -- defense in depth, RN-D01). Aplicarlo
+        igualmente daria 404 (`adjustment_service.apply` resuelve el
+        contrato con `ContractRepository.update`, que ya excluye
+        eliminados)."""
+        stmt = (
+            select(ContractAdjustment)
+            .join(
+                Contract,
+                (Contract.id == ContractAdjustment.contract_id)
+                & (Contract.organization_id == organization_id),
+            )
+            .where(
+                ContractAdjustment.organization_id == organization_id,
+                ContractAdjustment.status == "pending",
+                Contract.deleted_at.is_(None),
+            )
         )
         if cursor:
             cursor_created_at, cursor_id = _decode_cursor(cursor)

@@ -229,17 +229,17 @@ async def update_property(
 @properties_router.delete(
     "/{property_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(requires_permission("property:manage"))],
 )
 async def delete_property(
     property_id: UUID,
     organization_id: UUID = Depends(get_current_tenant),
+    payload: JWTPayload = Depends(requires_permission("property:manage")),
     service: PropertyService = Depends(get_property_service),
 ) -> None:
-    """RF-01 + CA-01-03: baja logica; `409 ENTITY_HAS_DEPENDENCIES` si hay
-    contrato activo (chequeo extensible, ver `repository.py` -- siempre
-    `False` hoy)."""
-    await service.delete(property_id, organization_id)
+    """RF-01 + CA-01-03/12/13 (issue #124, RN-D05): baja logica auditada
+    (`property.deleted`); con contrato `active` -> `422
+    ENTITY_HAS_ACTIVE_CONTRACT` con `details.active_contracts[]`."""
+    await service.delete(property_id, organization_id, actor_user_id=payload.sub)
 
 
 # ─── Cuentas de servicio — RF-02 ──────────────────────────────────────────

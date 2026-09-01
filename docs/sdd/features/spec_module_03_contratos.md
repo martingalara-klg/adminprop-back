@@ -2,12 +2,12 @@
 name: AdminProp — Módulo 3 — Contratos de Locación
 description: Contratos propiedad+inquilino con condiciones pactadas, ciclo de vida, ajustes por índice con ingreso manual del % y alertas de vencimiento
 type: project
-version: 1.6
+version: 1.7
 fecha: 2026-08-31
 ---
 # Módulo 3 — Contratos de Locación
 
-**Versión:** 1.6 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-31
+**Versión:** 1.7 · **Estado:** Borrador para revisión · **Fecha:** 2026-08-31
 
 ## Propósito
 
@@ -82,6 +82,20 @@ Feedback #2 del PO (2026-08-28): la ficha del contrato (`GET /contracts/:id`) de
 - **Monto de cada mes:** determinístico — `initial_amount` hasta el primer ajuste `applied` cuyo `due_period` cae en o antes de ese mes; a partir de ahí, el `new_amount` del ajuste `applied` más reciente cuyo `due_period` cae en o antes de ese mes. Incluye el ajuste sintético "Carga inicial" del issue #100 (RF-04 paso 6) igual que cualquier otro `applied`. Los ajustes `pending` **no** cuentan.
 - Un contrato USD sin carga inicial declarada tiene una serie plana en `initial_amount` (RN-03/RN-C02: sin ajuste periódico automático). Un contrato cuyo `start_date` todavía no llegó devuelve `monthly_amounts: []`.
 
+### RF-07 — Eliminación de contratos (issue #124, decisión #130)
+
+Feedback #4 del PO (2026-08-31): el `owner` puede eliminar CUALQUIER contrato — incluso `active` (decisión del PO vía AskUserQuestion). Borrado **LÓGICO** siempre (`deleted_at`, RN-D02), nunca físico.
+
+- `DELETE /contracts/:id` → `204 No Content`, sin body. Permiso atómico **`contract:delete`**, sembrado SOLO en el rol `owner` (precedente `contract:terminate`, issue #105/decisión #124); un `admin` con `contract:manage` recibe `403 FORBIDDEN`.
+- Aplica en cualquier estado (`draft`/`active`/`expired`/`terminated`). Contrato inexistente, ya eliminado o cross-tenant → `404 NOT_FOUND` (RN-D01).
+- Auditado con el evento `contract.deleted` (autor + estado previo en `before`).
+- **Efectos** (RN-13 / RN-C08 de `sdd_02`):
+  - El contrato desaparece de `GET /contracts` y de todo panel; su detalle y sub-endpoints (`PATCH`, `activate`, `terminate`, `adjustments`, `debt-certificate`) → `404`.
+  - Si estaba `active`: la propiedad vuelve a `available` (se preserva el invariante RF-04 del Módulo 1) y se detiene la generación de períodos futuros — `generate_rent_periods`, el hook de activación y los jobs `detect_due_adjustments`/`detect_expiring_contracts` ignoran contratos eliminados.
+  - La deuda del contrato deja de computarse: sus `rent_periods` salen del panel (`GET /rent-periods`), del estado de deuda (`GET /debt`, `GET /renters/:id/debt`) y de la advertencia de períodos impagos de la liquidación; el detalle de un período suyo → `404` y no admite cobros nuevos.
+  - Un ajuste `pending` del contrato sale de la bandeja (`GET /adjustments?status=pending`); aplicarlo → `404`.
+  - Los cobros y liquidaciones YA emitidos quedan intactos (line items, exports y recibos siguen accesibles); la auditoría conserva todo.
+
 ## Reglas de Negocio (del módulo)
 
 - **RN-01:** Una propiedad no puede tener dos contratos `active` con vigencias superpuestas (= RN-C01; constraint EXCLUDE en DB + validación app-level con mensaje claro).
@@ -95,6 +109,7 @@ Feedback #2 del PO (2026-08-28): la ficha del contrato (`GET /contracts/:id`) de
 - **RN-09** (issue #106): Serie mensual de valores locativos (RF-06) — cálculo determinístico desde `initial_amount` + ajustes `applied` (solo `applied`; `pending` no cuenta), orden descendente. Como `contracts` no persiste una fecha propia de terminación anticipada (RF-03 solo audita el motivo, no agrega columna), la fecha de corte de un contrato `terminated` se deriva del evento `contract.terminated` más reciente de ese contrato en `audit_logs` (misma transacción que la transición de estado — decisión de implementación, issue #106); si no existiera (defensivo), el fallback es `end_date`. Un contrato `expired` usa directamente `end_date` (vencimiento natural, sin ambigüedad).
 - **RN-10** (issue #118): `pct_effective` de un ajuste `applied` = `((new_amount − previous_amount) / previous_amount) × 100`, redondeado a 2 decimales con `ROUND_HALF_EVEN` (banker's rounding), siempre en `Decimal` — nunca `float`. Es la única fuente confiable del % para el ajuste sintético de carga inicial (`pct_applied` es `NULL` ahí, issues #100/#107); para los ajustes manuales normalmente coincide con `pct_applied` (que ya usa `ROUND_HALF_UP` al calcular `new_amount` en `POST /adjustments/:id/apply`), pero `pct_effective` es el valor recalculado y expuesto de forma uniforme en todos los casos. Ajustes `pending` → `null` (no hay `new_amount` todavía). `previous_amount = 0` → `null` (evita división por cero — defensivo, no debería ocurrir en la práctica dado RN-01, `initial_amount > 0`).
 - **RN-12** (issue #123, feedback #4 del PO — 2026-08-31): `property_address`/`property_neighborhood`/`renter_name` de `ContractSummary` son denormalizados de SOLO LECTURA, derivados por JOIN (`properties` → LEFT `neighborhoods`, `renters`) en el mismo query del repository — nunca persistidos en `contracts` ni aceptados en un body (`400 VALIDATION_ERROR`). `property_neighborhood = null` cuando `properties.neighborhood_id` es `NULL`. La resolución no filtra `deleted_at` de las tablas referenciadas (un contrato histórico sigue mostrando dirección/inquilino aunque estén soft-deleted — RN-06 ya impide borrar referencias con contrato activo). Cada tabla unida mantiene el filtro explícito de `organization_id` (defense in depth, RN-D01).
+- **RN-13** (= RN-C08, issue #124, decisión #130): Eliminación de contratos — solo `owner` (`contract:delete`), cualquier estado, borrado lógico siempre. Un contrato eliminado no genera períodos futuros, su deuda deja de computarse y sus referencias históricas (cobros, liquidaciones, auditoría, display RN-12) quedan intactas — ver RF-07. Complementa (no reemplaza) a RN-07/RN-C05: `expired`/`terminated` siguen siendo estados con deuda cobrable; la eliminación es la única operación que detiene el cómputo de la deuda.
 - **RN-11** (= RN-C07, issue #119, feedback #3 del PO — 2026-08-29): Alta de contrato en curso (`start_date` anterior al mes actual) → cobros retroactivos automáticos. El sistema genera, en la MISMA transacción del alta, un `RentPeriod` `paid` + un `Payment` `origin = initial_load` por cada mes desde `start_date` hasta el mes anterior al actual, con el monto que le corresponde a cada mes según `monthly_amounts[]`/RN-09 (coherente con los tramos de `historical_amounts[]`/RN-08 cuando aplica; si no hay tramos — el contrato arrancó recién el mes pasado sin ajuste — el monto es plano `initial_amount`). El mes actual no se toca: sigue naciendo `pending` por la activación/job mensual (RF-03/Módulo 4 RF-01). Ver `sdd_02` §3 RN-P09 para el detalle de exclusión en liquidaciones/recibos/anulación (Módulo 4 RF-03/RF-07, Módulo 5 RF-02).
 
 ## Validaciones
@@ -143,6 +158,11 @@ Feedback #2 del PO (2026-08-28): la ficha del contrato (`GET /contracts/:id`) de
 - [ ] **CA-03-33** (issue #123, RN-12): las respuestas de `POST /contracts`, `PATCH /contracts/:id`, `POST /contracts/:id/activate` y `POST /contracts/:id/terminate` exponen los tres campos (mismo `ContractSummary`).
 - [ ] **CA-03-34** (issue #123, RN-12): `GET /contracts/:id` (`ContractDetail`) también expone los tres campos, junto con `monthly_amounts[]`.
 - [ ] **CA-03-35** (issue #123, RN-12): enviar `property_address`, `property_neighborhood` o `renter_name` en el body de `POST /contracts` o `PATCH /contracts/:id` devuelve `400 VALIDATION_ERROR` (campos de solo lectura).
+- [ ] **CA-03-36** (issue #124, RN-13): `DELETE /contracts/:id` con un usuario sin `contract:delete` (ej. `admin` con `contract:manage`) devuelve `403 FORBIDDEN`; el rol `owner` lo tiene sembrado (organizaciones nuevas por provisioning, existentes por migración de backfill).
+- [ ] **CA-03-37** (issue #124, RN-13): el `owner` elimina un contrato en cualquier estado (incluso `active`) → `204`; el borrado es lógico (`deleted_at` en DB, la fila persiste), queda auditado (`contract.deleted` con el estado previo), el contrato desaparece de `GET /contracts` y su `GET /contracts/:id` devuelve `404`.
+- [ ] **CA-03-38** (issue #124, RN-13): al eliminar un contrato `active`, su propiedad vuelve a `available` y el job mensual `generate_rent_periods` NO genera el período siguiente del contrato eliminado (los demás contratos activos no se ven afectados).
+- [ ] **CA-03-39** (issue #124, RN-13): tras eliminar un contrato con períodos impagos, su deuda deja de computarse — sus `rent_periods` desaparecen de `GET /rent-periods` y de `GET /debt`/`GET /renters/:id/debt`, el detalle del período devuelve `404` y `POST /rent-periods/:id/payments` sobre él devuelve `404`; un ajuste `pending` suyo desaparece de `GET /adjustments?status=pending`.
+- [ ] **CA-03-40** (issue #124, RN-13): una liquidación ya emitida que incluye cobros del contrato eliminado queda íntegra tras la eliminación (totales y line items sin cambios) y el recibo de un cobro existente sigue descargable.
 
 ## Integraciones
 
