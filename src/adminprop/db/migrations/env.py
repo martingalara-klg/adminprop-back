@@ -37,7 +37,12 @@ target_metadata = Base.metadata
 
 
 def get_url() -> str:
-    return get_settings().migrations_database_url
+    # SQLAlchemy >=2.1 resuelve `postgresql://` al driver psycopg (v3), que no
+    # está instalado; las migraciones usan psycopg2, así que se fija explícito.
+    url = get_settings().migrations_database_url
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg2://" + url[len("postgresql://") :]
+    return url
 
 
 def run_migrations_offline() -> None:
